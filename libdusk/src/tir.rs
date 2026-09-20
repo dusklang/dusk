@@ -276,8 +276,8 @@ macro_rules! add_eval_dep_injector {
     ($self:expr, $name: ident) => {
         macro_rules! $name {
             ($a:expr, $b:expr) => {{
-                $self.tir.graph.add_type4_dep($a, ef!($self, $b.item));
-                $self.tir.depended_on[$b] = true;
+                $self.tir_builder.graph.add_type4_dep($a, ef!($self, $b.item));
+                $self.tir_builder.depended_on[$b] = true;
             }}
         }
     }
@@ -311,7 +311,7 @@ macro_rules! define_legacy_internal_types_internal {
                         InternalNamespace::$name => {
                             $({
                                 let decl = self.internal_field_decls.get().unwrap().$name.$field_name;
-                                let name = self.code.ast.names[decl];
+                                let name = self.ast.names[decl];
                                 if self.name_matches(lookup, name) {
                                     overloads.insert(decl.into());
                                 }
@@ -354,7 +354,7 @@ impl From<DeclId> for FoundOverload {
 impl Driver {
     // See comment about `should_traverse_blanket_uses` later in this file
     fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
-        let scope = &self.code.ast.new_namespaces[scope];
+        let scope = &self.ast.new_namespaces[scope];
         for decl in &scope.static_decls {
             if self.name_matches(name, decl.name) {
                 overloads.insert(decl.decl.into());
@@ -371,11 +371,11 @@ impl Driver {
         }
     }
     fn find_overloads_in_new_namespace(&self, name: &NameLookup, base: ExprId, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<FoundOverload>) {
-        let ns = &self.code.ast.new_namespaces[id];
+        let ns = &self.ast.new_namespaces[id];
 
         match kind {
             NewNamespaceRefKind::Instance => for decl in &ns.instance_decls {
-                let decl_name = self.code.ast.names[decl.decl];
+                let decl_name = self.ast.names[decl.decl];
                 if self.name_matches(name, decl_name) {
                     let scope = if let Some(field_info) = &decl.field_info {
                         OverloadScope::Field { base, struct_id: field_info.struct_id, field_index: field_info.field_index }
@@ -391,7 +391,7 @@ impl Driver {
                 }
             },
             NewNamespaceRefKind::Static => for decl in &ns.static_decls {
-                let decl_name = self.code.ast.names[decl.decl];
+                let decl_name = self.ast.names[decl.decl];
                 if self.name_matches(name, decl_name) {
                     overloads.insert(decl.decl.into());
                     return;
@@ -403,7 +403,7 @@ impl Driver {
         match &df!(func.ast) {
             ast::Decl::Function { params, .. } => {
                 for decl in range_iter(params.clone()) {
-                    let param_name = self.code.ast.names[decl];
+                    let param_name = self.ast.names[decl];
 
                     if self.name_matches(name, param_name) {
                         overloads.insert(decl.into());
@@ -428,7 +428,7 @@ impl Driver {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
-                        let namespace = &self.code.ast.imper_ns[scope];
+                        let namespace = &self.ast.imper_ns[scope];
                         let result = namespace.decls[..end_offset].iter()
                             .rev()
                             .find(|&decl| self.name_matches(name, decl.name));
@@ -438,21 +438,21 @@ impl Driver {
                         }
                     }
 
-                    self.code.ast.imper_ns[scope].parent
+                    self.ast.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
-                    let scope = self.code.ast.mod_ns[scope_ns].scope;
+                    let scope = self.ast.mod_ns[scope_ns].scope;
                     self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.code.ast.mod_ns[scope_ns].parent
+                    self.ast.mod_ns[scope_ns].parent
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
 
                     should_traverse_blanket_uses = false;
 
-                    if let Some(expr_namespaces) = self.tir.expr_namespaces.get(&base_expr) {
+                    if let Some(expr_namespaces) = self.tir_builder.expr_namespaces.get(&base_expr) {
                         for ns in expr_namespaces {
                             match *ns {
                                 ExprNamespace::Mod(scope) => {
@@ -470,10 +470,10 @@ impl Driver {
                     break;
                 },
                 Namespace::GenericContext(ns_id) => {
-                    let generic_context_ns = &self.code.ast.generic_context_ns[ns_id];
+                    let generic_context_ns = &self.ast.generic_context_ns[ns_id];
                     let generic_params = &generic_context_ns.generic_params;
                     for decl in range_iter(generic_params.clone()) {
-                        let param_name = self.code.ast.names[decl];
+                        let param_name = self.ast.names[decl];
                         if self.name_matches(name, param_name) {
                             overloads.insert(decl.into());
                             break 'find_overloads;
@@ -482,19 +482,19 @@ impl Driver {
                     generic_context_ns.parent
                 },
                 Namespace::Requirement(ns_id) => {
-                    let condition_ns = &self.code.ast.condition_ns[ns_id];
+                    let condition_ns = &self.ast.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
                     condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
-                    let condition_ns = &self.code.ast.condition_ns[ns_id];
+                    let condition_ns = &self.ast.condition_ns[ns_id];
                     self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
-                    if self.name_matches(name, self.ast.known_idents.return_value) && overloads.is_empty() {
+                    if self.name_matches(name, self.ast_builder.known_idents.return_value) && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL.into());
                     }
                     condition_ns.parent
                 },
-                Namespace::ExtendBlock(ns_id) => self.code.ast.extend_block_ns[ns_id].parent,
+                Namespace::ExtendBlock(ns_id) => self.ast.extend_block_ns[ns_id].parent,
                 Namespace::Invalid => {
                     panic!("internal compiler error: invalid namespace");
                 },
@@ -526,24 +526,24 @@ impl Driver {
     fn add_types_2_to_4_deps_to_member_ref(&mut self, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(self, add_eval_dep);
 
-        let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
+        let decl_ref = &self.ast.decl_refs[decl_ref_id];
         let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
             match df!(overload.decl.ast) {
                 ast::Decl::Function { ref param_tys, .. } => {
-                    let ty = self.code.ast.explicit_tys[overload.decl].unwrap_or(ast::VOID_TYPE);
+                    let ty = self.ast.explicit_tys[overload.decl].unwrap_or(ast::VOID_TYPE);
                     add_eval_dep!(id, ty);
                     for &ty in param_tys {
                         add_eval_dep!(id, ty);
                     }
-                    self.tir.graph.add_type3_dep(id, df!(overload.decl.item));
+                    self.tir_builder.graph.add_type3_dep(id, df!(overload.decl.item));
                 },
                 ast::Decl::ReturnValue => {
-                    let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
+                    let decl_ref = &self.ast.decl_refs[decl_ref_id];
                     match decl_ref.namespace {
                         Namespace::Guarantee(condition_ns_id) => {
-                            let func = self.code.ast.condition_ns[condition_ns_id].func;
-                            self.tir.graph.add_type3_dep(id, df!(func.item));
+                            let func = self.ast.condition_ns[condition_ns_id].func;
+                            self.tir_builder.graph.add_type3_dep(id, df!(func.item));
                         },
                         _ => panic!("invalid namespace for `return_value`"),
                     }
@@ -552,9 +552,9 @@ impl Driver {
                     if let Some(payload_ty) = payload_ty {
                         add_eval_dep!(id, payload_ty);
                     }
-                    self.tir.graph.add_type3_dep(id, df!(overload.decl.item));
+                    self.tir_builder.graph.add_type3_dep(id, df!(overload.decl.item));
                 },
-                _ => self.tir.graph.add_type2_dep(id, df!(overload.decl.item)),
+                _ => self.tir_builder.graph.add_type2_dep(id, df!(overload.decl.item)),
             }
         }
     }
@@ -573,14 +573,14 @@ impl Driver {
     /// the function itself. I think/hope this could also be a cause for some of the mysterious dependency cycles
     /// that have plagued the compiler for some time (though frankly I don't have a good reason to think that).
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
-        let block = self.code.ast.imper_scopes[b].block;
-        for &op in &self.code.blocks[block].ops {
-            let op = &self.code.ops[op];
+        let block = self.ast.imper_scopes[b].block;
+        for &op in &self.blocks[block].ops {
+            let op = &self.ops[op];
             let item = op.as_ast_item().unwrap();
             match item {
-                Item::Expr(expr) => self.tir.graph.add_type3_dep(a, self.code.ast.expr_to_items[expr]),
+                Item::Expr(expr) => self.tir_builder.graph.add_type3_dep(a, self.ast.expr_to_items[expr]),
                 Item::Decl(decl) => match df!(decl.ast) {
-                    ast::Decl::Stored { .. } => self.tir.graph.add_type3_dep(a, self.code.ast.decl_to_items[decl]),
+                    ast::Decl::Stored { .. } => self.tir_builder.graph.add_type3_dep(a, self.ast.decl_to_items[decl]),
                     ast::Decl::Function { .. } => {},
                     _ => panic!("Invalid scope item"),
                 },
@@ -589,13 +589,13 @@ impl Driver {
     }
 
     fn flush_staged_ret_groups(&mut self, sp: &mut Subprogram) {
-        let staged_ret_groups = mem::take(&mut self.tir.staged_ret_groups);
+        let staged_ret_groups = mem::take(&mut self.tir_builder.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
             assert!(matches!(df!(decl.ast), ast::Decl::Function { .. }));
 
-            let ty = self.code.ast.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
+            let ty = self.ast.explicit_tys[decl].expect("explicit return statements are not allowed in assigned functions (yet?)");
 
-            let item = self.code.ast.decl_to_items[decl];
+            let item = self.ast.decl_to_items[decl];
             let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
@@ -648,7 +648,7 @@ impl Driver {
             &ast::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
             &ast::Expr::Ret { expr, decl } => {
                 if let Some(decl) = decl {
-                    self.tir.staged_ret_groups.entry(decl).or_default().push(expr);
+                    self.tir_builder.staged_ret_groups.entry(decl).or_default().push(expr);
                 }
                 insert_expr!(explicit_rets, ExplicitRet)
             }
@@ -656,11 +656,11 @@ impl Driver {
             &ast::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
             &ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
             &ast::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
-            &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.code.ast.imper_scopes[scope].terminal_expr }),
+            &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.ast.imper_scopes[scope].terminal_expr }),
             &ast::Expr::If { condition, then_scope, else_scope } => {
-                let then_expr = self.code.ast.imper_scopes[then_scope].terminal_expr;
+                let then_expr = self.ast.imper_scopes[then_scope].terminal_expr;
                 let else_expr = if let Some(else_scope) = else_scope {
-                    self.code.ast.imper_scopes[else_scope].terminal_expr
+                    self.ast.imper_scopes[else_scope].terminal_expr
                 } else {
                     ast::VOID_EXPR
                 };
@@ -668,7 +668,7 @@ impl Driver {
             },
             &ast::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
             &ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
-                let explicit_ty = self.code.ast.explicit_tys[binding];
+                let explicit_ty = self.ast.explicit_tys[binding];
                 insert_expr!(fors, For { binding_decl: binding, binding_explicit_ty: explicit_ty, lower_bound, upper_bound })
             },
             &ast::Expr::Switch { scrutinee, context, ref cases, } => {
@@ -676,7 +676,7 @@ impl Driver {
                 for case in cases {
                     let case = SwitchCase {
                         pattern: case.pattern.clone(),
-                        terminal_expr: self.code.ast.imper_scopes[case.scope].terminal_expr,
+                        terminal_expr: self.ast.imper_scopes[case.scope].terminal_expr,
                         scope: case.scope,
                     };
                     tir_cases.push(case);
@@ -685,12 +685,12 @@ impl Driver {
             },
             &ast::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
             &ast::Expr::Struct(struct_id) => {
-                let field_tys = self.code.ast.structs[struct_id].fields.iter().map(|field| field.ty).collect();
+                let field_tys = self.ast.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
             &ast::Expr::Enum(enum_id) => {
                 let mut variant_payload_tys = SmallVec::new();
-                for variant in &self.code.ast.enums[enum_id].variants {
+                for variant in &self.ast.enums[enum_id].variants {
                     if let Some(payload) = variant.payload_ty {
                         variant_payload_tys.push(payload);
                     }
@@ -717,15 +717,15 @@ impl Driver {
                 unit.generic_params.push(GenericParam { id });
             },
             ast::Decl::Static(root_expr) | ast::Decl::Const { assigned_expr: root_expr, .. } | ast::Decl::Stored { root_expr, .. } => {
-                let explicit_ty = self.code.ast.explicit_tys[id];
+                let explicit_ty = self.ast.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
             ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, .. } => {
                 unit.pattern_bindings.insert(level, PatternBinding { context, scrutinee_value: scrutinee, root_scrutinee, decl_id: id });
             },
             ast::Decl::Function { scope, .. } => {
-                let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
-                self.tir.staged_ret_groups.entry(id).or_default().push(terminal_expr);
+                let terminal_expr = self.ast.imper_scopes[scope].terminal_expr;
+                self.tir_builder.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 unit.func_decls.push(FunctionDecl { id });
             },
             ast::Decl::FunctionPrototype { .. } => {
@@ -737,7 +737,7 @@ impl Driver {
     fn initialize_tir_impl(&mut self, new_code: &NewCode) {
         // Populate `decls`
         for id in range_iter(new_code.decls.clone()) {
-            let decl = &self.code.ast.decls[id];
+            let decl = &self.ast.decls[id];
             let mut generic_params = empty_range();
             let (is_mut, param_list) = match *decl {
                 ast::Decl::Function { ref param_tys, generic_params: ref og_generic_params, .. } => {
@@ -765,11 +765,11 @@ impl Driver {
                     ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false },
                 ),
                 ast::Decl::Intrinsic(id) => {
-                    let param_tys = &self.code.ast.intrinsics[id].param_tys;
+                    let param_tys = &self.ast.intrinsics[id].param_tys;
                     (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
                 },
                 ast::Decl::MethodIntrinsic(id) => {
-                    let param_tys = SmallVec::from(&self.code.ast.intrinsics[id].param_tys[1..]);
+                    let param_tys = SmallVec::from(&self.ast.intrinsics[id].param_tys[1..]);
                     (false, ParamList { param_tys, has_c_variadic_param: false })
                 },
                 ast::Decl::Static(_) => (
@@ -797,7 +797,7 @@ impl Driver {
                     ParamList::default(),
                 ),
             };
-            self.tir.decls.push_at(id, Decl { param_list, is_mut, generic_params });
+            self.tir_builder.decls.push_at(id, Decl { param_list, is_mut, generic_params });
         }
 
         self.initialize_graph();
@@ -810,12 +810,12 @@ impl Driver {
                 ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::FunctionPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
                 ast::Decl::PatternBinding { root_scrutinee, .. } => {
                     // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
-                    self.tir.graph.add_type1_dep(id, ef!(root_scrutinee.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(root_scrutinee.item));
                 },
-                ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
+                ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.tir_builder.graph.add_type1_dep(id, ef!(expr.item)),
                 ast::Decl::Function { scope, .. } => {
-                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    let terminal_expr = self.ast.imper_scopes[scope].terminal_expr;
+                    self.tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
             }
         }
@@ -826,112 +826,112 @@ impl Driver {
                     | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::Break(_) | ast::Expr::Continue(_) => {},
                 ast::Expr::Mod { extern_library_path, .. } => {
                     if let Some(extern_library_path) = extern_library_path {
-                        self.tir.graph.add_type1_dep(id, ef!(extern_library_path.item));
+                        self.tir_builder.graph.add_type1_dep(id, ef!(extern_library_path.item));
                     }
                 },
                 ast::Expr::AddrOf { expr, .. } | ast::Expr::Deref(expr) | ast::Expr::Pointer { expr, .. }
-                    | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => self.tir.graph.add_type1_dep(id, ef!(expr.item)),
+                    | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => self.tir_builder.graph.add_type1_dep(id, ef!(expr.item)),
                 ast::Expr::DeclRef { id: decl_ref_id, .. } => {
-                    let decl_ref = &self.code.ast.decl_refs[decl_ref_id];
+                    let decl_ref = &self.ast.decl_refs[decl_ref_id];
                     if let ast::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-                        self.tir.graph.add_type1_dep(id, ef!(base_expr.item));
-                        self.tir.graph.add_meta_dep(id, ef!(base_expr.item));
+                        self.tir_builder.graph.add_type1_dep(id, ef!(base_expr.item));
+                        self.tir_builder.graph.add_meta_dep(id, ef!(base_expr.item));
                     }
                 },
                 ast::Expr::Call { callee, ref arguments } => {
-                    self.tir.graph.add_type1_dep(id, ef!(callee.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(callee.item));
                     for &arg in arguments {
-                        self.tir.graph.add_type1_dep(id, ef!(arg.item));
+                        self.tir_builder.graph.add_type1_dep(id, ef!(arg.item));
 
                         // NOTE: if the callee is a declref, it is important for it to have a type 1 dependency on all
                         // arguments, because declrefs do not lock their generic argument values in until pass 2, when
                         // the caller's pass 2 has already passed. This is important because declrefs need to
                         // substitute all generic arguments for the appropriate generic parameter types.
-                        self.tir.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
+                        self.tir_builder.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
                     }
                 },
                 ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => {
                     for &param_ty in param_tys {
-                        self.tir.graph.add_type1_dep(id, ef!(param_ty.item));
+                        self.tir_builder.graph.add_type1_dep(id, ef!(param_ty.item));
                     }
-                    self.tir.graph.add_type1_dep(id, ef!(ret_ty.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(ret_ty.item));
                 },
                 ast::Expr::Set { lhs, rhs } => {
-                    self.tir.graph.add_type1_dep(id, ef!(lhs.item));
-                    self.tir.graph.add_type1_dep(id, ef!(rhs.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(lhs.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(rhs.item));
                 },
                 ast::Expr::Do { scope } => {
-                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    let terminal_expr = self.ast.imper_scopes[scope].terminal_expr;
+                    self.tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
                 ast::Expr::If { condition, then_scope, else_scope } => {
-                    self.tir.graph.add_type1_dep(id, ef!(condition.item));
-                    let then_expr = self.code.ast.imper_scopes[then_scope].terminal_expr;
+                    self.tir_builder.graph.add_type1_dep(id, ef!(condition.item));
+                    let then_expr = self.ast.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
-                        self.code.ast.imper_scopes[else_scope].terminal_expr
+                        self.ast.imper_scopes[else_scope].terminal_expr
                     } else {
                         ast::VOID_EXPR
                     };
-                    self.tir.graph.add_type1_dep(id, ef!(then_expr.item));
-                    self.tir.graph.add_type1_dep(id, ef!(else_expr.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(then_expr.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(else_expr.item));
                 },
                 ast::Expr::Switch { scrutinee, ref cases, .. } => {
-                    self.tir.graph.add_type1_dep(id, ef!(scrutinee.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(scrutinee.item));
                     for case in cases.clone() {
-                        let terminal = self.code.ast.imper_scopes[case.scope].terminal_expr;
-                        self.tir.graph.add_type1_dep(id, ef!(terminal.item));
+                        let terminal = self.ast.imper_scopes[case.scope].terminal_expr;
+                        self.tir_builder.graph.add_type1_dep(id, ef!(terminal.item));
                     }
                 },
                 ast::Expr::While { condition, scope, .. } => {
-                    self.tir.graph.add_type1_dep(id, ef!(condition.item));
-                    let terminal_expr = self.code.ast.imper_scopes[scope].terminal_expr;
-                    self.tir.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(condition.item));
+                    let terminal_expr = self.ast.imper_scopes[scope].terminal_expr;
+                    self.tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
                 },
                 ast::Expr::Struct(struct_id) => {
-                    for field in &self.code.ast.structs[struct_id].fields {
-                        self.tir.graph.add_type1_dep(id, ef!(field.ty.item));
+                    for field in &self.ast.structs[struct_id].fields {
+                        self.tir_builder.graph.add_type1_dep(id, ef!(field.ty.item));
                     }
                 },
                 ast::Expr::Enum(enum_id) => {
-                    for variant in &self.code.ast.enums[enum_id].variants {
+                    for variant in &self.ast.enums[enum_id].variants {
                         if let Some(payload_ty) = variant.payload_ty {
-                            self.tir.graph.add_type1_dep(id, ef!(payload_ty.item));
+                            self.tir_builder.graph.add_type1_dep(id, ef!(payload_ty.item));
                         }
                     }
                 },
                 ast::Expr::StructLit { ref fields, ty, .. } => {
-                    self.tir.graph.add_type1_dep(id, ef!(ty.item));
-                    self.tir.graph.add_meta_dep(id, ef!(ty.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(ty.item));
+                    self.tir_builder.graph.add_meta_dep(id, ef!(ty.item));
                     for field in fields {
-                        self.tir.graph.add_type1_dep(id, ef!(field.expr.item));
+                        self.tir_builder.graph.add_type1_dep(id, ef!(field.expr.item));
                     }
                 },
                 ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
-                    self.tir.graph.add_type1_dep(id, df!(binding.item));
+                    self.tir_builder.graph.add_type1_dep(id, df!(binding.item));
 
                     // THIS IS KIND OF A HACK. The AST variants for loop binding variables do not currently keep track
                     // of the lower_bound or upper_bound, so I just add the dependencies here.
-                    self.tir.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
-                    self.tir.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
+                    self.tir_builder.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
+                    self.tir_builder.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
                 },
                 ast::Expr::ExtendBlock { extendee, id: extend_block_id } => {
-                    self.tir.extend_blocks.insert(extendee, extend_block_id);
-                    self.tir.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
-                    self.tir.graph.add_type1_dep(id, ef!(extendee.item));
+                    self.tir_builder.extend_blocks.insert(extendee, extend_block_id);
+                    self.tir_builder.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
+                    self.tir_builder.graph.add_type1_dep(id, ef!(extendee.item));
                 },
             }
         }
 
         // Split the graph into components
-        self.tir.graph.split(new_code);
+        self.tir_builder.graph.split(new_code);
 
         // TODO: do something better than an array of bools :(
-        self.tir.depended_on.resize_with(self.code.ast.exprs.len(), || false);
+        self.tir_builder.depended_on.resize_with(self.ast.exprs.len(), || false);
     }
 
     pub fn initialize_tir(&mut self) {
         let new_snapshot = self.take_snapshot();
-        let last_snapshot = mem::replace(&mut self.tir.last_snapshot, new_snapshot);
+        let last_snapshot = mem::replace(&mut self.tir_builder.last_snapshot, new_snapshot);
         let new_code = self.get_new_code_since(last_snapshot);
         self.initialize_tir_impl(&new_code);
     }
@@ -939,21 +939,21 @@ impl Driver {
     pub fn build_more_tir(&mut self, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
         self.initialize_tir();
 
-        if !self.tir.graph.has_outstanding_components() {
+        if !self.tir_builder.graph.has_outstanding_components() {
             return Ok(None);
         }
 
         add_eval_dep_injector!(self, add_eval_dep);
 
         // Add types 2-4 dependencies
-        let items_that_need_dependencies = self.tir.graph.get_items_that_need_dependencies();
+        let items_that_need_dependencies = self.tir_builder.graph.get_items_that_need_dependencies();
         for id in items_that_need_dependencies {
-            match self.code.ast.items[id] {
+            match self.ast.items[id] {
                 ast::Item::Decl(decl_id) => {
                     match df!(decl_id.ast) {
                         ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const { .. } | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
                         ast::Decl::PatternBinding { root_scrutinee, .. } => {
-                            self.tir.graph.add_type2_dep(id, ef!(root_scrutinee.item));
+                            self.tir_builder.graph.add_type2_dep(id, ef!(root_scrutinee.item));
                         },
                         ast::Decl::GenericParam(_) => {
                             add_eval_dep!(id, ast::TYPE_TYPE);
@@ -964,7 +964,7 @@ impl Driver {
                             }
                         },
                         ast::Decl::Intrinsic(intr) | ast::Decl::MethodIntrinsic(intr) => {
-                            let param_tys = self.code.ast.intrinsics[intr].param_tys.clone();
+                            let param_tys = self.ast.intrinsics[intr].param_tys.clone();
                             for ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
@@ -980,7 +980,7 @@ impl Driver {
                             }
                             self.add_type3_scope_dep(id, scope);
                             // NOTE: the Some case is handled below this match expression
-                            if self.code.ast.explicit_tys[decl_id].is_none() {
+                            if self.ast.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, ast::VOID_TYPE);
                             }
                         },
@@ -989,23 +989,23 @@ impl Driver {
                                 add_eval_dep!(id, ty);
                             }
                             // NOTE: the Some case is handled below this match expression
-                            if self.code.ast.explicit_tys[decl_id].is_none() {
+                            if self.ast.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, ast::VOID_TYPE);
                             }
 
                             if let Some(extern_func) = extern_func {
-                                let extern_library_path = self.code.ast.extern_mods[extern_func.extern_mod].library_path;
+                                let extern_library_path = self.ast.extern_mods[extern_func.extern_mod].library_path;
                                 add_eval_dep!(id, extern_library_path);
                             }
                         },
                         ast::Decl::ObjcClassRef { extern_mod, .. } => {
-                            let extern_library_path = self.code.ast.extern_mods[extern_mod].library_path;
+                            let extern_library_path = self.ast.extern_mods[extern_mod].library_path;
                             add_eval_dep!(id, extern_library_path);
                         },
                     }
 
                     // NOTE: The function decl case in the above match expression depends on this!
-                    if let Some(ty) = self.code.ast.explicit_tys[decl_id] {
+                    if let Some(ty) = self.ast.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
                     }
                 }
@@ -1021,7 +1021,7 @@ impl Driver {
                         },
                         ast::Expr::Ret { decl, .. } => {
                             let ty = decl
-                                .and_then(|decl| self.code.ast.explicit_tys[decl])
+                                .and_then(|decl| self.ast.explicit_tys[decl])
                                 .unwrap_or(ast::VOID_TYPE);
                             add_eval_dep!(id, ty);
                         }
@@ -1059,7 +1059,7 @@ impl Driver {
         }
 
         // Solve for the unit and level of each item
-        let levels = self.tir.graph.solve(last_typecheck_succeeded).map_err(|err| {
+        let levels = self.tir_builder.graph.solve(last_typecheck_succeeded).map_err(|err| {
             match err {
                 TirError::DependencyCycle => {
                     self.diag.report_error_no_range("dependency cycle found. this is most likely a Dusk compiler bug.");
@@ -1085,15 +1085,15 @@ impl Driver {
         for (unit, levels_unit) in sp.units.iter_mut().zip(&sp.levels.units) {
             for &item_id in &levels_unit.items {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.code.ast.items[item_id] {
+                match self.ast.items[item_id] {
                     ast::Item::Decl(id) => {
                         self.build_tir_decl(&mut unit.items, level, id);
                     }
                     ast::Item::Expr(id) => {
-                        if let Some(&extend_block) = self.tir.extend_blocks.get(&id) {
+                        if let Some(&extend_block) = self.tir_builder.extend_blocks.get(&id) {
                             unit.extend_blocks.push(extend_block);
                         }
-                        if self.tir.depended_on[id] { unit.eval_dependees.push(id); }
+                        if self.tir_builder.depended_on[id] { unit.eval_dependees.push(id); }
 
                         self.build_tir_expr(&mut unit.items, level, id);
                     }
@@ -1101,7 +1101,7 @@ impl Driver {
             }
         }
         for mock_unit in &sp.levels.mock_units {
-            let main_expr = match self.code.ast.items[mock_unit.item] {
+            let main_expr = match self.ast.items[mock_unit.item] {
                 ast::Item::Expr(id) => id,
                 ast::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
             };
@@ -1109,7 +1109,7 @@ impl Driver {
             self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
             for &item_id in &mock_unit.deps {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.code.ast.items[item_id] {
+                match self.ast.items[item_id] {
                     ast::Item::Decl(id) => {
                         self.build_tir_decl(&mut items, level, id);
                     }
@@ -1127,9 +1127,9 @@ impl Driver {
             );
         }
         self.flush_staged_ret_groups(sp);
-        for scope in &self.code.ast.imper_scopes {
-            for &op in &self.code.blocks[scope.block].ops {
-                let op = &self.code.ops[op];
+        for scope in &self.ast.imper_scopes {
+            for &op in &self.blocks[scope.block].ops {
+                let op = &self.ops[op];
                 let item = op.as_ast_item().unwrap();
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow

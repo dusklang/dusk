@@ -22,9 +22,9 @@ impl Backend for X64Backend {
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = X64Encoder::new();
 
-        let func = &d.code.mir.functions[func_index];
+        let func = &d.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
-        assert_eq!(d.code.num_parameters(func), 0);
+        assert_eq!(d.num_parameters(func), 0);
 
         let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
         let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
@@ -33,13 +33,13 @@ impl Backend for X64Backend {
         let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
         code.sub64_imm(Reg64::Rsp, 72);
-        for &op in &d.code.blocks[func.blocks[0]].ops {
-            let instr = d.code.ops[op].as_mir_instr().unwrap();
+        for &op in &d.blocks[func.blocks[0]].ops {
+            let instr = d.ops[op].as_mir_instr().unwrap();
             match instr {
                 Instr::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
-                            code.lea64(Reg64::Rax, exe.use_cstring(&d.code.mir.strings[id]));
+                            code.lea64(Reg64::Rax, exe.use_cstring(&d.mir.strings[id]));
                         },
                         _ => todo!("{}", d.display_const(konst)),
                     }
@@ -72,7 +72,7 @@ impl Backend for X64Backend {
                     }
                 },
                 &Instr::Ret(value) => {
-                    let value = d.code.ops[value].as_mir_instr().unwrap();
+                    let value = d.ops[value].as_mir_instr().unwrap();
                     // If this is the main function, we should call ExitProcess.
                     if is_main {
                         assert_eq!(value, &Instr::Void);

@@ -172,15 +172,15 @@ struct Component {
 impl Driver {
     pub fn initialize_graph(&mut self) {
         let mut deps = [
-            &mut self.tir.graph.dependees,
-            &mut self.tir.graph.t2_dependees,
-            &mut self.tir.graph.dependers
+            &mut self.tir_builder.graph.dependees,
+            &mut self.tir_builder.graph.t2_dependees,
+            &mut self.tir_builder.graph.dependers
         ];
         for dep in &mut deps {
-            dep.resize_with(self.code.ast.items.len(), Vec::new);
+            dep.resize_with(self.ast.items.len(), Vec::new);
         }
 
-        self.tir.graph.item_to_components.resize_with(self.code.ast.items.len(), || CompId::new(u32::MAX as usize));
+        self.tir_builder.graph.item_to_components.resize_with(self.ast.items.len(), || CompId::new(u32::MAX as usize));
     }
 }
 

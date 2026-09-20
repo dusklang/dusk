@@ -241,22 +241,22 @@ impl Server {
         let pos = lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
         // TODO: this is preposterously stupid
         let mut hovered_item = None;
-        for (id, range) in driver.read().code.ast.source_ranges.iter_enumerated() {
+        for (id, range) in driver.read().ast.source_ranges.iter_enumerated() {
             if range.contains(pos) {
                 hovered_item = Some(id);
                 break;
             }
         }
         hovered_item.map(|item| {
-            let range = driver.read().code.ast.source_ranges[item];
+            let range = driver.read().ast.source_ranges[item];
             let range = dusk_range_to_lsp_range(&driver.read(), range).1;
-            let message = match driver.read().code.ast.items[item] {
+            let message = match driver.read().ast.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
                     let d = driver.read();
                     match ef!(d, expr.ast) {
                         Expr::DeclRef { id, .. } => {
-                            let name = d.code.ast.decl_refs[id].name;
+                            let name = d.ast.decl_refs[id].name;
                             let interner = d.interner.read().unwrap();
                             let name = interner.resolve(name).unwrap();
                             let mut ty = None;
@@ -282,7 +282,7 @@ impl Server {
                 Item::Decl(decl) => {
                     let mut message = String::new();
                     let d = driver.read();
-                    let name = d.code.ast.names[decl];
+                    let name = d.ast.names[decl];
                     let interner = d.interner.read().unwrap();
                     let name = interner.resolve(name).unwrap();
                     let mut ty = None;

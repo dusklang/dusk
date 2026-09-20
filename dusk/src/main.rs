@@ -174,10 +174,10 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
 
     begin_phase!(Interp);
     let main_sym = driver.read().interner.write().unwrap().get_or_intern_static("main");
-    let main = driver.read().code.mir.functions.iter()
+    let main = driver.read().mir.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().code.num_parameters(func) == 0,
+                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().num_parameters(func) == 0,
                 None => false,
             }
         }).map(FuncId::new);

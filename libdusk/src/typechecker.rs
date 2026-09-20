@@ -410,7 +410,7 @@ impl tir::Expr<tir::For> {
             ty
         };
 
-        let is_mut = driver.tir.decls[self.binding_decl].is_mut;
+        let is_mut = driver.tir_builder.decls[self.binding_decl].is_mut;
         *tp.decl_type_mut(self.binding_decl) = QualType { ty: loop_binding_ty, is_mut };
     }
 
@@ -558,7 +558,7 @@ fn string_types() -> [Type; 3] {
 impl tir::Expr<tir::DeclRef> {
     fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
         // Initialize overloads
-        let decl_ref = &driver.code.ast.decl_refs[self.decl_ref_id];
+        let decl_ref = &driver.ast.decl_refs[self.decl_ref_id];
         let overload_decls = match driver.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)) {
             Some(overloads) => overloads,
             None => {
@@ -590,7 +590,7 @@ impl tir::Expr<tir::DeclRef> {
             } else {
                 tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty
             };
-            let decl = &driver.tir.decls[overload.decl];
+            let decl = &driver.tir_builder.decls[overload.decl];
             let mut is_mut = decl.is_mut;
             if let OverloadScope::Member { base } = overload.scope {
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
@@ -611,14 +611,14 @@ impl tir::Expr<tir::DeclRef> {
             tp.resize(driver, new_code);
 
             if let Some(generic_args) = &self.explicit_generic_args {
-                let generic_params = driver.tir.decls[overload.decl].generic_params.clone();
+                let generic_params = driver.tir_builder.decls[overload.decl].generic_params.clone();
                 if generic_args.len() != generic_params.end - generic_params.start {
                     nonviable_overloads.push(overload.decl);
                     break;
                 }
 
                 for (&generic_arg, generic_param) in generic_args.iter().zip(range_iter(generic_params)) {
-                    let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = driver.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     let ty = tp.get_evaluated_type(generic_arg).clone();
 
                     driver.set_type(tp, type_var, ty).unwrap();
@@ -669,14 +669,14 @@ impl tir::Expr<tir::DeclRef> {
             let overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0]);
-            let decl = &driver.tir.decls[overload];
+            let decl = &driver.tir_builder.decls[overload];
 
             let generic_args = if tp.is_mock() {
-                range_iter(driver.tir.decls[overload].generic_params.clone()).map(Type::GenericParam).collect()
+                range_iter(driver.tir_builder.decls[overload].generic_params.clone()).map(Type::GenericParam).collect()
             } else {
                 let mut generic_args = Vec::new();
                 for generic_param in range_iter(decl.generic_params.clone()) {
-                    let type_var = driver.code.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = driver.ast.generic_arg_type_variables.get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     // TODO: error message probably
                     let solution = driver.solve_constraints(tp, type_var).unwrap();
                     generic_args.push(solution.qual_ty.ty);
@@ -686,7 +686,7 @@ impl tir::Expr<tir::DeclRef> {
 
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
-            let name = driver.code.ast.decl_refs[self.decl_ref_id].name;
+            let name = driver.ast.decl_refs[self.decl_ref_id].name;
             let interner = driver.interner.read().unwrap();
             let name = interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
@@ -717,7 +717,7 @@ impl tir::Expr<tir::DeclRef> {
 impl tir::Expr<tir::Call> {
     fn decl_ref_id(&self, driver: &Driver) -> DeclRefId {
         let generic_ctx_id = ef!(driver, self.callee.generic_ctx_id);
-        let generic_ctx = &driver.code.ast.generic_ctxs[generic_ctx_id];
+        let generic_ctx = &driver.ast.generic_ctxs[generic_ctx_id];
         if let GenericCtx::DeclRef { id, .. } = *generic_ctx {
             id
         } else {
@@ -738,9 +738,9 @@ impl tir::Expr<tir::Call> {
             let mut num_args = self.args.len();
             if let Some(overload) = overload {
                 if let Decl::MethodIntrinsic(intr) = df!(driver, overload.ast) {
-                    let self_ty = driver.code.ast.intrinsics[intr].param_tys[0];
+                    let self_ty = driver.ast.intrinsics[intr].param_tys[0];
                     let self_ty = tp.get_evaluated_type(self_ty);
-                    let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
+                    let ast::Namespace::MemberRef { base_expr } = driver.ast.decl_refs[decl_ref_id].namespace else {
                         panic!("expected MemberRef as base of method intrinsic call");
                     };
                     if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err()
@@ -748,13 +748,13 @@ impl tir::Expr<tir::Call> {
                             && driver.can_unify_to(tp, base_expr, pointee_ty).is_err() {
                                 return false;
                             }
-                } else if let Some(self_param) = driver.code.ast.decl_self_parameters[overload] {
+                } else if let Some(self_param) = driver.ast.decl_self_parameters[overload] {
                     let self_ty = tp.get_evaluated_type(self_param.self_ty);
-                    let ast::Namespace::MemberRef { base_expr } = driver.code.ast.decl_refs[decl_ref_id].namespace else {
+                    let ast::Namespace::MemberRef { base_expr } = driver.ast.decl_refs[decl_ref_id].namespace else {
                         panic!("expected MemberRef as base of method call");
                     };
 
-                    let expr_namespaces = &driver.tir.expr_namespaces[&base_expr];
+                    let expr_namespaces = &driver.tir_builder.expr_namespaces[&base_expr];
 
                     let is_instance = expr_namespaces.iter().any(|ns| {
                         let ExprNamespace::New(_, kind) = ns else {
@@ -1099,12 +1099,12 @@ impl tir::Expr<tir::StructLit> {
             driver.diag.push(error);
             driver.get_constraints_mut(tp, self.id).make_error();
         } else {
-            if let Some(macro_options) = driver.tir.expr_macro_info.get(&self.ty) {
+            if let Some(macro_options) = driver.tir_builder.expr_macro_info.get(&self.ty) {
                 let mut one_of = SmallVec::<[QualType; 1]>::new();
                 for option in macro_options {
                     match option {
                         ExprMacroInfo::Struct(strukt) => {
-                            let struct_fields = &driver.code.ast.structs[strukt.identity].fields;
+                            let struct_fields = &driver.ast.structs[strukt.identity].fields;
                             let mut matched_fields = Vec::new();
                             matched_fields.resize_with(struct_fields.len(), || MatchedField { expr: ExprId::new(u32::MAX as usize), ty: Type::Error });
 
@@ -1344,15 +1344,15 @@ impl tir::FunctionDecl {
 
 impl Driver {
     pub fn register_type_variables_for_decl_ref(&mut self, tp: &mut dyn TypeProvider, expr: ExprId, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
-        let decl = &self.tir.decls[overload];
+        let decl = &self.tir_builder.decls[overload];
         if decl.generic_params.is_empty() {
             return ty;
         }
 
         let mut generic_param_substitutions = HashMap::new();
         for generic_param in range_iter(decl.generic_params.clone()) {
-            let type_var = *self.code.ast.generic_arg_type_variables.entry((decl_ref, generic_param))
-                .or_insert_with(|| self.code.ast.type_vars.next_idx());
+            let type_var = *self.ast.generic_arg_type_variables.entry((decl_ref, generic_param))
+                .or_insert_with(|| self.ast.type_vars.next_idx());
             generic_param_substitutions.insert(generic_param, Type::TypeVar(type_var));
         }
 
@@ -1364,17 +1364,17 @@ impl Driver {
     }
 
     pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
-        let explicit_ty = self.code.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
+        let explicit_ty = self.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         match &df!(id.ast) {
             ast::Decl::Function { param_tys, .. } | ast::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
                 self.function_decl_type(param_tys, false, explicit_ty, tp),
             ast::Decl::FunctionPrototype { param_list, .. } => self.function_decl_type(&param_list.param_tys, param_list.has_c_variadic_param, explicit_ty, tp),
             &ast::Decl::Intrinsic(intr) => {
-                let param_tys = &self.code.ast.intrinsics[intr].param_tys;
+                let param_tys = &self.ast.intrinsics[intr].param_tys;
                 self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             &ast::Decl::MethodIntrinsic(intr) => {
-                let param_tys = &self.code.ast.intrinsics[intr].param_tys[1..];
+                let param_tys = &self.ast.intrinsics[intr].param_tys[1..];
                 self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             &ast::Decl::Variant { payload_ty, .. } => if let Some(payload_ty) = payload_ty {
@@ -1506,7 +1506,7 @@ impl DriverRwRef<'_> {
             // TODO: reduce duplicated code with eval dependencies
             for i in 0..unit.extend_blocks.len() {
                 let block_id = unit.extend_blocks[i];
-                let mut stack = vec![self.read().code.ast.extend_blocks[block_id].extendee];
+                let mut stack = vec![self.read().ast.extend_blocks[block_id].extendee];
                 while let Some(expr) = stack.pop() {
 
                     let val = self.eval_expr(expr, tp);
@@ -1519,12 +1519,12 @@ impl DriverRwRef<'_> {
                         }
                 }
 
-                let block = self.read().code.ast.extend_blocks[block_id].clone();
+                let block = self.read().ast.extend_blocks[block_id].clone();
                 let extendee_ty = tp.get_evaluated_type(block.extendee);
                 let ns = self.read().find_namespace_for_type(extendee_ty);
                 for method in block.static_methods {
-                    let name = self.read().code.ast.names[method];
-                    self.write().code.ast.new_namespaces[ns].static_decls.push(
+                    let name = self.read().ast.names[method];
+                    self.write().ast.new_namespaces[ns].static_decls.push(
                         StaticDecl {
                             name,
                             decl: method,
@@ -1533,7 +1533,7 @@ impl DriverRwRef<'_> {
                 }
 
                 for method in block.instance_methods {
-                    self.write().code.ast.new_namespaces[ns].instance_decls.push(
+                    self.write().ast.new_namespaces[ns].instance_decls.push(
                         InstanceDecl {
                             decl: method,
                             field_info: None,
@@ -1541,8 +1541,8 @@ impl DriverRwRef<'_> {
                     );
 
                     // Add to static decls as well, so we can call it using UFCS style.
-                    let name = self.read().code.ast.names[method];
-                    self.write().code.ast.new_namespaces[ns].static_decls.push(
+                    let name = self.read().ast.names[method];
+                    self.write().ast.new_namespaces[ns].static_decls.push(
                         StaticDecl {
                             name,
                             decl: method,
@@ -1564,7 +1564,7 @@ impl DriverRwRef<'_> {
                 .map(|ty| ty.ty.clone())
                 .collect::<Vec<_>>();
             if constraints.is_error() {
-                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
             } else {
                 // TODO: we currently write to both `tir.expr_namespaces` and `tir.macro_info`, but we will only ever
                 // actually read the value inserted into one or the other. We should specify which one we care about
@@ -1575,7 +1575,7 @@ impl DriverRwRef<'_> {
                         Type::Mod => {
                             self.write().run_pass_2(&unit.items, &mut mock_tp);
                             let Ok(module) = self.eval_expr(unit.main_expr, &mock_tp) else {
-                                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
                             };
                             match module {
@@ -1584,32 +1584,32 @@ impl DriverRwRef<'_> {
                             }
                         },
                         Type::Struct(strukt) => {
-                            ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
+                            ExprNamespace::New(self.read().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
                         },
-                        Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
-                        Type::Internal(id) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
+                        Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
+                        Type::Internal(id) => ExprNamespace::New(self.read().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
                             match &pointee.ty {
-                                Type::Struct(strukt) => ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
-                                &Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
-                                &Type::Internal(id) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
+                                Type::Struct(strukt) => ExprNamespace::New(self.read().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.read().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Internal(id) => ExprNamespace::New(self.read().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                                 _ => continue,
                             }
                         },
                         Type::Ty => {
                             self.write().run_pass_2(&unit.items, &mut mock_tp);
                             let Ok(ty) = self.eval_expr(unit.main_expr, &mock_tp) else {
-                                self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
                             };
 
                             match ty {
                                 Const::Ty(Type::Struct(ref strukt)) => {
                                     macro_info = Some(ExprMacroInfo::Struct(strukt.clone()));
-                                    ExprNamespace::New(self.read().code.ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
+                                    ExprNamespace::New(self.read().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
                                 },
-                                Const::Ty(Type::Enum(EnumType { identity, .. })) => ExprNamespace::New(self.read().code.ast.enums[identity].namespace, NewNamespaceRefKind::Static),
-                                Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.read().code.ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Enum(EnumType { identity, .. })) => ExprNamespace::New(self.read().ast.enums[identity].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.read().ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },
@@ -1619,9 +1619,9 @@ impl DriverRwRef<'_> {
                         Type::Error => ExprNamespace::Error,
                         _ => continue,
                     };
-                    self.write().tir.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+                    self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
                     if let Some(macro_info) = macro_info {
-                        self.write().tir.expr_macro_info.entry(unit.main_expr).or_default().push(macro_info);
+                        self.write().tir_builder.expr_macro_info.entry(unit.main_expr).or_default().push(macro_info);
                     }
                 }
             }
@@ -1633,8 +1633,8 @@ impl DriverRwRef<'_> {
 impl Driver {
     fn find_namespace_for_type(&self, ty: &Type) -> NewNamespaceId {
         match *ty {
-            Type::Struct(StructType { identity, .. }) => self.code.ast.structs[identity].namespace,
-            Type::Enum(EnumType { identity, .. }) => self.code.ast.enums[identity].namespace,
+            Type::Struct(StructType { identity, .. }) => self.ast.structs[identity].namespace,
+            Type::Enum(EnumType { identity, .. }) => self.ast.enums[identity].namespace,
             _ => todo!("find namespace for type {:?}", ty),
         }
     }

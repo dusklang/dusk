@@ -187,7 +187,6 @@ impl Builder {
     fn ast_code(mut self, driver: impl Into<TokenStream>) -> Self {
         self.stream.extend(driver.into());
         self
-            .field("code")
             .field("ast")
     }
 
@@ -372,9 +371,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                let namespace = d.code.ast.new_namespaces.push(NewNamespace::default());
+                let namespace = d.ast.new_namespaces.push(NewNamespace::default());
                 let internal_type = InternalType { name: String::from(#bridged_name), size: size_of::<#decl_name>(), namespace };
-                let type_id = d.code.ast.internal_types.push(internal_type);
+                let type_id = d.ast.internal_types.push(internal_type);
                 let ty = Type::Internal(type_id);
             }
         };
@@ -391,7 +390,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(konst);
                     d.add_decl_to_path(#bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), ty);
+                    d.ast.bridged_types.insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -416,9 +415,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.code.ast.bridged_types.get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.ast.bridged_types.get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.code.ast.bridged_types.insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.ast.bridged_types.insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -584,7 +583,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     implementation: thunk,
                                 };
                                 let ret_ty = d.add_const_ty(ret_ty);
-                                let intr_id = d.code.ast.intrinsics.push(intr);
+                                let intr_id = d.ast.intrinsics.push(intr);
                                 d.add_decl_to_path(#name, #path, #decl, Some(ret_ty));
                             }
                         );

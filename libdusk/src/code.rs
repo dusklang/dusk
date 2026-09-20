@@ -1,11 +1,10 @@
-use crate::index_vec::{IndexVec, index_vec, define_index_type};
+use crate::index_vec::define_index_type;
 use crate::display_adapter;
+use crate::driver::Driver;
 
-use crate::ast::{Ast, Item, GenericCtx};
+use crate::ast::Item;
 use crate::ty::Type;
-use crate::mir::{MirCode, Instr, InstrId, VOID_INSTR};
-
-use crate::source_info::SourceRange;
+use crate::mir::{Instr, InstrId};
 
 define_index_type!(pub struct OpId = u32;);
 define_index_type!(pub struct BlockId = u32;);
@@ -68,29 +67,8 @@ impl Op {
 pub struct Block {
     pub ops: Vec<OpId>,
 }
-pub struct Code {
-    pub blocks: IndexVec<BlockId, Block>,
-    pub ops: IndexVec<OpId, Op>,
-    pub ast: Ast,
-    pub mir: MirCode,
-}
 
-impl Default for Code {
-    fn default() -> Self {
-        let mut val = Code {
-            blocks: IndexVec::default(),
-            ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
-            ast: Ast::default(),
-            mir: MirCode::default(),
-        };
-        val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
-        val.mir.instr_names.insert(VOID_INSTR, "void".to_string());
-        val.ast.generic_ctxs.push(GenericCtx::Blank);
-        val
-    }
-}
-
-impl Code {
+impl Driver {
     #[display_adapter]
     pub fn display_block(&self, block: BlockId, w: &mut Formatter) {
         let block = &self.blocks[block];

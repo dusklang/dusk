@@ -22,9 +22,9 @@ impl Backend for Arm64Backend {
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = Arm64Encoder::new();
 
-        let func = &d.code.mir.functions[func_index];
+        let func = &d.mir.functions[func_index];
         assert_eq!(func.blocks.len(), 1);
-        assert_eq!(d.code.num_parameters(func), 0);
+        assert_eq!(d.num_parameters(func), 0);
 
         match d.os {
             OperatingSystem::MacOS => {
@@ -32,8 +32,8 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
-                for &op in &d.code.blocks[func.blocks[0]].ops {
-                    let instr = d.code.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].ops {
+                    let instr = d.ops[op].as_mir_instr().unwrap();
                     match instr {
                         Instr::Const(konst) => {
                             match konst {
@@ -43,7 +43,7 @@ impl Backend for Arm64Backend {
                                     let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
                                     code.load_fixed_up_address(Reg::R16, objc_msg_send);
 
-                                    let cfstring = exe.use_constant_nsstring(&d.code.mir.strings[id]);
+                                    let cfstring = exe.use_constant_nsstring(&d.mir.strings[id]);
                                     code.load_fixed_up_address(Reg::R0, cfstring);
 
                                     let string_by_appending_string = exe.use_objc_selector(c"stringByAppendingString:");
@@ -74,7 +74,7 @@ impl Backend for Arm64Backend {
                             }
                         },
                         &Instr::Ret(value) => {
-                            let value = d.code.ops[value].as_mir_instr().unwrap();
+                            let value = d.ops[value].as_mir_instr().unwrap();
                             // If this is the main function, we should return 0 despite the high-level return type being `void`.
                             if is_main {
                                 assert_eq!(value, &Instr::Void);
@@ -101,13 +101,13 @@ impl Backend for Arm64Backend {
                 let frame_size = 16;
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
-                for &op in &d.code.blocks[func.blocks[0]].ops {
-                    let instr = d.code.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].ops {
+                    let instr = d.ops[op].as_mir_instr().unwrap();
                     match instr {
                         Instr::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
-                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.code.mir.strings[id]));
+                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
                                 },
                                 _ => todo!("{}", d.display_const(konst)),
                             }
@@ -144,7 +144,7 @@ impl Backend for Arm64Backend {
                             }
                         },
                         &Instr::Ret(value) => {
-                            let value = d.code.ops[value].as_mir_instr().unwrap();
+                            let value = d.ops[value].as_mir_instr().unwrap();
                             // If this is the main function, we should call ExitProcess.
                             if is_main {
                                 assert_eq!(value, &Instr::Void);
@@ -166,13 +166,13 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
                 code.mov64(Reg::R29, Reg::SP);
 
-                for &op in &d.code.blocks[func.blocks[0]].ops {
-                    let instr = d.code.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].ops {
+                    let instr = d.ops[op].as_mir_instr().unwrap();
                     match instr {
                         Instr::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
-                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.code.mir.strings[id]));
+                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
                                 },
                                 _ => todo!("{}", d.display_const(konst)),
                             }
@@ -200,7 +200,7 @@ impl Backend for Arm64Backend {
                             }
                         }
                         &Instr::Ret(value) => {
-                            let value = d.code.ops[value].as_mir_instr().unwrap();
+                            let value = d.ops[value].as_mir_instr().unwrap();
                             // If this is the main function, we should call exit().
                             if is_main {
                                 assert_eq!(value, &Instr::Void);

@@ -280,7 +280,7 @@ impl Value {
             },
             Const::Bool(val) => Value::from_bool(val),
             Const::Str { id, .. } => {
-                let ptr = driver.code.mir.strings[id].as_ptr();
+                let ptr = driver.mir.strings[id].as_ptr();
                 Value::from_usize(ptr as usize)
             },
             Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
@@ -314,7 +314,7 @@ impl Value {
     }
 
     fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {
-        let layout = &d.code.mir.enums[&enuum];
+        let layout = &d.mir.enums[&enuum];
         let payload_offset = layout.payload_offsets[index];
         let mut bytes = Vec::new();
         bytes.extend(Value::from_u32(index as u32).as_bytes_without_driver().as_ref());
@@ -360,12 +360,12 @@ impl StackFrame {
     fn jump_to(&mut self, target: &JumpTarget, d: &Driver) {
         self.block = target.bb;
         for (i, &arg) in target.arguments.iter().enumerate() {
-            let op = d.code.blocks[target.bb].ops[i];
-            let Op::MirInstr(ref param, param_instr_id, _) = d.code.ops[op] else {
+            let op = d.blocks[target.bb].ops[i];
+            let Op::MirInstr(ref param, param_instr_id, _) = d.ops[op] else {
                 panic!("expected MIR instruction");
             };
             assert!(matches!(param, Instr::Parameter(_)));
-            let arg_instr_id = d.code.ops[arg].get_mir_instr_id().expect("MIR instruction");
+            let arg_instr_id = d.ops[arg].get_mir_instr_id().expect("MIR instruction");
             self.results[param_instr_id] = self.results[arg_instr_id].clone();
         }
         self.pc = target.arguments.len();
@@ -408,12 +408,12 @@ impl StackFrame {
     }
 
     fn get_val(&self, op: OpId, d: &Driver) -> &Value {
-        let instr_id = d.code.ops[op].get_mir_instr_id().unwrap();
+        let instr_id = d.ops[op].get_mir_instr_id().unwrap();
         &self.results[instr_id]
     }
 
     fn get_val_mut(&mut self, op: OpId, d: &Driver) -> &mut Value {
-        let instr_id = d.code.ops[op].get_mir_instr_id().unwrap();
+        let instr_id = d.ops[op].get_mir_instr_id().unwrap();
         &mut self.results[instr_id]
     }
 }
@@ -553,7 +553,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
 
     let mut driver = DriverRwRef::new(&DRIVER);
 
-    let func_ty = driver.read().code.mir.functions[func_id].ty.clone();
+    let func_ty = driver.read().mir.functions[func_id].ty.clone();
     let return_ty = func_ty.return_ty.as_ref().clone();
     let mut arguments = Vec::with_capacity(func_ty.param_tys.len());
     macro_rules! get_param {
@@ -638,7 +638,7 @@ impl Driver {
                 #[cfg(debug_assertions)]
                 println!("NOTICE: about to blindly copy null-terminated data from an arbitrary address to the global strings!");
                 let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
-                let id = self.code.mir.strings.push(string);
+                let id = self.mir.strings.push(string);
                 Const::Str { id, ty }
             },
             Type::Ty => Const::Ty(val.as_ty()),
@@ -658,7 +658,7 @@ impl Driver {
                 Const::StructLit { fields, id: strukt.identity }
             },
             Type::Enum(enuum) => {
-                let enum_val = &self.code.ast.enums[enuum.identity];
+                let enum_val = &self.ast.enums[enuum.identity];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
                 assert!(valid, "In order to output value of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
                 Const::Variant { enuum: enuum.identity, index: val.as_enum(&enuum, self).discriminant as usize, payload_tys: enuum.payload_tys.clone() }
@@ -673,11 +673,11 @@ impl Driver {
     }
 
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
-        let func = function_by_ref(&self.code.mir, &func_ref);
+        let func = function_by_ref(&self.mir, &func_ref);
 
         let mut results = IndexVec::new();
 
-        let num_parameters = self.code.num_parameters(func);
+        let num_parameters = self.num_parameters(func);
         if num_parameters != arguments.len() {
             let interner = self.interner.read().unwrap();
             let func_name = func.name.map(|name| interner.resolve(name).unwrap()).unwrap_or("<anonymous func>");
@@ -691,8 +691,8 @@ impl Driver {
         let start_block = func.blocks[0];
         results.push(Value::Nothing); // void
         for (i, arg) in arguments.into_iter().enumerate() {
-            let op = self.code.blocks[start_block].ops[i];
-            let param = self.code.ops[op].as_mir_instr().unwrap();
+            let op = self.blocks[start_block].ops[i];
+            let param = self.ops[op].as_mir_instr().unwrap();
             assert!(matches!(param, Instr::Parameter(_)));
             results.push(arg);
         }
@@ -716,7 +716,7 @@ impl Driver {
     #[display_adapter]
     pub fn stack_trace(&self, stack: &[StackFrame], f: &mut Formatter) {
         for (i, frame) in stack.iter().rev().enumerate() {
-            let func = function_by_ref(&self.code.mir, &frame.func_ref);
+            let func = function_by_ref(&self.mir, &frame.func_ref);
             write!(f, "{}: {}", i, self.fn_name(func.name))?;
 
             if i + 1 < stack.len() {
@@ -788,7 +788,7 @@ impl Driver {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
         }
 
-        let func = &self.code.mir.functions[func_id];
+        let func = &self.mir.functions[func_id];
         let param_tys = func.ty.param_tys.clone();
 
         let mut thunk = X64Encoder::new();
@@ -1197,7 +1197,7 @@ impl DriverRwRef<'_> {
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        let library = &self.read().code.mir.extern_mods[&func_ref.extern_mod];
+        let library = &self.read().mir.extern_mods[&func_ref.extern_mod];
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks when possible)
         let dyn_lib = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
@@ -1259,9 +1259,9 @@ impl DriverRwRef<'_> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last_mut().unwrap();
-            let next_op = self.read().code.blocks[frame.block].ops[frame.pc];
+            let next_op = self.read().blocks[frame.block].ops[frame.pc];
             let d = self.read();
-            match d.code.ops[next_op].as_mir_instr().unwrap() {
+            match d.ops[next_op].as_mir_instr().unwrap() {
                 Instr::Void => Value::Nothing,
                 Instr::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
                 Instr::Alloca(ty) => {
@@ -1305,7 +1305,7 @@ impl DriverRwRef<'_> {
                 },
                 #[cfg(target_os = "macos")]
                 &Instr::ObjcClassRef { extern_mod, index } => {
-                    let library = &self.read().code.mir.extern_mods[&extern_mod];
+                    let library = &self.read().mir.extern_mods[&extern_mod];
                     let mut interp = INTERP.write().unwrap();
                     let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
                         // TODO: cache library and proc addresses (and thunks when possible)
@@ -1314,7 +1314,7 @@ impl DriverRwRef<'_> {
                             panic!("unable to load library {:?}", library.library_path);
                         }
                         let mut objc_classes = Vec::new();
-                        for class_name in &self.read().code.ast.extern_mods[extern_mod].objc_class_references {
+                        for class_name in &self.read().ast.extern_mods[extern_mod].objc_class_references {
                             let class_name = CString::new(class_name.clone()).unwrap();
                             let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
                             objc_classes.push(class_ptr as *const c_void);
@@ -1507,7 +1507,7 @@ impl DriverRwRef<'_> {
                                 match ty {
                                     Type::Struct(strukt) => {
                                         let layout = self.read().layout_struct(&strukt);
-                                        for (index, field) in self.read().code.ast.structs[strukt.identity].fields.iter().enumerate() {
+                                        for (index, field) in self.read().ast.structs[strukt.identity].fields.iter().enumerate() {
                                             if field_name == field.name {
                                                 offset = Some(layout.field_offsets[index]);
                                                 break;
@@ -1545,7 +1545,7 @@ impl DriverRwRef<'_> {
                             let file = self.read().src_map.add_file_on_disk(path).unwrap();
                             self.write().parse_file(file).unwrap();
 
-                            let added_module = self.read().code.ast.global_scopes[&file];
+                            let added_module = self.read().ast.global_scopes[&file];
                             Value::from_mod(added_module)
                         },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
@@ -1553,7 +1553,7 @@ impl DriverRwRef<'_> {
                 },
                 &Instr::Intrinsic { ref arguments, intr } => {
                     let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                    let implementation = d.code.ast.intrinsics[intr].implementation;
+                    let implementation = d.ast.intrinsics[intr].implementation;
                     drop(d);
                     implementation(self, arguments)
                 },
@@ -1657,7 +1657,7 @@ impl DriverRwRef<'_> {
                 }
                 &Instr::Load(location) => {
                     let frame = stack.last().unwrap();
-                    let op = self.read().code.blocks[frame.block].ops[frame.pc];
+                    let op = self.read().blocks[frame.block].ops[frame.pc];
                     let ty = d.type_of(op);
                     let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
@@ -1674,7 +1674,7 @@ impl DriverRwRef<'_> {
                     if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
                         panic!("Can't access static at compile time!");
                     }
-                    let static_value = Value::from_const(&self.read().code.mir.statics[statik].val.clone(), &self.read());
+                    let static_value = Value::from_const(&self.read().mir.statics[statik].val.clone(), &self.read());
                     let statik = INTERP.write().unwrap().statics.entry(statik)
                         .or_insert(static_value)
                         .as_bytes_without_driver()
@@ -1706,19 +1706,19 @@ impl DriverRwRef<'_> {
                     Value::from_new_internal(Type::Struct(strukt), &self.read())
                 },
                 &Instr::Enum { ref variants, id } => {
-                    if !self.read().code.mir.enums.contains_key(&id) {
+                    if !self.read().mir.enums.contains_key(&id) {
                         let mut payload_tys = Vec::new();
                         for &variant in variants {
                             payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
                         }
                         let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
                         drop(d);
-                        self.write().code.mir.enums.insert(
+                        self.write().mir.enums.insert(
                             id,
                             layout,
                         );
                     }
-                    let payload_tys = self.read().code.mir.enums[&id].payload_tys.to_vec();
+                    let payload_tys = self.read().mir.enums[&id].payload_tys.to_vec();
                     Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
                 }
                 &Instr::StructLit { ref fields, id } => {
@@ -1835,7 +1835,7 @@ impl DriverRwRef<'_> {
 
         let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
-        let op = self.read().code.blocks[frame.block].ops[frame.pc];
+        let op = self.read().blocks[frame.block].ops[frame.pc];
         *frame.get_val_mut(op, &self.read()) = val;
         frame.pc += 1;
         Ok(None)

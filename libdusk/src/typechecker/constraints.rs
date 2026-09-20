@@ -323,7 +323,7 @@ macro_rules! get_constraints {
     ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
             ConstraintHaver::Expr(expr) => {
-                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                let type_var = $driver.ast.expr_to_type_vars[expr];
                 $tp.constraints(type_var)
             },
             ConstraintHaver::TypeVar(type_var) => $tp.constraints(type_var),
@@ -336,7 +336,7 @@ macro_rules! get_constraints_mut {
     ($driver:expr, $tp:expr, $haver:expr) => {
         match $haver.into() {
             MutConstraintHaver::Expr(expr) => {
-                let type_var = $driver.code.ast.expr_to_type_vars[expr];
+                let type_var = $driver.ast.expr_to_type_vars[expr];
                 $tp.constraints_mut(type_var)
             },
             MutConstraintHaver::TypeVar(type_var) => $tp.constraints_mut(type_var),
@@ -680,7 +680,7 @@ impl Driver {
 
     fn to_type_var<'a>(&self, constraint_haver: impl Into<ConstraintHaver<'a>>) -> Option<TypeVarId> {
         match constraint_haver.into() {
-            ConstraintHaver::Expr(expr) => Some(self.code.ast.expr_to_type_vars[expr]),
+            ConstraintHaver::Expr(expr) => Some(self.ast.expr_to_type_vars[expr]),
             ConstraintHaver::TypeVar(type_var) => Some(type_var),
             ConstraintHaver::ConstraintList(_) => None,
         }

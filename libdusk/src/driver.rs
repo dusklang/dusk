@@ -2,14 +2,16 @@ use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use crossbeam_skiplist::SkipMap;
 use string_interner::DefaultStringInterner as StringInterner;
 
-use crate::ast::ExprId;
-use crate::mir::Const;
+use crate::index_vec::*;
+use crate::ast::{Ast, ExprId, GenericCtx};
+use crate::mir::{Const, Instr, InstrId, MirCode, VOID_INSTR};
 use crate::target::{Arch, OperatingSystem};
-use crate::source_info::SourceFileId;
-use crate::code::Code;
+use crate::source_info::{SourceFileId, SourceRange};
+use crate::code::{Block, BlockId, Op, OpId};
 use crate::internal_types::InternalFieldDecls;
 use crate::source_info::SourceMap;
 use crate::token::TokenVec;
+use crate::ty::Type;
 use crate::type_interner::TypeInterner;
 use crate::ast;
 use crate::tir;
@@ -37,30 +39,41 @@ pub struct Driver {
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
-    pub ast: ast::Builder,
-    pub tir: tir::Builder,
-    pub mir: mir::Builder,
-    pub code: Code,
+    pub ast_builder: ast::Builder,
+    pub tir_builder: tir::Builder,
+    pub mir_builder: mir::Builder,
+    pub blocks: IndexVec<BlockId, Block>,
+    pub ops: IndexVec<OpId, Op>,
+    pub ast: Ast,
+    pub mir: MirCode,
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool) -> Self {
-        Self {
+        let mut val = Self {
             arch,
             os,
             src_map: Arc::new(src_map),
             toks: Default::default(),
             interner: Default::default(),
             types: Default::default(),
-            ast: ast::Builder::default(),
-            tir: tir::Builder::default(),
+            ast_builder: ast::Builder::default(),
+            tir_builder: tir::Builder::default(),
+            mir_builder: mir::Builder::new(),
             diag: Default::default(),
-            mir: mir::Builder::new(),
-            code: Code::default(),
             internal_field_decls: Default::default(),
             no_core,
-        }
+
+            blocks: IndexVec::default(),
+            ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
+            ast: Ast::default(),
+            mir: MirCode::default(),
+        };
+        val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
+        val.mir.instr_names.insert(VOID_INSTR, "void".to_string());
+        val.ast.generic_ctxs.push(GenericCtx::Blank);
+        val
     }
 }
 impl DriverRwRef<'_> {

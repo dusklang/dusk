@@ -161,10 +161,10 @@ macro_rules! declare_tp {
             fn fetch_decl_type(&mut self, d: &Driver, id: DeclId, decl_ref: Option<DeclRefId>) -> QualType {
                 if let Type::Error = self.decl_type(id).ty {
                     if let Some(decl_ref) = decl_ref {
-                        let decl_ref = &d.code.ast.decl_refs[decl_ref];
+                        let decl_ref = &d.ast.decl_refs[decl_ref];
                         match decl_ref.namespace {
-                            Namespace::Guarantee(ns) if decl_ref.name == d.ast.known_idents.return_value => {
-                                let func = d.code.ast.condition_ns[ns].func;
+                            Namespace::Guarantee(ns) if decl_ref.name == d.ast_builder.known_idents.return_value => {
+                                let func = d.ast.condition_ns[ns].func;
                                 // This gets the return value because this declref refers to the return_value decl
                                 return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
                             }
@@ -211,37 +211,37 @@ macro_rules! declare_tp {
             fn resize_impl(&mut self, d: &Driver, decl_start: DeclId) {
                 macro_rules! resize_idx_vec {
                     ($fname:ident, DeclRefId) => {
-                        self.$fname.resize_with(d.code.ast.decl_refs.len(), Default::default);
+                        self.$fname.resize_with(d.ast.decl_refs.len(), Default::default);
                     };
                     ($fname:ident, ExprId) => {
-                        self.$fname.resize_with(d.code.ast.exprs.len(), Default::default);
+                        self.$fname.resize_with(d.ast.exprs.len(), Default::default);
                     };
                     ($fname:ident, TypeVarId) => {
-                        self.$fname.resize_with(d.code.ast.type_vars.len(), Default::default);
+                        self.$fname.resize_with(d.ast.type_vars.len(), Default::default);
                     };
                     ($fname:ident, DeclId) => {
-                        self.$fname.resize_with(d.code.ast.decls.len(), Default::default);
+                        self.$fname.resize_with(d.ast.decls.len(), Default::default);
                     };
                     ($fname:ident, StructLitId) => {
-                        self.$fname.resize_with(d.code.ast.struct_lits.len(), Default::default);
+                        self.$fname.resize_with(d.ast.struct_lits.len(), Default::default);
                     };
                     ($fname:ident, CastId) => {
-                        self.$fname.resize_with(d.code.ast.cast_counter.len(), Default::default);
+                        self.$fname.resize_with(d.ast.cast_counter.len(), Default::default);
                     };
                     ($fname:ident, StructId) => {
-                        self.$fname.resize_with(d.code.ast.structs.len(), Default::default);
+                        self.$fname.resize_with(d.ast.structs.len(), Default::default);
                     };
                     ($fname:ident, PatternMatchingContextId) => {
-                        self.$fname.resize_with(d.code.ast.pattern_matching_contexts.len(), Default::default);
+                        self.$fname.resize_with(d.ast.pattern_matching_contexts.len(), Default::default);
                     };
                 }
                 $(resize_idx_vec!($field_name, $id_ty);)*
                 let end = self.decl_types.next_idx();
                 for decl in range_iter(decl_start..end) {
-                    self.decl_types[decl].is_mut = d.tir.decls[decl].is_mut;
+                    self.decl_types[decl].is_mut = d.tir_builder.decls[decl].is_mut;
                 }
                 for (decl, ty) in self.decl_types.iter_mut_enumerated() {
-                    ty.is_mut = d.tir.decls[decl].is_mut;
+                    ty.is_mut = d.tir_builder.decls[decl].is_mut;
                 }
             }
         }
