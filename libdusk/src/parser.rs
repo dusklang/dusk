@@ -853,9 +853,9 @@ impl Driver {
             &TokenKind::Ident(sym) => sym,
             _ => panic!("Unexpected token when parsing attribute"),
         };
-        let is_requires = attr == self.ast_builder.known_idents.requires;
-        let is_guarantees = attr == self.ast_builder.known_idents.guarantees;
-        let is_comptime = attr == self.ast_builder.known_idents.comptime;
+        let is_requires = attr == self.ast.known_idents.requires;
+        let is_guarantees = attr == self.ast.known_idents.guarantees;
+        let is_comptime = attr == self.ast.known_idents.comptime;
         let is_condition = is_requires || is_guarantees;
 
         if !is_condition && !is_comptime {
@@ -964,7 +964,7 @@ impl Driver {
             },
             &TokenKind::Ident(name) => {
                 p.next();
-                if name == self.ast_builder.known_idents.underscore {
+                if name == self.ast.known_idents.underscore {
                     Pattern {
                         kind: PatternKind::AnonymousCatchAll(initial_range),
                         scrutinee,
@@ -1073,10 +1073,10 @@ impl Driver {
 
     fn convert_ambiguous_generic_list_to_params(&mut self, idents: &Vec<Ident>) -> GenericParamList {
         let mut generic_params = GenericParamList::default();
-        generic_params.ids.start = self.ast_builder.generic_params.peek_next_idx();
+        generic_params.ids.start = self.ast.generic_params.peek_next_idx();
         for ident in idents {
             // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-            let generic_param = self.ast_builder.generic_params.next_idx();
+            let generic_param = self.ast.generic_params.next_idx();
             generic_params.ids.end = generic_param + 1;
 
             generic_params.names.push(ident.symbol);
@@ -1207,7 +1207,7 @@ impl Driver {
                 if let Some(condition_ns) = condition_ns {
                     self.ast.condition_ns[condition_ns].func = decl;
                 }
-                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast_builder.known_idents.comptime)
+                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime)
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
@@ -1510,12 +1510,12 @@ impl Driver {
             p.next();
             let generic_param_syntax_list = self.begin_list(p, TokenKind::could_begin_generic_parameter, [TokenKind::Comma], Some(TokenKind::CloseGenerics));
             if matches!(p.cur().kind, TokenKind::Ident(_)) {
-                generic_param_list.ids.start = self.ast_builder.generic_params.peek_next_idx();
+                generic_param_list.ids.start = self.ast.generic_params.peek_next_idx();
                 generic_param_list.ids.end = generic_param_list.ids.start;
                 while let TokenKind::Ident(name) = *p.cur().kind {
                     self.start_next_list_item(p, generic_param_syntax_list.id());
                     // Claim a GenericParamId for yourself, then set the `end` value to be one past the end
-                    let generic_param = self.ast_builder.generic_params.next_idx();
+                    let generic_param = self.ast.generic_params.next_idx();
                     // Make sure nobody interrupts this loop and creates an unrelated generic param
                     debug_assert_eq!(generic_param_list.ids.end, generic_param);
                     generic_param_list.ids.end = generic_param + 1;
@@ -1553,7 +1553,7 @@ impl Driver {
 
                 let ty = 'blk: {
                     // Handle `self` parameters.
-                    if name == self.ast_builder.known_idents.salf
+                    if name == self.ast.known_idents.salf
                         && *p.cur().kind != TokenKind::Colon {
                             let self_param = self.parse_self_parameter(p, param_range);
                             if param_names.len() > 1 {

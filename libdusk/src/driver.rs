@@ -13,7 +13,6 @@ use crate::source_info::SourceMap;
 use crate::token::TokenVec;
 use crate::ty::Type;
 use crate::type_interner::TypeInterner;
-use crate::ast;
 use crate::tir;
 use crate::error::DiagnosticReporter;
 use crate::mir::FunctionRef;
@@ -39,7 +38,6 @@ pub struct Driver {
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
-    pub ast_builder: ast::Builder,
     pub tir_builder: tir::Builder,
     pub blocks: IndexVec<BlockId, Block>,
     pub ops: IndexVec<OpId, Op>,
@@ -57,7 +55,6 @@ impl Driver {
             toks: Default::default(),
             interner: Default::default(),
             types: Default::default(),
-            ast_builder: ast::Builder::default(),
             tir_builder: tir::Builder::default(),
             diag: Default::default(),
             internal_field_decls: Default::default(),

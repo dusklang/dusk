@@ -881,7 +881,7 @@ impl DriverRwRef<'_> {
 
                 let func_ty = self.read().decl_type(id, tp).as_function().unwrap().clone();
                 let name = self.read().ast.names[id];
-                let comptime_sym = self.read().ast_builder.known_idents.comptime;
+                let comptime_sym = self.read().ast.known_idents.comptime;
                 let is_comptime = self.read().ast.decl_attributes.get(&id)
                     .map(|attrs|
                         attrs.iter()

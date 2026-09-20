@@ -125,7 +125,7 @@ impl Drop for EnumBuilder {
 
 impl Driver {
     pub fn add_prelude(&mut self) {
-        assert!(self.ast_builder.prelude_namespace.is_none());
+        assert!(self.ast.prelude_namespace.is_none());
         let prelude_scope = self.ast.new_namespaces.push(NewNamespace::default());
         let prelude_namespace = self.ast.mod_ns.push(
             ModScopeNs {
@@ -134,7 +134,7 @@ impl Driver {
             }
         );
         let _prelude_scope = self.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
-        self.ast_builder.prelude_namespace = Some(prelude_namespace);
+        self.ast.prelude_namespace = Some(prelude_namespace);
 
         // Add intrinsics to prelude
 

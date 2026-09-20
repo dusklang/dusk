@@ -163,7 +163,7 @@ macro_rules! declare_tp {
                     if let Some(decl_ref) = decl_ref {
                         let decl_ref = &d.ast.decl_refs[decl_ref];
                         match decl_ref.namespace {
-                            Namespace::Guarantee(ns) if decl_ref.name == d.ast_builder.known_idents.return_value => {
+                            Namespace::Guarantee(ns) if decl_ref.name == d.ast.known_idents.return_value => {
                                 let func = d.ast.condition_ns[ns].func;
                                 // This gets the return value because this declref refers to the return_value decl
                                 return self.fetch_decl_type(d, func, None).ty.return_ty().unwrap().into();
