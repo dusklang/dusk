@@ -1755,7 +1755,7 @@ impl DriverRwRef<'_> {
                 },
                 &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
-                    let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().to_owned();
+                    let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
                     let interp = INTERP.read().unwrap();
                     let target = if let Some(table) = interp.switch_cache.get(&next_op) {
                         let target = table.get(scrutinee.as_ref()).cloned();

@@ -136,7 +136,7 @@ struct Subprogram {
 }
 
 impl Subprogram {
-    fn as_units(self) -> Units {
+    fn into_units(self) -> Units {
         Units {
             units: self.units,
             mock_units: self.mock_units,
@@ -1073,7 +1073,7 @@ impl Driver {
 
         Ok(
             Some(
-                main_sp.as_units()
+                main_sp.into_units()
             )
         )
     }

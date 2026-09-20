@@ -434,7 +434,7 @@ impl From<Type> for QualType {
     }
 }
 
-impl<'a> From<&Type> for QualType {
+impl From<&Type> for QualType {
     fn from(ty: &Type) -> Self {
         QualType::from(ty.clone())
     }
