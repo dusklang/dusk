@@ -307,6 +307,10 @@ pub struct Function {
     pub last_block: BlockId,
     pub entry_block: BlockId,
     pub instrs: IndexVec<InstrId, Instr>,
+    pub source_ranges: HashMap<InstrId, SourceRange>,
+    pub instr_names: HashMap<InstrId, String>,
+    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
+    pub poisoned_instrs: HashSet<InstrId>,
     pub decl: Option<DeclId>,
     pub generic_params: Range<GenericParamId>,
     pub instr_namespace: InstrNamespace,
@@ -323,6 +327,9 @@ impl Default for Function {
             last_block: BlockId::new(0),
             entry_block: BlockId::new(0),
             instrs: Default::default(),
+            source_ranges: Default::default(),
+            instr_names: Default::default(),
+            poisoned_instrs: Default::default(),
             decl: Default::default(),
             generic_params: empty_range(),
             instr_namespace: Default::default(),
@@ -432,12 +439,7 @@ pub struct Mir {
     pub statics: IndexVec<StaticId, Static>,
     pub extern_mods: HashMap<ExternModId, ExternMod>,
     pub enums: HashMap<EnumId, EnumLayout>,
-    pub source_ranges: HashMap<InstrId, SourceRange>,
-    pub instr_names: HashMap<InstrId, String>,
     decls: HashMap<DeclId, Decl>,
-
-    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
-    pub poisoned_instrs: HashSet<InstrId>,
 }
 
 #[derive(Debug)]
@@ -505,9 +507,6 @@ impl Mir {
             statics: IndexVec::new(),
             extern_mods: HashMap::new(),
             enums: HashMap::new(),
-            source_ranges: HashMap::new(),
-            instr_names: HashMap::new(),
-            poisoned_instrs: HashSet::new(),
             decls: HashMap::new(),
         }
     }
@@ -1017,7 +1016,7 @@ impl DriverRwRef<'_> {
             },
             ast::Decl::Static(expr) => {
                 drop(d);
-                let name = self.read().display_item(id).to_string();
+                let name = self.read().display_item(&Default::default(), id).to_string();
                 let konst = self.eval_expr(expr, tp);
                 let statik = self.write().mir.statics.push(
                     Static {
@@ -1140,8 +1139,8 @@ impl Driver {
 
     // TODO: Move this out of MIR
     #[display_adapter('a)]
-    pub fn display_item(&'a self, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
-        let range = self.get_range(item);
+    pub fn display_item(&'a self, ctx: &HashMap<InstrId, SourceRange>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
+        let range = self.get_range_with_mir_ctx(item, ctx);
         if range.is_empty() {
             let item = item.into();
             match item {
@@ -1157,13 +1156,19 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_instr_name(&self, item: InstrId, f: &mut Formatter) {
-        write!(f, "{}", self.mir.instr_names.get(&item).cloned()
+    pub fn display_instr_name(&self, func: &Function, item: InstrId, f: &mut Formatter) {
+        write!(f, "{}", func.instr_names.get(&item).cloned()
             .unwrap_or_else(|| format!("instr{}", item.index())))
     }
 
     #[display_adapter]
-    pub fn display_branch_target(&self, target: &JumpTarget, f: &mut Formatter) {
+    pub fn display_instr_name_from_builder(&self, b: &FunctionBuilder, item: InstrId, f: &mut Formatter) {
+        write!(f, "{}", b.instr_names.get(&item).cloned()
+            .unwrap_or_else(|| format!("instr{}", item.index())))
+    }
+
+    #[display_adapter]
+    pub fn display_branch_target(&self, func: &Function, target: &JumpTarget, f: &mut Formatter) {
         write!(f, "%bb{}", target.bb.index())?;
         if !target.arguments.is_empty() {
             write!(f, "(")?;
@@ -1174,7 +1179,7 @@ impl Driver {
                 } else {
                     write!(f, ", ")?;
                 }
-                write!(f, "%{}", self.display_instr_name(arg))?;
+                write!(f, "%{}", self.display_instr_name(func, arg))?;
             }
             write!(f, ")")?;
         }
@@ -1194,7 +1199,7 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}", self.display_instr_name(arg))?;
+                    write!(f, "%{}", self.display_instr_name(func, arg))?;
                 }
                 write!(f, ")")?;
             }}
@@ -1217,73 +1222,73 @@ impl Driver {
             }}
         }
         match instr {
-            InstrKind::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(instr_id), ty)?,
-            InstrKind::Jump(block) => write!(f, "jump {}", self.display_branch_target(block))?,
+            InstrKind::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(func, instr_id), ty)?,
+            InstrKind::Jump(block) => write!(f, "jump {}", self.display_branch_target(func, block))?,
             &InstrKind::CondBr { condition, ref true_target, ref false_target }
-                => write!(f, "condbr %{}, {}, {}", self.display_instr_name(condition), self.display_branch_target(true_target), self.display_branch_target(false_target))?,
+                => write!(f, "condbr %{}, {}, {}", self.display_instr_name(func, condition), self.display_branch_target(func, true_target), self.display_branch_target(func, false_target))?,
             &InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
-                write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
+                write!(f, "switchbr %{} : ", self.display_instr_name(func, scrutinee))?;
                 for case in cases {
-                    write!(f, "case {} => {}, ", self.display_const(&case.value), self.display_branch_target(&case.target))?;
+                    write!(f, "case {} => {}, ", self.display_const(&case.value), self.display_branch_target(func, &case.target))?;
                 }
-                write!(f, "else => {}", self.display_branch_target(catch_all_target))?;
+                write!(f, "else => {}", self.display_branch_target(func, catch_all_target))?;
             }
             &InstrKind::Call { ref arguments, func: callee, ref generic_arguments } => {
-                write!(f, "%{} = call `{}`", self.display_instr_name(instr_id), self.fn_name(self.mir.functions[callee].name))?;
+                write!(f, "%{} = call `{}`", self.display_instr_name(func, instr_id), self.fn_name(self.mir.functions[callee].name))?;
                 write_generic_args!(generic_arguments);
                 write_args!(arguments);
             },
             &InstrKind::FunctionRef { func: callee, ref generic_arguments } => {
-                write!(f, "%{} = function_ref `{}`", self.display_instr_name(instr_id), self.fn_name(self.mir.functions[callee].name))?;
+                write!(f, "%{} = function_ref `{}`", self.display_instr_name(func, instr_id), self.fn_name(self.mir.functions[callee].name))?;
                 write_generic_args!(generic_arguments);
             },
             &InstrKind::ExternCall { ref arguments, func: callee, .. } => {
                 let extern_mod = &self.mir.extern_mods[&callee.extern_mod];
                 let callee_func = &extern_mod.imported_functions[callee.index];
-                write!(f, "%{} = externcall `{}`", self.display_instr_name(instr_id), callee_func.name)?;
+                write!(f, "%{} = externcall `{}`", self.display_instr_name(func, instr_id), callee_func.name)?;
                 write_args!(arguments);
                 write!(f, " from {:?}", extern_mod.library_path)?
             },
             &InstrKind::ObjcClassRef { extern_mod, index } => write!(
                 f,
                 "%{} = objc_class_ref `{}` from {:?}",
-                self.display_instr_name(instr_id),
+                self.display_instr_name(func, instr_id),
                 self.ast.extern_mods[extern_mod].objc_class_references[index],
                 self.mir.extern_mods[&extern_mod].library_path
             )?,
             InstrKind::Const(konst) => {
-                write!(f, "%{} = {}", self.display_instr_name(instr_id), self.display_const(konst))?;
+                write!(f, "%{} = {}", self.display_instr_name(func, instr_id), self.display_const(konst))?;
             },
             InstrKind::LegacyIntrinsic { arguments, intr, .. } => {
-                write!(f, "%{} = intrinsic `{}`", self.display_instr_name(instr_id), intr.name())?;
+                write!(f, "%{} = intrinsic `{}`", self.display_instr_name(func, instr_id), intr.name())?;
                 write_args!(arguments);
             },
             InstrKind::Intrinsic { arguments, intr, .. } => {
-                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(instr_id), self.ast.intrinsics[*intr].name)?;
+                write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(func, instr_id), self.ast.intrinsics[*intr].name)?;
                 write_args!(arguments);
             },
             &InstrKind::Pointer { instr, is_mut } => {
-                write!(f, "%{} = %{} *", self.display_instr_name(instr_id), self.display_instr_name(instr))?;
+                write!(f, "%{} = %{} *", self.display_instr_name(func, instr_id), self.display_instr_name(func, instr))?;
                 if is_mut {
                     write!(f, "mut")?
                 }
             },
-            &InstrKind::Load(location) => write!(f, "%{} = load %{}", self.display_instr_name(instr_id), self.display_instr_name(location))?,
-            &InstrKind::LogicalNot(instr) => write!(f, "%{} = not %{}", self.display_instr_name(instr_id), self.display_instr_name(instr))?,
-            &InstrKind::Ret(val) => write!(f,  "return %{}", self.display_instr_name(val))?,
-            &InstrKind::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
-            &InstrKind::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(instr_id), self.mir.statics[statik].name)?,
-            &InstrKind::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::Truncate(val, ref ty) => write!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::FloatCast(val, ref ty) => write!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::IntToFloat(val, ref ty) => write!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
-            &InstrKind::FloatToInt(val, ref ty) => write!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(instr_id), self.display_instr_name(val), ty)?,
+            &InstrKind::Load(location) => write!(f, "%{} = load %{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, location))?,
+            &InstrKind::LogicalNot(instr) => write!(f, "%{} = not %{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, instr))?,
+            &InstrKind::Ret(val) => write!(f,  "return %{}", self.display_instr_name(func, val))?,
+            &InstrKind::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(func, value), self.display_instr_name(func, location))?,
+            &InstrKind::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(func, instr_id), self.mir.statics[statik].name)?,
+            &InstrKind::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::Truncate(val, ref ty) => write!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::FloatCast(val, ref ty) => write!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::IntToFloat(val, ref ty) => write!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
+            &InstrKind::FloatToInt(val, ref ty) => write!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), ty)?,
             &InstrKind::Struct { ref fields, id } => {
-                write!(f, "%{} = define struct{} {{ ", self.display_instr_name(instr_id), id.index())?;
+                write!(f, "%{} = define struct{} {{ ", self.display_instr_name(func, instr_id), id.index())?;
                 for i in 0..fields.len() {
-                    write!(f, "%{}", self.display_instr_name(fields[i]))?;
+                    write!(f, "%{}", self.display_instr_name(func, fields[i]))?;
                     if i < (fields.len() - 1) {
                         write!(f, ",")?;
                     }
@@ -1292,9 +1297,9 @@ impl Driver {
                 write!(f, "}}")?;
             },
             &InstrKind::StructLit { ref fields, id } => {
-                write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(instr_id), id.index())?;
+                write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(func, instr_id), id.index())?;
                 for i in 0..fields.len() {
-                    write!(f, "%{}", self.display_instr_name(fields[i]))?;
+                    write!(f, "%{}", self.display_instr_name(func, fields[i]))?;
                     if i < (fields.len() - 1) {
                         write!(f, ",")?;
                     }
@@ -1303,12 +1308,12 @@ impl Driver {
                 write!(f, "}}")?;
             },
             &InstrKind::Enum { ref variants, id } => {
-                write!(f, "%{} = define enum{} {{", self.display_instr_name(instr_id), id.index())?;
+                write!(f, "%{} = define enum{} {{", self.display_instr_name(func, instr_id), id.index())?;
 
                 for (i, variant) in self.ast.enums[id].variants.iter().enumerate() {
                     write!(f, "{}", self.interner.read().unwrap().resolve(variant.name).unwrap())?;
                     if variant.payload_ty.is_some() {
-                        write!(f, "(%{})", self.display_instr_name(variants[i]))?;
+                        write!(f, "(%{})", self.display_instr_name(func, variants[i]))?;
                     }
                     if i < (variants.len() - 1) {
                         write!(f, ",")?;
@@ -1319,12 +1324,12 @@ impl Driver {
                 write!(f, "}}")?;
             },
             &InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
-                write!(f, "%{} = fn type (", self.display_instr_name(instr_id))?;
+                write!(f, "%{} = fn type (", self.display_instr_name(func, instr_id))?;
                 for (i, &param) in param_tys.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}", self.display_instr_name(param))?;
+                    write!(f, "%{}", self.display_instr_name(func, param))?;
                 }
                 if has_c_variadic_param {
                     if !param_tys.is_empty() {
@@ -1332,28 +1337,28 @@ impl Driver {
                     }
                     write!(f, "...")?;
                 }
-                write!(f, " -> {}", self.display_instr_name(ret_ty))?;
+                write!(f, " -> {}", self.display_instr_name(func, ret_ty))?;
             },
             &InstrKind::Variant { enuum, index, payload } => {
                 let variant = &self.ast.enums[enuum].variants[index];
                 let variant_name = variant.name;
-                write!(f, "%{} = %enum{}.{}", self.display_instr_name(instr_id), enuum.index(), self.interner.read().unwrap().resolve(variant_name).unwrap())?;
+                write!(f, "%{} = %enum{}.{}", self.display_instr_name(func, instr_id), enuum.index(), self.interner.read().unwrap().resolve(variant_name).unwrap())?;
                 if variant.payload_ty.is_some() {
-                    write!(f, "(%{})", self.display_instr_name(payload))?
+                    write!(f, "(%{})", self.display_instr_name(func, payload))?
                 }
             },
-            &InstrKind::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(instr_id), self.display_instr_name(val), index)?,
-            &InstrKind::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(instr_id), self.display_instr_name(val), index)?,
-            &InstrKind::InternalFieldAccess { val, field } => write!(f, "%{} = %{}.{}", self.display_instr_name(instr_id), self.display_instr_name(val), field.name())?,
-            &InstrKind::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(instr_id), self.display_instr_name(val))?,
-            &InstrKind::PayloadAccess { val, variant_index } => write!(f, "%{} = payload of %{} using variant {}", self.display_instr_name(instr_id), self.display_instr_name(val), variant_index)?,
+            &InstrKind::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), index)?,
+            &InstrKind::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), index)?,
+            &InstrKind::InternalFieldAccess { val, field } => write!(f, "%{} = %{}.{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), field.name())?,
+            &InstrKind::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val))?,
+            &InstrKind::PayloadAccess { val, variant_index } => write!(f, "%{} = payload of %{} using variant {}", self.display_instr_name(func, instr_id), self.display_instr_name(func, val), variant_index)?,
             // TODO: instead of emitting these instructions as needed, add all generic params to the beginning of the MIR function as "hidden" values, just like normal parameters.
             &InstrKind::GenericParam(param) => {
-                write!(f, "%{} = generic_param{}", self.display_instr_name(instr_id), param.index())?
+                write!(f, "%{} = generic_param{}", self.display_instr_name(func, instr_id), param.index())?
             },
             InstrKind::Parameter(_) => {},
-            InstrKind::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(instr_id))?,
-            InstrKind::Void => write!(f, "%{} = void", self.display_instr_name(instr_id))?,
+            InstrKind::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(func, instr_id))?,
+            InstrKind::Void => write!(f, "%{} = void", self.display_instr_name(func, instr_id))?,
         };
         Ok(())
     }
@@ -1372,7 +1377,7 @@ impl Driver {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "%{}: {:?}", self.display_instr_name(instr), ty)?;
+                    write!(f, "%{}: {:?}", self.display_instr_name(func, instr), ty)?;
                 } else {
                     break;
                 }
@@ -1425,7 +1430,7 @@ impl Driver {
                 } else {
                     write!(f, ", ")?;
                 }
-                write!(f, "%{}: {:?}", self.display_instr_name(instr), ty)?;
+                write!(f, "%{}: {:?}", self.display_instr_name(func, instr), ty)?;
             } else {
                 break;
             }
@@ -1484,6 +1489,8 @@ struct FunctionBuilder {
     last_block: BlockId,
     entry_block: BlockId,
     instrs: IndexVec<InstrId, Instr>,
+    source_ranges: HashMap<InstrId, SourceRange>,
+    instr_names: HashMap<InstrId, String>,
     block_states: HashMap<BlockId, BlockState>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
@@ -1545,6 +1552,8 @@ impl DriverRwRef<'_> {
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
         let mut instrs = IndexVec::new();
+        let mut source_ranges = HashMap::new();
+        let mut instr_names = HashMap::new();
         for param in range_iter(params.clone()) {
             let d = self.read();
             assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
@@ -1555,9 +1564,9 @@ impl DriverRwRef<'_> {
             let d = self.read();
             let range = df!(d, param.range);
             drop(d);
-            let name = instr_namespace.insert(self.read().display_item(range).to_string());
-            self.write().mir.source_ranges.insert(id, range);
-            self.write().mir.instr_names.insert(id, name);
+            let name = instr_namespace.insert(self.read().display_item(&source_ranges, range).to_string());
+            source_ranges.insert(id, range);
+            instr_names.insert(id, name);
             entry.instrs.push(id);
         }
         let mut blocks = IndexVec::new();
@@ -1570,6 +1579,8 @@ impl DriverRwRef<'_> {
             last_block: entry_block,
             entry_block,
             instrs,
+            source_ranges,
+            instr_names,
             block_states: HashMap::new(),
             current_block: entry_block,
             stored_decl_locs: IndexVec::new(),
@@ -1628,6 +1639,9 @@ impl DriverRwRef<'_> {
             last_block: b.last_block,
             entry_block: b.entry_block,
             instrs: b.instrs,
+            source_ranges: b.source_ranges,
+            instr_names: b.instr_names,
+            poisoned_instrs: Default::default(),
             instr_namespace: b.instr_namespace,
             decl,
             generic_params,
@@ -1969,7 +1983,7 @@ impl DriverRwRef<'_> {
                 instr.replace_value(old, new);
             }
 
-            let copied_instr_id = self.write().push_instr(b, instr, instr_id);
+            let copied_instr_id = self.write().push_instr(b, instr, src_function.source_ranges[&instr_id]);
             copier.old_to_new.insert(instr_id, copied_instr_id);
             copied_instr_id
         }
@@ -1978,6 +1992,7 @@ impl DriverRwRef<'_> {
     fn eval_constants(&mut self, func: &mut Function, tp: &dyn TypeProvider) -> bool {
         self.write();
         let mut transformer = MirTransformer::default();
+        let mut poison_list = Vec::new();
         for block in func.make_cursor().blocks_iter() {
             for &instr in &block.instrs {
                 // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
@@ -1990,19 +2005,23 @@ impl DriverRwRef<'_> {
                 // possible to put them all together (or they each need to be returned from the function via tuples or
                 // something). So it's not quite as simple to do this as I had initially thought. But still a good idea
                 // probably.
-                if self.instruction_is_nontrivial_const(func, instr) && !self.read().mir.poisoned_instrs.contains(&instr) {
+                if self.instruction_is_nontrivial_const(func, instr) && !func.poisoned_instrs.contains(&instr) {
                     let ty = func.type_of(instr).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
                     let new_func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction { parent_func: func, instr }, empty_range(), empty_range(), true, tp);
                     let Ok(result) = self.call(FunctionRef::Ref(new_func), Vec::new(), Vec::new()) else {
                         // Make sure we won't repeatedly try and fail to const-eval this instruction.
-                        self.write().mir.poisoned_instrs.insert(instr);
+                        poison_list.push(instr);
                         continue;
                     };
                     let konst = self.write().value_to_const(result, ty, tp);
                     transformer.replace_list.push((instr, InstrKind::Const(konst)));
                 }
             }
+        }
+
+        for instr in poison_list {
+            func.poisoned_instrs.insert(instr);
         }
 
         transformer.transform(func)
@@ -2197,8 +2216,8 @@ impl Driver {
     fn push_instr(&mut self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> InstrId {
         let ty = self.generate_type_of(b, &instr);
         let id = b.instrs.push(Instr::new(instr, ty));
-        let source_range = self.get_range(item);
-        self.mir.source_ranges.insert(id, source_range);
+        let source_range = self.get_range_with_mir_ctx(item, &b.source_ranges);
+        b.source_ranges.insert(id, source_range);
         b.blocks[b.current_block].instrs.push(id);
 
         id
@@ -2207,10 +2226,10 @@ impl Driver {
     fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> InstrId {
         let ty = self.generate_type_of(b, &instr);
         let id = b.instrs.push(Instr::new(instr, ty));
-        let source_range = self.get_range(item);
-        self.mir.source_ranges.insert(id, source_range);
+        let source_range = self.get_range_with_mir_ctx(item, &b.source_ranges);
+        b.source_ranges.insert(id, source_range);
         let name = b.instr_namespace.insert(name.into());
-        self.mir.instr_names.insert(id, name);
+        b.instr_names.insert(id, name);
         b.blocks[b.current_block].instrs.push(id);
 
         id
@@ -2229,12 +2248,12 @@ impl DriverRwRef<'_> {
                 ast::Decl::Stored { id, root_expr, .. } => {
                     drop(d);
                     let ty = tp.ty(root_expr).clone();
-                    let name = self.read().display_item(decl).to_string();
+                    let name = self.read().display_item(&b.source_ranges, decl).to_string();
                     let location = self.write().push_instr_with_name(b, InstrKind::Alloca(ty), decl, name);
                     b.stored_decl_locs.push_at(id, location);
                     let val = self.build_expr(b, root_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                     let instr = self.write().handle_indirection(b, val);
-                    let range = self.read().get_range(location) + self.read().get_range(instr);
+                    let range = self.read().get_range_with_mir_ctx(location, &b.source_ranges) + self.read().get_range_with_mir_ctx(instr, &b.source_ranges);
                     self.write().push_instr(b, InstrKind::Store { location, value: instr }, range);
                 },
                 ast::Decl::Function { .. } => {},
@@ -2282,7 +2301,7 @@ impl DriverRwRef<'_> {
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         assert_eq!(generic_params.end - generic_params.start, generic_arguments.len());
         let expr = self.read().ast.decl_refs[decl_ref_id].expr;
-        let name = self.read().display_item(id).to_string();
+        let name = self.read().display_item(&b.source_ranges, id).to_string();
         match self.get_decl(id, tp) {
             Decl::Function { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
             Decl::ExternFunction(func) => {
@@ -2934,12 +2953,12 @@ impl DriverRwRef<'_> {
                 };
                 drop(d);
                 let binding_ty = tp.ty(lower_bound).clone();
-                let binding_name = self.read().display_item(binding).to_string();
+                let binding_name = self.read().display_item(&b.source_ranges, binding).to_string();
                 let binding_location = self.write().push_instr_with_name(b, InstrKind::Alloca(binding_ty), binding, &binding_name);
                 b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
                 let val = self.build_expr(b, lower_bound, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 let instr = self.write().handle_indirection(b, val);
-                let range = self.read().get_range(binding_location) + self.read().get_range(instr);
+                let range = self.read().get_range_with_mir_ctx(binding_location, &b.source_ranges) + self.read().get_range_with_mir_ctx(instr, &b.source_ranges);
                 self.write().push_instr(b, InstrKind::Store { location: binding_location, value: instr }, range);
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.write().handle_indirection(b, upper_bound);
@@ -3116,7 +3135,7 @@ impl Driver {
     fn get_discriminant(&mut self, b: &mut FunctionBuilder, val: Value) -> InstrId {
         // TODO: handle indirect enum discriminant accesses, without loading the entire value.
         let val = self.handle_indirection(b, val);
-        self.push_instr_with_name(b, InstrKind::DiscriminantAccess { val }, val, format!("{}.disc", self.display_instr_name(val)))
+        self.push_instr_with_name(b, InstrKind::DiscriminantAccess { val }, val, format!("{}.disc", self.display_instr_name_from_builder(b, val)))
     }
 
     fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> InstrId {
@@ -3210,7 +3229,7 @@ impl DriverRwRef<'_> {
             },
             DataDest::Receive { value } => {
                 let location = self.write().handle_indirection(b, val.get_address());
-                let range = self.read().get_range(location) + self.read().get_range(value);
+                let range = self.read().get_range_with_mir_ctx(location, &b.source_ranges) + self.read().get_range_with_mir_ctx(value, &b.source_ranges);
                 self.write().push_instr(b, InstrKind::Store { location, value }, range);
             },
             DataDest::Void => {},

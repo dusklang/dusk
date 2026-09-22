@@ -11,7 +11,7 @@ use crate::index_vec::{IndexVec, define_index_type};
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
-use crate::mir::Const;
+use crate::mir::{Const, InstrId};
 use crate::index_counter::IndexCounter;
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
@@ -1360,7 +1360,17 @@ impl Driver {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
             }
-            ToSourceRange::Instr(instr) => *self.mir.source_ranges.get(&instr).unwrap(),
+            ToSourceRange::Instr(_) => SourceRange::default(),
+            ToSourceRange::SourceRange(range) => range,
+        }
+    }
+    pub fn get_range_with_mir_ctx(&self, item: impl Into<ToSourceRange>, source_ranges: &HashMap<InstrId, SourceRange>) -> SourceRange {
+        match item.into() {
+            ToSourceRange::Item(item) => match item {
+                Item::Expr(expr) => ef!(expr.range),
+                Item::Decl(decl) => df!(decl.range),
+            }
+            ToSourceRange::Instr(instr) => source_ranges[&instr],
             ToSourceRange::SourceRange(range) => range,
         }
     }
