@@ -139,7 +139,7 @@ impl InstrEncoder {
 
 impl Drop for InstrEncoder {
     fn drop(&mut self) {
-        panic!("must call Instr::get_instr()")
+        panic!("must call InstrEncoder::get_instr()")
     }
 }
 

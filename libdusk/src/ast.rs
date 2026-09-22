@@ -1360,7 +1360,7 @@ impl Driver {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
             }
-            ToSourceRange::Op(op) => *self.mir.source_ranges.get(&op).unwrap(),
+            ToSourceRange::Instr(op) => *self.mir.source_ranges.get(&op).unwrap(),
             ToSourceRange::SourceRange(range) => range,
         }
     }

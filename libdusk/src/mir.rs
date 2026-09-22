@@ -11,8 +11,6 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::{IndexVec, define_index_type};
 use crate::display_adapter;
 
-use crate::index_counter::IndexCounter;
-use crate::driver::{Block, BlockId, Op, OpId};
 use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScrutineeValueId, TypedSwitchScrutineeValue, TypedSwitchScrutineeValueKind};
 use crate::source_info::SourceRange;
 
@@ -34,13 +32,34 @@ define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
 define_index_type!(pub struct StrId = u32;);
 define_index_type!(pub struct InstrId = u32;);
+define_index_type!(pub struct BlockId = u32;);
 
-pub const VOID_INSTR: OpId = OpId::from_usize_unchecked(0);
+pub const VOID_INSTR: InstrId = InstrId::from_usize_unchecked(0);
+
+#[derive(Clone, Debug)]
+pub struct Instr {
+    pub kind: InstrKind,
+    pub ty: Type,
+}
+
+impl Instr {
+    pub fn new(kind: InstrKind, ty: Type) -> Self {
+        Self {
+            kind,
+            ty,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Block {
+    pub instrs: Vec<InstrId>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct JumpTarget {
     pub bb: BlockId,
-    pub arguments: SmallVec<[OpId; 2]>,
+    pub arguments: SmallVec<[InstrId; 2]>,
 }
 
 impl From<BlockId> for JumpTarget {
@@ -56,52 +75,52 @@ pub struct SwitchCase {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Instr {
+pub enum InstrKind {
     Void,
     Invalid, // Used temporarily when copying functions
     Const(Const),
     Alloca(Type),
-    LogicalNot(OpId),
-    Call { arguments: SmallVec<[OpId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
-    ExternCall { arguments: SmallVec<[OpId; 2]>, func: ExternFunctionRef },
+    LogicalNot(InstrId),
+    Call { arguments: SmallVec<[InstrId; 2]>, generic_arguments: Vec<Type>, func: FuncId },
+    ExternCall { arguments: SmallVec<[InstrId; 2]>, func: ExternFunctionRef },
     ObjcClassRef { extern_mod: ExternModId, index: usize },
     FunctionRef { generic_arguments: Vec<Type>, func: FuncId, },
-    LegacyIntrinsic { arguments: SmallVec<[OpId; 2]>, ty: Type, intr: LegacyIntrinsic },
-    Intrinsic { arguments: SmallVec<[OpId; 2]>, intr: IntrinsicId },
-    Reinterpret(OpId, Type),
-    Truncate(OpId, Type),
-    SignExtend(OpId, Type),
-    ZeroExtend(OpId, Type),
-    FloatCast(OpId, Type),
-    FloatToInt(OpId, Type),
-    IntToFloat(OpId, Type),
-    Load(OpId),
-    Store { location: OpId, value: OpId },
+    LegacyIntrinsic { arguments: SmallVec<[InstrId; 2]>, ty: Type, intr: LegacyIntrinsic },
+    Intrinsic { arguments: SmallVec<[InstrId; 2]>, intr: IntrinsicId },
+    Reinterpret(InstrId, Type),
+    Truncate(InstrId, Type),
+    SignExtend(InstrId, Type),
+    ZeroExtend(InstrId, Type),
+    FloatCast(InstrId, Type),
+    FloatToInt(InstrId, Type),
+    IntToFloat(InstrId, Type),
+    Load(InstrId),
+    Store { location: InstrId, value: InstrId },
     AddressOfStatic(StaticId),
-    Pointer { op: OpId, is_mut: bool },
-    Struct { fields: SmallVec<[OpId; 2]>, id: StructId },
-    Enum { variants: SmallVec<[OpId; 2]>, id: EnumId },
-    FunctionTy { param_tys: Vec<OpId>, has_c_variadic_param: bool, ret_ty: OpId },
-    StructLit { fields: SmallVec<[OpId; 2]>, id: StructId },
-    DirectFieldAccess { val: OpId, index: usize },
-    IndirectFieldAccess { val: OpId, index: usize },
-    InternalFieldAccess { val: OpId, field: InternalField },
-    Variant { enuum: EnumId, index: usize, payload: OpId },
-    DiscriminantAccess { val: OpId },
-    PayloadAccess { val: OpId, variant_index: usize },
-    Ret(OpId),
+    Pointer { op: InstrId, is_mut: bool },
+    Struct { fields: SmallVec<[InstrId; 2]>, id: StructId },
+    Enum { variants: SmallVec<[InstrId; 2]>, id: EnumId },
+    FunctionTy { param_tys: Vec<InstrId>, has_c_variadic_param: bool, ret_ty: InstrId },
+    StructLit { fields: SmallVec<[InstrId; 2]>, id: StructId },
+    DirectFieldAccess { val: InstrId, index: usize },
+    IndirectFieldAccess { val: InstrId, index: usize },
+    InternalFieldAccess { val: InstrId, field: InternalField },
+    Variant { enuum: EnumId, index: usize, payload: InstrId },
+    DiscriminantAccess { val: InstrId },
+    PayloadAccess { val: InstrId, variant_index: usize },
+    Ret(InstrId),
     Jump(JumpTarget),
-    CondBr { condition: OpId, true_target: JumpTarget, false_target: JumpTarget },
-    SwitchBr { scrutinee: OpId, cases: Vec<SwitchCase>, catch_all_target: JumpTarget },
-    /// This variant currently exists (rather than just stuffing a constant `Type` into `Instr::Const()`) so that we
+    CondBr { condition: InstrId, true_target: JumpTarget, false_target: JumpTarget },
+    SwitchBr { scrutinee: InstrId, cases: Vec<SwitchCase>, catch_all_target: JumpTarget },
+    /// This variant currently exists (rather than just stuffing a constant `Type` into `InstrKind::Const()`) so that we
     /// know to lookup the generic param instead of preserving it as-is.
     GenericParam(GenericParamId),
     /// Only valid at the beginning of a function, right after the void instruction
-    // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Op
+    // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Instr
     Parameter(Type),
 }
 
-impl Instr {
+impl InstrKind {
     pub fn replace_bb(&mut self, old: BlockId, new: BlockId) {
         fn replace(target: &mut JumpTarget, old: BlockId, new: BlockId) {
             // TODO: handle basic block arguments (currently not needed by any callers of this method)
@@ -111,12 +130,12 @@ impl Instr {
             }
         }
         match self {
-            Instr::Jump(target) => replace(target, old, new),
-            Instr::CondBr { true_target, false_target, .. } => {
+            InstrKind::Jump(target) => replace(target, old, new),
+            InstrKind::CondBr { true_target, false_target, .. } => {
                 replace(true_target, old, new);
                 replace(false_target, old, new);
             },
-            Instr::SwitchBr { cases, catch_all_target, .. } => {
+            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                 for case in cases {
                     replace(&mut case.target, old, new);
                 }
@@ -127,83 +146,83 @@ impl Instr {
     }
 
     // TODO: allocating a Vec here sucks!
-    pub fn referenced_values(&self) -> Vec<OpId> {
+    pub fn referenced_values(&self) -> Vec<InstrId> {
         match *self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => vec![],
-            Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
-                | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
-                | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
-                | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
-                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
-                | Instr::InternalFieldAccess { val: op, .. } => vec![op],
-            Instr::Store { location, value } => vec![location, value],
-            Instr::Call { arguments: ref ops, .. } | Instr::ExternCall { arguments: ref ops, .. }
-                | Instr::LegacyIntrinsic { arguments: ref ops, .. } | Instr::Struct { fields: ref ops, .. }
-                | Instr::Enum { variants: ref ops, .. } | Instr::StructLit { fields: ref ops, .. }
-                | Instr::Intrinsic { arguments: ref ops, .. } => ops.iter().copied().collect(),
-            Instr::FunctionTy { ref param_tys, ret_ty, .. } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
-            Instr::Jump(ref target) => target.arguments.iter().copied().collect(),
-            Instr::CondBr { condition: op, ref true_target, ref false_target } => std::iter::once(op)
+            InstrKind::Void | InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
+                | InstrKind::GenericParam(_) | InstrKind::Parameter(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => vec![],
+            InstrKind::LogicalNot(op) | InstrKind::Reinterpret(op, _) | InstrKind::Truncate(op, _) | InstrKind::SignExtend(op, _)
+                | InstrKind::ZeroExtend(op, _) | InstrKind::FloatCast(op, _) | InstrKind::FloatToInt(op, _)
+                | InstrKind::IntToFloat(op, _) | InstrKind::Load(op) | InstrKind::Pointer { op, .. }
+                | InstrKind::DirectFieldAccess { val: op, .. } | InstrKind::IndirectFieldAccess { val: op, .. }
+                | InstrKind::DiscriminantAccess { val: op } | InstrKind::Ret(op) | InstrKind::Variant { payload: op, .. } | InstrKind::PayloadAccess { val: op, .. }
+                | InstrKind::InternalFieldAccess { val: op, .. } => vec![op],
+            InstrKind::Store { location, value } => vec![location, value],
+            InstrKind::Call { arguments: ref instrs, .. } | InstrKind::ExternCall { arguments: ref instrs, .. }
+                | InstrKind::LegacyIntrinsic { arguments: ref instrs, .. } | InstrKind::Struct { fields: ref instrs, .. }
+                | InstrKind::Enum { variants: ref instrs, .. } | InstrKind::StructLit { fields: ref instrs, .. }
+                | InstrKind::Intrinsic { arguments: ref instrs, .. } => instrs.iter().copied().collect(),
+            InstrKind::FunctionTy { ref param_tys, ret_ty, .. } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
+            InstrKind::Jump(ref target) => target.arguments.iter().copied().collect(),
+            InstrKind::CondBr { condition: op, ref true_target, ref false_target } => std::iter::once(op)
                 .chain(true_target.arguments.iter().copied())
                 .chain(false_target.arguments.iter().copied())
                 .collect(),
-            Instr::SwitchBr { scrutinee: op, ref cases, ref catch_all_target } => std::iter::once(op)
+            InstrKind::SwitchBr { scrutinee: op, ref cases, ref catch_all_target } => std::iter::once(op)
                 .chain(cases.iter().flat_map(|case| case.target.arguments.iter().copied()))
                 .chain(catch_all_target.arguments.iter().copied())
                 .collect()
         }
     }
 
-    pub fn references_value(&self, val: OpId) -> bool {
+    pub fn references_value(&self, val: InstrId) -> bool {
         self.referenced_values().contains(&val)
     }
 
-    pub fn replace_value(&mut self, old: OpId, new: OpId) {
-        fn replace(target: &mut OpId, old: OpId, new: OpId) {
+    pub fn replace_value(&mut self, old: InstrId, new: InstrId) {
+        fn replace(target: &mut InstrId, old: InstrId, new: InstrId) {
             if *target == old {
                 *target = new;
             }
         }
-        fn replace_args(target: &mut JumpTarget, old: OpId, new: OpId) {
+        fn replace_args(target: &mut JumpTarget, old: InstrId, new: InstrId) {
             for arg in &mut target.arguments {
                 replace(arg, old, new);
             }
         }
         match self {
-            Instr::Void | Instr::Const(_) | Instr::Alloca(_) | Instr::AddressOfStatic(_)
-                | Instr::GenericParam(_) | Instr::Parameter(_) | Instr::FunctionRef { .. } | Instr::Invalid | Instr::ObjcClassRef { .. } => {},
-            Instr::LogicalNot(op) | Instr::Reinterpret(op, _) | Instr::Truncate(op, _) | Instr::SignExtend(op, _)
-                | Instr::ZeroExtend(op, _) | Instr::FloatCast(op, _) | Instr::FloatToInt(op, _)
-                | Instr::IntToFloat(op, _) | Instr::Load(op) | Instr::Pointer { op, .. }
-                | Instr::DirectFieldAccess { val: op, .. } | Instr::IndirectFieldAccess { val: op, .. }
-                | Instr::DiscriminantAccess { val: op } | Instr::Ret(op) | Instr::Variant { payload: op, .. } | Instr::PayloadAccess { val: op, .. }
-                | Instr::InternalFieldAccess { val: op, .. } => replace(op, old, new),
-            Instr::Store { location, value } => {
+            InstrKind::Void | InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
+                | InstrKind::GenericParam(_) | InstrKind::Parameter(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => {},
+            InstrKind::LogicalNot(op) | InstrKind::Reinterpret(op, _) | InstrKind::Truncate(op, _) | InstrKind::SignExtend(op, _)
+                | InstrKind::ZeroExtend(op, _) | InstrKind::FloatCast(op, _) | InstrKind::FloatToInt(op, _)
+                | InstrKind::IntToFloat(op, _) | InstrKind::Load(op) | InstrKind::Pointer { op, .. }
+                | InstrKind::DirectFieldAccess { val: op, .. } | InstrKind::IndirectFieldAccess { val: op, .. }
+                | InstrKind::DiscriminantAccess { val: op } | InstrKind::Ret(op) | InstrKind::Variant { payload: op, .. } | InstrKind::PayloadAccess { val: op, .. }
+                | InstrKind::InternalFieldAccess { val: op, .. } => replace(op, old, new),
+            InstrKind::Store { location, value } => {
                 replace(location, old, new);
                 replace(value, old, new);
             },
-            Instr::Call { arguments: ops, .. } | Instr::ExternCall { arguments: ops, .. }
-                | Instr::LegacyIntrinsic { arguments: ops, .. } | Instr::Struct { fields: ops, .. }
-                | Instr::Enum { variants: ops, .. } | Instr::StructLit { fields: ops, .. }
-                | Instr::Intrinsic { arguments: ops, .. } => {
-                    for op in ops {
+            InstrKind::Call { arguments: instrs, .. } | InstrKind::ExternCall { arguments: instrs, .. }
+                | InstrKind::LegacyIntrinsic { arguments: instrs, .. } | InstrKind::Struct { fields: instrs, .. }
+                | InstrKind::Enum { variants: instrs, .. } | InstrKind::StructLit { fields: instrs, .. }
+                | InstrKind::Intrinsic { arguments: instrs, .. } => {
+                    for op in instrs {
                         replace(op, old, new);
                     }
                 }
-            Instr::FunctionTy { param_tys, ret_ty, .. } => {
+            InstrKind::FunctionTy { param_tys, ret_ty, .. } => {
                 for op in param_tys {
                     replace(op, old, new);
                 }
                 replace(ret_ty, old, new);
             },
-            Instr::Jump(target) => replace_args(target, old, new),
-            Instr::CondBr { condition: op, true_target, false_target } => {
+            InstrKind::Jump(target) => replace_args(target, old, new),
+            InstrKind::CondBr { condition: op, true_target, false_target } => {
                 replace(op, old, new);
                 replace_args(true_target, old, new);
                 replace_args(false_target, old, new);
             },
-            Instr::SwitchBr { scrutinee: op, cases, catch_all_target } => {
+            InstrKind::SwitchBr { scrutinee: op, cases, catch_all_target } => {
                 replace(op, old, new);
                 for case in cases {
                     replace_args(&mut case.target, old, new);
@@ -280,7 +299,6 @@ impl InstrNamespace {
 pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
-    pub num_instrs: usize,
     /// Index 0 is defined to be the entry block
     pub blocks: Vec<BlockId>,
     pub decl: Option<DeclId>,
@@ -296,7 +314,6 @@ impl Default for Function {
         Self {
             name: Default::default(),
             ty: Default::default(),
-            num_instrs: Default::default(),
             blocks: Default::default(),
             decl: Default::default(),
             generic_params: empty_range(),
@@ -310,10 +327,10 @@ impl Driver {
     pub fn parameter_tys(&self, func: &Function) -> impl Iterator<Item=&Type> {
         let entry = func.blocks[0];
         let block = &self.blocks[entry];
-        block.ops.iter()
+        block.instrs.iter()
             .filter_map(|&op| {
-                match self.ops[op].as_mir_instr().unwrap() {
-                    Instr::Parameter(ty) => Some(ty),
+                match &self.instrs[op].kind {
+                    InstrKind::Parameter(ty) => Some(ty),
                     _ => None,
                 }
             })
@@ -330,6 +347,15 @@ impl Driver {
             write!(w, "%bb{}:\n{}", block.index(), self.display_block(block))?;
         }
         writeln!(w, "}}")?;
+        Ok(())
+    }
+
+    #[display_adapter]
+    pub fn display_block(&self, block: BlockId, w: &mut Formatter) {
+        let block = &self.blocks[block];
+        for &id in &block.instrs {
+            writeln!(w, "    %instr{} = mir.{:?}", id.index(), self.instrs[id].kind)?;
+        }
         Ok(())
     }
 }
@@ -380,12 +406,12 @@ pub struct Mir {
     pub statics: IndexVec<StaticId, Static>,
     pub extern_mods: HashMap<ExternModId, ExternMod>,
     pub enums: HashMap<EnumId, EnumLayout>,
-    pub source_ranges: HashMap<OpId, SourceRange>,
-    pub instr_names: HashMap<OpId, String>,
+    pub source_ranges: HashMap<InstrId, SourceRange>,
+    pub instr_names: HashMap<InstrId, String>,
     decls: HashMap<DeclId, Decl>,
 
     // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
-    pub poisoned_ops: HashSet<OpId>,
+    pub poisoned_instrs: HashSet<InstrId>,
 
     block_states: HashMap<BlockId, BlockState>,
 }
@@ -411,7 +437,7 @@ impl Mir {
             enums: HashMap::new(),
             source_ranges: HashMap::new(),
             instr_names: HashMap::new(),
-            poisoned_ops: HashSet::new(),
+            poisoned_instrs: HashSet::new(),
             block_states: HashMap::new(),
             decls: HashMap::new(),
         }
@@ -490,7 +516,7 @@ enum DataDest {
     /// This value needs to be returned from the current function
     Ret,
     /// A particular value needs to be assigned to this value
-    Receive { value: OpId },
+    Receive { value: InstrId },
     /// Jump to a particular basic block argument, with this value as an argument
     JumpWithArgument(BlockId),
     /// This value just needs to be read
@@ -503,7 +529,7 @@ enum DataDest {
 
 #[derive(Debug, Copy, Clone)]
 struct Value {
-    instr: OpId,
+    instr: InstrId,
     /// The number of pointer hops the value is away from instr.
     ///     Positive values => number of layers of indirection
     ///     Negative values => number of times the pointer has been dereferenced
@@ -535,7 +561,7 @@ trait Indirection {
     fn indirect(self) -> Value;
 }
 
-impl Indirection for OpId {
+impl Indirection for InstrId {
     fn direct(self) -> Value {
         Value {
             instr: self,
@@ -558,7 +584,7 @@ enum ControlDest {
     Unreachable,
     Jump(BlockId),
     IncrementVariableAndThenJump {
-        location: OpId,
+        location: InstrId,
         target: BlockId,
     },
     RetVoid,
@@ -1103,7 +1129,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_instr_name(&self, item: OpId, f: &mut Formatter) {
+    pub fn display_instr_name(&self, item: InstrId, f: &mut Formatter) {
         write!(f, "{}", self.mir.instr_names.get(&item).cloned()
             .unwrap_or_else(|| format!("instr{}", item.index())))
     }
@@ -1128,8 +1154,8 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_mir_instr(&self, op_id: OpId, f: &mut Formatter) {
-        let instr = self.ops[op_id].as_mir_instr().unwrap();
+    pub fn display_mir_instr(&self, op_id: InstrId, f: &mut Formatter) {
+        let instr = &self.instrs[op_id].kind;
         macro_rules! write_args {
             ($args:expr) => {{
                 write!(f, "(")?;
@@ -1163,70 +1189,70 @@ impl Driver {
             }}
         }
         match instr {
-            Instr::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
-            Instr::Jump(block) => write!(f, "jump {}", self.display_branch_target(block))?,
-            &Instr::CondBr { condition, ref true_target, ref false_target }
+            InstrKind::Alloca(ty) => write!(f, "%{} = alloca {:?}", self.display_instr_name(op_id), ty)?,
+            InstrKind::Jump(block) => write!(f, "jump {}", self.display_branch_target(block))?,
+            &InstrKind::CondBr { condition, ref true_target, ref false_target }
                 => write!(f, "condbr %{}, {}, {}", self.display_instr_name(condition), self.display_branch_target(true_target), self.display_branch_target(false_target))?,
-            &Instr::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
+            &InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
                 write!(f, "switchbr %{} : ", self.display_instr_name(scrutinee))?;
                 for case in cases {
                     write!(f, "case {} => {}, ", self.display_const(&case.value), self.display_branch_target(&case.target))?;
                 }
                 write!(f, "else => {}", self.display_branch_target(catch_all_target))?;
             }
-            &Instr::Call { ref arguments, func: callee, ref generic_arguments } => {
+            &InstrKind::Call { ref arguments, func: callee, ref generic_arguments } => {
                 write!(f, "%{} = call `{}`", self.display_instr_name(op_id), self.fn_name(self.mir.functions[callee].name))?;
                 write_generic_args!(generic_arguments);
                 write_args!(arguments);
             },
-            &Instr::FunctionRef { func: callee, ref generic_arguments } => {
+            &InstrKind::FunctionRef { func: callee, ref generic_arguments } => {
                 write!(f, "%{} = function_ref `{}`", self.display_instr_name(op_id), self.fn_name(self.mir.functions[callee].name))?;
                 write_generic_args!(generic_arguments);
             },
-            &Instr::ExternCall { ref arguments, func: callee, .. } => {
+            &InstrKind::ExternCall { ref arguments, func: callee, .. } => {
                 let extern_mod = &self.mir.extern_mods[&callee.extern_mod];
                 let callee_func = &extern_mod.imported_functions[callee.index];
                 write!(f, "%{} = externcall `{}`", self.display_instr_name(op_id), callee_func.name)?;
                 write_args!(arguments);
                 write!(f, " from {:?}", extern_mod.library_path)?
             },
-            &Instr::ObjcClassRef { extern_mod, index } => write!(
+            &InstrKind::ObjcClassRef { extern_mod, index } => write!(
                 f,
                 "%{} = objc_class_ref `{}` from {:?}",
                 self.display_instr_name(op_id),
                 self.ast.extern_mods[extern_mod].objc_class_references[index],
                 self.mir.extern_mods[&extern_mod].library_path
             )?,
-            Instr::Const(konst) => {
+            InstrKind::Const(konst) => {
                 write!(f, "%{} = {}", self.display_instr_name(op_id), self.display_const(konst))?;
             },
-            Instr::LegacyIntrinsic { arguments, intr, .. } => {
+            InstrKind::LegacyIntrinsic { arguments, intr, .. } => {
                 write!(f, "%{} = intrinsic `{}`", self.display_instr_name(op_id), intr.name())?;
                 write_args!(arguments);
             },
-            Instr::Intrinsic { arguments, intr, .. } => {
+            InstrKind::Intrinsic { arguments, intr, .. } => {
                 write!(f, "%{} = new_style_intrinsic `{}`", self.display_instr_name(op_id), self.ast.intrinsics[*intr].name)?;
                 write_args!(arguments);
             },
-            &Instr::Pointer { op, is_mut } => {
+            &InstrKind::Pointer { op, is_mut } => {
                 write!(f, "%{} = %{} *", self.display_instr_name(op_id), self.display_instr_name(op))?;
                 if is_mut {
                     write!(f, "mut")?
                 }
             },
-            &Instr::Load(location) => write!(f, "%{} = load %{}", self.display_instr_name(op_id), self.display_instr_name(location))?,
-            &Instr::LogicalNot(op) => write!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
-            &Instr::Ret(val) => write!(f,  "return %{}", self.display_instr_name(val))?,
-            &Instr::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
-            &Instr::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.mir.statics[statik].name)?,
-            &Instr::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::Truncate(val, ref ty) => write!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::FloatCast(val, ref ty) => write!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::IntToFloat(val, ref ty) => write!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::FloatToInt(val, ref ty) => write!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
-            &Instr::Struct { ref fields, id } => {
+            &InstrKind::Load(location) => write!(f, "%{} = load %{}", self.display_instr_name(op_id), self.display_instr_name(location))?,
+            &InstrKind::LogicalNot(op) => write!(f, "%{} = not %{}", self.display_instr_name(op_id), self.display_instr_name(op))?,
+            &InstrKind::Ret(val) => write!(f,  "return %{}", self.display_instr_name(val))?,
+            &InstrKind::Store { location, value } => write!(f, "store %{} in %{}", self.display_instr_name(value), self.display_instr_name(location))?,
+            &InstrKind::AddressOfStatic(statik) => write!(f, "%{} = address of static %{}", self.display_instr_name(op_id), self.mir.statics[statik].name)?,
+            &InstrKind::Reinterpret(val, ref ty) => write!(f, "%{} = reinterpret %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::SignExtend(val, ref ty) => write!(f, "%{} = sign-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::ZeroExtend(val, ref ty) => write!(f, "%{} = zero-extend %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::Truncate(val, ref ty) => write!(f, "%{} = truncate %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::FloatCast(val, ref ty) => write!(f, "%{} = floatcast %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::IntToFloat(val, ref ty) => write!(f, "%{} = inttofloat %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::FloatToInt(val, ref ty) => write!(f, "%{} = floattoint %{} as {:?}", self.display_instr_name(op_id), self.display_instr_name(val), ty)?,
+            &InstrKind::Struct { ref fields, id } => {
                 write!(f, "%{} = define struct{} {{ ", self.display_instr_name(op_id), id.index())?;
                 for i in 0..fields.len() {
                     write!(f, "%{}", self.display_instr_name(fields[i]))?;
@@ -1237,7 +1263,7 @@ impl Driver {
                 }
                 write!(f, "}}")?;
             },
-            &Instr::StructLit { ref fields, id } => {
+            &InstrKind::StructLit { ref fields, id } => {
                 write!(f, "%{} = literal struct{} {{ ", self.display_instr_name(op_id), id.index())?;
                 for i in 0..fields.len() {
                     write!(f, "%{}", self.display_instr_name(fields[i]))?;
@@ -1248,7 +1274,7 @@ impl Driver {
                 }
                 write!(f, "}}")?;
             },
-            &Instr::Enum { ref variants, id } => {
+            &InstrKind::Enum { ref variants, id } => {
                 write!(f, "%{} = define enum{} {{", self.display_instr_name(op_id), id.index())?;
 
                 for (i, variant) in self.ast.enums[id].variants.iter().enumerate() {
@@ -1264,7 +1290,7 @@ impl Driver {
 
                 write!(f, "}}")?;
             },
-            &Instr::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
+            &InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                 write!(f, "%{} = fn type (", self.display_instr_name(op_id))?;
                 for (i, &param) in param_tys.iter().enumerate() {
                     if i > 0 {
@@ -1280,7 +1306,7 @@ impl Driver {
                 }
                 write!(f, " -> {}", self.display_instr_name(ret_ty))?;
             },
-            &Instr::Variant { enuum, index, payload } => {
+            &InstrKind::Variant { enuum, index, payload } => {
                 let variant = &self.ast.enums[enuum].variants[index];
                 let variant_name = variant.name;
                 write!(f, "%{} = %enum{}.{}", self.display_instr_name(op_id), enuum.index(), self.interner.read().unwrap().resolve(variant_name).unwrap())?;
@@ -1288,18 +1314,18 @@ impl Driver {
                     write!(f, "(%{})", self.display_instr_name(payload))?
                 }
             },
-            &Instr::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
-            &Instr::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
-            &Instr::InternalFieldAccess { val, field } => write!(f, "%{} = %{}.{}", self.display_instr_name(op_id), self.display_instr_name(val), field.name())?,
-            &Instr::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
-            &Instr::PayloadAccess { val, variant_index } => write!(f, "%{} = payload of %{} using variant {}", self.display_instr_name(op_id), self.display_instr_name(val), variant_index)?,
+            &InstrKind::DirectFieldAccess { val, index } => write!(f, "%{} = %{}.field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+            &InstrKind::IndirectFieldAccess { val, index } => write!(f, "%{} = &(*%{}).field{}", self.display_instr_name(op_id), self.display_instr_name(val), index)?,
+            &InstrKind::InternalFieldAccess { val, field } => write!(f, "%{} = %{}.{}", self.display_instr_name(op_id), self.display_instr_name(val), field.name())?,
+            &InstrKind::DiscriminantAccess { val } => write!(f, "%{} = discriminant of %{}", self.display_instr_name(op_id), self.display_instr_name(val))?,
+            &InstrKind::PayloadAccess { val, variant_index } => write!(f, "%{} = payload of %{} using variant {}", self.display_instr_name(op_id), self.display_instr_name(val), variant_index)?,
             // TODO: instead of emitting these instructions as needed, add all generic params to the beginning of the MIR function as "hidden" values, just like normal parameters.
-            &Instr::GenericParam(param) => {
+            &InstrKind::GenericParam(param) => {
                 write!(f, "%{} = generic_param{}", self.display_instr_name(op_id), param.index())?
             },
-            Instr::Parameter(_) => {},
-            Instr::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(op_id))?,
-            Instr::Void => panic!("unexpected void!"),
+            InstrKind::Parameter(_) => {},
+            InstrKind::Invalid => write!(f, "%{} = invalid!", self.display_instr_name(op_id))?,
+            InstrKind::Void => panic!("unexpected void!"),
         };
         Ok(())
     }
@@ -1308,12 +1334,12 @@ impl Driver {
     pub fn display_mir_block(&self, block_index: usize, id: BlockId, f: &mut Formatter) {
         let block = &self.blocks[id];
         write!(f, "%bb{}", id.index())?;
-        if block_index > 0 && matches!(block.ops.first().and_then(|&op| self.ops[op].as_mir_instr()), Some(Instr::Parameter(_))) {
+        if block_index > 0 && matches!(block.instrs.first().map(|&op| &self.instrs[op].kind), Some(InstrKind::Parameter(_))) {
             write!(f, "(")?;
             let mut first = true;
-            for &op in &block.ops {
-                let instr = self.ops[op].as_mir_instr().unwrap();
-                if let Instr::Parameter(ty) = instr {
+            for &op in &block.instrs {
+                let instr = &self.instrs[op].kind;
+                if let InstrKind::Parameter(ty) = instr {
                     if first {
                         first = false;
                     } else {
@@ -1328,15 +1354,15 @@ impl Driver {
         }
         writeln!(f, ":")?;
         let mut start = 0;
-        for (i, &op) in block.ops.iter().enumerate() {
-            let instr = self.ops[op].as_mir_instr().unwrap();
-            if !matches!(instr, Instr::Parameter(_)) {
+        for (i, &op) in block.instrs.iter().enumerate() {
+            let instr = &self.instrs[op].kind;
+            if !matches!(instr, InstrKind::Parameter(_)) {
                 start = i;
                 break;
             }
         }
 
-        for &op_id in &block.ops[start..] {
+        for &op_id in &block.instrs[start..] {
             writeln!(f, "    {}", self.display_mir_instr(op_id))?;
         }
         Ok(())
@@ -1365,9 +1391,9 @@ impl Driver {
         write!(f, "(")?;
         let entry_block = &self.blocks[func.blocks[0]];
         let mut first = true;
-        for &op in &entry_block.ops {
-            let instr = self.ops[op].as_mir_instr().unwrap();
-            if let Instr::Parameter(ty) = instr {
+        for &op in &entry_block.instrs {
+            let instr = &self.instrs[op].kind;
+            if let InstrKind::Parameter(ty) = instr {
                 if first {
                     first = false;
                 } else {
@@ -1409,23 +1435,22 @@ impl Driver {
 enum FunctionBody {
     Scope { scope: ImperScopeId, decl: DeclId },
     Expr(ExprId),
-    ConstantInstruction(OpId),
+    ConstantInstruction(InstrId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct LoopState {
     break_block: BlockId,
     continue_block: BlockId,
-    continue_location_of_variable_to_increment: Option<OpId>,
+    continue_location_of_variable_to_increment: Option<InstrId>,
 }
 
 struct FunctionBuilder {
     name: Option<Sym>,
     ty: FunctionType,
-    instrs: IndexCounter<InstrId>,
     blocks: Vec<BlockId>,
     current_block: BlockId,
-    stored_decl_locs: IndexVec<StoredDeclId, OpId>,
+    stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
     instr_namespace: InstrNamespace,
     loops: IndexVec<LoopId, LoopState>,
     pattern_matching_scrutinees: HashMap<PatternMatchingContextId, HashMap<SwitchScrutineeValueId, Value>>,
@@ -1460,16 +1485,16 @@ impl Driver {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.display_block(bb));
         }
         let block = &self.blocks[bb];
-        let last_instr = self.ops[block.ops.last().copied().unwrap()].as_mir_instr().unwrap();
+        let last_instr = &self.instrs[block.instrs.last().copied().unwrap()].kind;
         assert!(
-            matches!(last_instr, Instr::Jump(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } | Instr::Ret { .. } | Instr::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
+            matches!(last_instr, InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } | InstrKind::Ret { .. } | InstrKind::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
             last_instr,
         );
     }
 
-    pub fn type_of(&self, instr: OpId) -> &Type {
-        self.ops[instr].get_mir_instr_type().unwrap()
+    pub fn type_of(&self, instr: InstrId) -> &Type {
+        &self.instrs[instr].ty
     }
 }
 
@@ -1479,29 +1504,25 @@ impl DriverRwRef<'_> {
 
         let mut entry = Block::default();
         let mut instr_namespace = InstrNamespace::default();
-        let mut instrs = IndexCounter::new();
-        instrs.next_idx(); // void
         for param in range_iter(params.clone()) {
             let d = self.read();
             assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
             drop(d);
             let ty = self.read().decl_type(param, tp);
-            let instr = Instr::Parameter(ty.clone());
-            let instr_id = instrs.next_idx();
-            let op = self.write().ops.push(Op::MirInstr(instr, instr_id, ty));
+            let instr = InstrKind::Parameter(ty.clone());
+            let id = self.write().instrs.push(Instr::new(instr, ty));
             let d = self.read();
             let range = df!(d, param.range);
             drop(d);
             let name = instr_namespace.insert(self.read().display_item(range).to_string());
-            self.write().mir.source_ranges.insert(op, range);
-            self.write().mir.instr_names.insert(op, name);
-            entry.ops.push(op);
+            self.write().mir.source_ranges.insert(id, range);
+            self.write().mir.instr_names.insert(id, name);
+            entry.instrs.push(id);
         }
         let entry = self.write().blocks.push(entry);
         let mut b = FunctionBuilder {
             name,
             ty: func_ty,
-            instrs,
             blocks: vec![entry],
             current_block: entry,
             stored_decl_locs: IndexVec::new(),
@@ -1521,22 +1542,22 @@ impl DriverRwRef<'_> {
                 Some(decl)
             },
             FunctionBody::ConstantInstruction(op) => {
-                let instruction = self.read().ops[op].as_mir_instr().unwrap().clone();
+                let instruction = self.read().instrs[op].kind.clone();
                 match instruction {
-                    Instr::LegacyIntrinsic { arguments, .. } | Instr::Call { arguments, .. } => {
+                    InstrKind::LegacyIntrinsic { arguments, .. } | InstrKind::Call { arguments, .. } => {
                         let mut copier = MirCopier::default();
                         for arg in arguments {
                             self.copy_instruction_if_needed(&mut b, &mut copier, arg);
                         }
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
-                        self.write().push_instr(&mut b, Instr::Ret(result), result);
+                        self.write().push_instr(&mut b, InstrKind::Ret(result), result);
                         self.write().end_current_bb(&b);
                     },
-                    Instr::DiscriminantAccess { val } | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _) => {
+                    InstrKind::DiscriminantAccess { val } | InstrKind::SignExtend(val, _) | InstrKind::ZeroExtend(val, _) => {
                         let mut copier = MirCopier::default();
                         self.copy_instruction_if_needed(&mut b, &mut copier, val);
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, op);
-                        self.write().push_instr(&mut b, Instr::Ret(result), result);
+                        self.write().push_instr(&mut b, InstrKind::Ret(result), result);
                         self.write().end_current_bb(&b);
                     }
                     _ => unimplemented!("{:?}", instruction),
@@ -1547,7 +1568,6 @@ impl DriverRwRef<'_> {
         let mut function = Function {
             name: b.name,
             ty: b.ty,
-            num_instrs: b.instrs.len(),
             blocks: b.blocks,
             instr_namespace: b.instr_namespace,
             decl,
@@ -1571,26 +1591,26 @@ impl DriverRwRef<'_> {
 
 #[derive(Default)]
 struct MirTransformer {
-    delete_list: HashSet<OpId>,
-    ref_replace_list: Vec<(OpId, OpId)>,
-    replace_list: Vec<(OpId, Instr)>,
+    delete_list: HashSet<InstrId>,
+    ref_replace_list: Vec<(InstrId, InstrId)>,
+    replace_list: Vec<(InstrId, InstrKind)>,
 }
 
 impl MirTransformer {
-    fn q_delete_and_replace_references(&mut self, to_delete: OpId, to_replace_with: OpId) {
+    fn q_delete_and_replace_references(&mut self, to_delete: InstrId, to_replace_with: InstrId) {
         self.delete_list.insert(to_delete);
         self.ref_replace_list.push((to_delete, to_replace_with));
     }
 
-    fn q_delete(&mut self, to_delete: OpId) {
+    fn q_delete(&mut self, to_delete: InstrId) {
         self.delete_list.insert(to_delete);
     }
 
-    fn q_delete_items(&mut self, to_delete: impl IntoIterator<Item=OpId>) {
+    fn q_delete_items(&mut self, to_delete: impl IntoIterator<Item=InstrId>) {
         self.delete_list.extend(to_delete);
     }
 
-    fn q_replace_instr(&mut self, to_replace: OpId, instr: Instr) {
+    fn q_replace_instr(&mut self, to_replace: InstrId, instr: InstrKind) {
         self.replace_list.push((to_replace, instr));
     }
 
@@ -1601,15 +1621,15 @@ impl MirTransformer {
 
         for &block_id in &func.blocks {
             let block = &mut d.blocks[block_id];
-            block.ops.retain(|op| !self.delete_list.contains(op));
-            for &op in &block.ops {
+            block.instrs.retain(|op| !self.delete_list.contains(op));
+            for &op in &block.instrs {
                 for &(old, new) in &self.ref_replace_list {
-                    d.ops[op].as_mir_instr_mut().unwrap().replace_value(old, new);
+                    d.instrs[op].kind.replace_value(old, new);
                 }
             }
         }
         for (id, new_instr) in self.replace_list {
-            *d.ops[id].as_mir_instr_mut().unwrap() = new_instr;
+            d.instrs[id].kind = new_instr;
         }
 
         true
@@ -1622,13 +1642,13 @@ impl Driver {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.blocks[block_id];
-            for (i, &op_id) in block.ops.iter().enumerate() {
-                let instr = self.ops[op_id].as_mir_instr().unwrap();
-                if let &Instr::Store { location, value } = instr
-                    && i + 1 < block.ops.len() {
-                        let next_op = block.ops[i+1];
-                        let next_instr = self.ops[next_op].as_mir_instr().unwrap();
-                        if let &Instr::Load(load_loc) = next_instr
+            for (i, &op_id) in block.instrs.iter().enumerate() {
+                let instr = &self.instrs[op_id].kind;
+                if let &InstrKind::Store { location, value } = instr
+                    && i + 1 < block.instrs.len() {
+                        let next_op = block.instrs[i+1];
+                        let next_instr = &self.instrs[next_op].kind;
+                        if let &InstrKind::Load(load_loc) = next_instr
                             && load_loc == location {
                                 transformer.q_delete_and_replace_references(next_op, value);
                             }
@@ -1642,18 +1662,18 @@ impl Driver {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.blocks[block_id];
-            for &op_id in &block.ops {
-                let instr = self.ops[op_id].as_mir_instr().unwrap();
+            for &op_id in &block.instrs {
+                let instr = &self.instrs[op_id].kind;
                 let mut potential_deletions = Vec::new();
-                if let Instr::Alloca(_) = instr {
+                if let InstrKind::Alloca(_) = instr {
                     let mut is_used = false;
                     'check_uses: for &other_block_id in &func.blocks {
                         let other_block = &self.blocks[other_block_id];
 
-                        for &other_op_id in &other_block.ops {
-                            let other_instr = self.ops[other_op_id].as_mir_instr().unwrap();
+                        for &other_op_id in &other_block.instrs {
+                            let other_instr = &self.instrs[other_op_id].kind;
                             if other_instr.references_value(op_id) {
-                                if let &Instr::Store { value, .. } = other_instr {
+                                if let &InstrKind::Store { value, .. } = other_instr {
                                     // If the address of the alloca is used as the *value* in the store, then we can't
                                     // delete either instruction. Otherwise, it must be the location, in which case we
                                     // can delete both (assuming the alloca isn't used elsewhere).
@@ -1686,15 +1706,15 @@ impl Driver {
         for &block_id in &func.blocks {
             let block = &self.blocks[block_id];
 
-            for &op_id in &block.ops {
-                let instr = self.ops[op_id].as_mir_instr().unwrap();
-                if let Instr::Const(_) | Instr::Load(_) = instr {
+            for &op_id in &block.instrs {
+                let instr = &self.instrs[op_id].kind;
+                if let InstrKind::Const(_) | InstrKind::Load(_) = instr {
                     let mut is_used = false;
                     'check_uses: for &other_block_id in &func.blocks {
                         let other_block = &self.blocks[other_block_id];
 
-                        for &other_op_id in &other_block.ops {
-                            let other_instr = self.ops[other_op_id].as_mir_instr().unwrap();
+                        for &other_op_id in &other_block.instrs {
+                            let other_instr = &self.instrs[other_op_id].kind;
                             if other_instr.references_value(op_id) {
                                 is_used = true;
                                 break 'check_uses;
@@ -1719,23 +1739,23 @@ impl Driver {
         for (i, &block_id) in func.blocks.iter().enumerate() {
             let block = &self.blocks[block_id];
             let mut num_parameters = 0;
-            for &op in &block.ops {
-                if !matches!(self.ops[op].as_mir_instr().unwrap(), Instr::Parameter(_)) {
+            for &op in &block.instrs {
+                if !matches!(&self.instrs[op].kind, InstrKind::Parameter(_)) {
                     break;
                 }
                 num_parameters += 1;
             }
-            if block.ops.len() - num_parameters != 1 { continue; }
+            if block.instrs.len() - num_parameters != 1 { continue; }
 
-            let terminal = *block.ops.last().unwrap();
-            let terminal = self.ops[terminal].as_mir_instr().unwrap();
+            let terminal = *block.instrs.last().unwrap();
+            let terminal = &self.instrs[terminal].kind;
             // TODO: continue the transformation even if there are basic block arguments
-            if let Instr::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
+            if let InstrKind::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
                 replace_list.push((block_id, other.bb));
                 delete_list.insert(block_id);
                 did_something = true;
                 if i == 0 {
-                    let parameters = block.ops[..num_parameters].to_vec();
+                    let parameters = block.instrs[..num_parameters].to_vec();
                     new_entry_block = Some((other.bb, parameters));
                 }
                 if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
@@ -1747,8 +1767,8 @@ impl Driver {
         let mut new_entry_block_index = None;
         for (i, &block_id) in func.blocks.iter().enumerate() {
             let block = &self.blocks[block_id];
-            let terminal = *block.ops.last().unwrap();
-            let terminal = self.ops[terminal].as_mir_instr_mut().unwrap();
+            let terminal = *block.instrs.last().unwrap();
+            let terminal = &mut self.instrs[terminal].kind;
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
             }
@@ -1759,7 +1779,7 @@ impl Driver {
         if let Some((new_entry_block, parameters)) = new_entry_block {
             func.blocks.swap(0, new_entry_block_index.unwrap());
 
-            self.blocks[new_entry_block].ops.splice(0..0, parameters);
+            self.blocks[new_entry_block].instrs.splice(0..0, parameters);
         }
         did_something
     }
@@ -1767,15 +1787,15 @@ impl Driver {
     fn traverse_descendants(&self, func: &mut Function, visited: &mut HashSet<BlockId>, block: BlockId) {
         if !visited.insert(block) { return; }
 
-        let terminal = *self.blocks[block].ops.last().unwrap();
-        let terminal = self.ops[terminal].as_mir_instr().unwrap();
+        let terminal = *self.blocks[block].instrs.last().unwrap();
+        let terminal = &self.instrs[terminal].kind;
         match terminal {
-            Instr::Jump(target) => self.traverse_descendants(func, visited, target.bb),
-            Instr::CondBr { true_target, false_target, .. } => {
+            InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.bb),
+            InstrKind::CondBr { true_target, false_target, .. } => {
                 self.traverse_descendants(func, visited, true_target.bb);
                 self.traverse_descendants(func, visited, false_target.bb);
             },
-            Instr::SwitchBr { cases, catch_all_target, .. } => {
+            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                 for case in cases {
                     self.traverse_descendants(func, visited, case.target.bb);
                 }
@@ -1800,27 +1820,27 @@ impl Driver {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.blocks[block_id];
-            if let Some(&terminal) = block.ops.last() {
-                match self.ops[terminal].as_mir_instr().unwrap() {
-                    Instr::CondBr { condition, true_target, false_target } => {
-                        let condition = self.ops[*condition].as_mir_instr().unwrap();
-                        if let &Instr::Const(Const::Bool(condition)) = condition {
+            if let Some(&terminal) = block.instrs.last() {
+                match &self.instrs[terminal].kind {
+                    InstrKind::CondBr { condition, true_target, false_target } => {
+                        let condition = &self.instrs[*condition].kind;
+                        if let &InstrKind::Const(Const::Bool(condition)) = condition {
                             let destination = if condition {
                                 true_target
                             } else {
                                 false_target
                             };
-                            transformer.q_replace_instr(terminal, Instr::Jump(destination.clone()));
+                            transformer.q_replace_instr(terminal, InstrKind::Jump(destination.clone()));
                         }
                     },
-                    Instr::SwitchBr { scrutinee, cases, catch_all_target } => {
-                        let scrutinee = self.ops[*scrutinee].as_mir_instr().unwrap();
-                        if let Instr::Const(scrutinee @ Const::Int { .. }) = scrutinee {
+                    InstrKind::SwitchBr { scrutinee, cases, catch_all_target } => {
+                        let scrutinee = &self.instrs[*scrutinee].kind;
+                        if let InstrKind::Const(scrutinee @ Const::Int { .. }) = scrutinee {
                             let destination = cases.iter()
                                 .find(|case| *scrutinee == case.value)
                                 .map(|case| &case.target)
                                 .unwrap_or(catch_all_target);
-                            transformer.q_replace_instr(terminal, Instr::Jump(destination.clone()));
+                            transformer.q_replace_instr(terminal, InstrKind::Jump(destination.clone()));
                         }
                     },
                     _ => {},
@@ -1835,11 +1855,11 @@ impl Driver {
         let mut transformer = MirTransformer::default();
         for &block_id in &func.blocks {
             let block = &self.blocks[block_id];
-            for op_id in block.ops.clone() {
-                let instr = self.ops[op_id].as_mir_instr().unwrap();
-                if let &Instr::Ret(ret_val) = instr
+            for op_id in block.instrs.clone() {
+                let instr = &self.instrs[op_id].kind;
+                if let &InstrKind::Ret(ret_val) = instr
                     && *func.ty.return_ty == Type::Void && ret_val != VOID_INSTR {
-                        transformer.q_replace_instr(op_id, Instr::Ret(VOID_INSTR));
+                        transformer.q_replace_instr(op_id, InstrKind::Ret(VOID_INSTR));
                     }
             }
         }
@@ -1849,7 +1869,7 @@ impl Driver {
 
 #[derive(Default)]
 struct MirCopier {
-    old_to_new: HashMap<OpId, OpId>,
+    old_to_new: HashMap<InstrId, InstrId>,
 }
 
 struct BlockMetadata {
@@ -1857,12 +1877,12 @@ struct BlockMetadata {
 }
 
 impl DriverRwRef<'_> {
-    fn instruction_is_const(&self, instr: OpId) -> bool {
+    fn instruction_is_const(&self, instr: InstrId) -> bool {
         let d = self.read();
-        let instr = d.ops[instr].as_mir_instr().unwrap();
+        let instr = &d.instrs[instr].kind;
         match *instr {
-            Instr::Const(_) | Instr::Void => true,
-            Instr::LegacyIntrinsic { intr, .. } => {
+            InstrKind::Const(_) | InstrKind::Void => true,
+            InstrKind::LegacyIntrinsic { intr, .. } => {
                 match intr {
                     LegacyIntrinsic::Mult | LegacyIntrinsic::Div | LegacyIntrinsic::Mod | LegacyIntrinsic::Add | LegacyIntrinsic::Sub
                         | LegacyIntrinsic::Less | LegacyIntrinsic::LessOrEq | LegacyIntrinsic::Greater | LegacyIntrinsic::GreaterOrEq
@@ -1875,24 +1895,24 @@ impl DriverRwRef<'_> {
                     _ => false,
                 }
             },
-            Instr::LogicalNot(val) | Instr::Truncate(val, _) | Instr::SignExtend(val, _) | Instr::ZeroExtend(val, _)
-                | Instr::FloatCast(val, _) | Instr::FloatToInt(val, _) | Instr::IntToFloat(val, _)
-                | Instr::DiscriminantAccess { val }
+            InstrKind::LogicalNot(val) | InstrKind::Truncate(val, _) | InstrKind::SignExtend(val, _) | InstrKind::ZeroExtend(val, _)
+                | InstrKind::FloatCast(val, _) | InstrKind::FloatToInt(val, _) | InstrKind::IntToFloat(val, _)
+                | InstrKind::DiscriminantAccess { val }
                 => self.instruction_is_const(val),
-            Instr::Call { func, .. } if d.mir.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
+            InstrKind::Call { func, .. } if d.mir.functions[func].is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(val)),
             _ => false,
         }
     }
 
-    fn instruction_is_nontrivial_const(&self, instr: OpId) -> bool {
-        self.instruction_is_const(instr) && !matches!(self.read().ops[instr].as_mir_instr().unwrap(), Instr::Const(_))
+    fn instruction_is_nontrivial_const(&self, instr: InstrId) -> bool {
+        self.instruction_is_const(instr) && !matches!(&self.read().instrs[instr].kind, InstrKind::Const(_))
     }
 
-    fn copy_instruction_if_needed(&mut self, b: &mut FunctionBuilder, copier: &mut MirCopier, instr_id: OpId) -> OpId {
+    fn copy_instruction_if_needed(&mut self, b: &mut FunctionBuilder, copier: &mut MirCopier, instr_id: InstrId) -> InstrId {
         if let Some(&new) = copier.old_to_new.get(&instr_id) {
             new
         } else {
-            let mut instr = self.read().ops[instr_id].as_mir_instr().unwrap().clone();
+            let mut instr = self.read().instrs[instr_id].kind.clone();
             let replacements: Vec<_> = instr.referenced_values().into_iter().map(|arg| (arg, self.copy_instruction_if_needed(b, copier, arg))).collect();
             for (old, new) in replacements {
                 instr.replace_value(old, new);
@@ -1908,8 +1928,8 @@ impl DriverRwRef<'_> {
         let mut did_something = false;
         self.write();
         for &block in &func.blocks {
-            let ops = self.read().blocks[block].ops.clone();
-            for op in ops {
+            let instrs = self.read().blocks[block].instrs.clone();
+            for op in instrs {
                 // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
                 // functions built. For example, in the MIR equivalent of 2 + 3 + 4, the current implementation would
                 // evaluate 2 + 3 as its own function, then 5 + 4 as another. We should put both operations in the same
@@ -1920,17 +1940,17 @@ impl DriverRwRef<'_> {
                 // possible to put them all together (or they each need to be returned from the function via tuples or
                 // something). So it's not quite as simple to do this as I had initially thought. But still a good idea
                 // probably.
-                if self.instruction_is_nontrivial_const(op) && !self.read().mir.poisoned_ops.contains(&op) {
+                if self.instruction_is_nontrivial_const(op) && !self.read().mir.poisoned_instrs.contains(&op) {
                     let ty = self.read().type_of(op).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
                     let func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction(op), empty_range(), empty_range(), true, tp);
                     let Ok(result) = self.call(FunctionRef::Ref(func), Vec::new(), Vec::new()) else {
                         // Make sure we won't repeatedly try and fail to const-eval this instruction.
-                        self.write().mir.poisoned_ops.insert(op);
+                        self.write().mir.poisoned_instrs.insert(op);
                         continue;
                     };
                     let konst = self.write().value_to_const(result, ty, tp);
-                    *self.write().ops[op].as_mir_instr_mut().unwrap() = Instr::Const(konst);
+                    self.write().instrs[op].kind = InstrKind::Const(konst);
                     did_something = true;
                 }
             }
@@ -1944,7 +1964,7 @@ impl DriverRwRef<'_> {
         // empty, reachable block and fail silently (at MIR generation time).
         func.blocks.retain(|&block| {
             let block = &self.read().blocks[block];
-            !block.ops.is_empty()
+            !block.instrs.is_empty()
         });
 
         let mut did_something = true;
@@ -1970,7 +1990,7 @@ impl DriverRwRef<'_> {
 
         let d = self.read();
         for (&arg, param_ty) in target.arguments.iter().zip(&metadata.param_tys) {
-            let arg_ty = d.ops[arg].get_mir_instr_type().unwrap();
+            let arg_ty = &d.instrs[arg].ty;
             assert!(arg_ty.trivially_convertible_to(param_ty), "basic block argument type doesn't match param type ({:?}, {:?})", arg_ty, param_ty);
         }
     }
@@ -1982,9 +2002,9 @@ impl DriverRwRef<'_> {
             let block = &d.blocks[bb];
             let mut expecting_parameters = true;
             let mut param_tys = SmallVec::new();
-            for &op in &block.ops {
-                let instr = d.ops[op].as_mir_instr().unwrap();
-                if let Instr::Parameter(ty) = instr {
+            for &op in &block.instrs {
+                let instr = &d.instrs[op].kind;
+                if let InstrKind::Parameter(ty) = instr {
                     assert!(expecting_parameters, "Parameter instruction in the middle of a block");
                     param_tys.push(ty.clone());
                 } else {
@@ -1998,15 +2018,15 @@ impl DriverRwRef<'_> {
         for &bb in &func.blocks {
             let block = &d.blocks[bb];
             let metadata = &block_metadata[&bb];
-            for &op in &block.ops[metadata.param_tys.len()..] {
-                let instr = d.ops[op].as_mir_instr().unwrap();
+            for &op in &block.instrs[metadata.param_tys.len()..] {
+                let instr = &d.instrs[op].kind;
                 match instr {
-                    Instr::Jump(target) => self.check_jump_target(target, &block_metadata),
-                    Instr::CondBr { true_target, false_target, .. } => {
+                    InstrKind::Jump(target) => self.check_jump_target(target, &block_metadata),
+                    InstrKind::CondBr { true_target, false_target, .. } => {
                         self.check_jump_target(true_target, &block_metadata);
                         self.check_jump_target(false_target, &block_metadata);
                     },
-                    Instr::SwitchBr { cases, catch_all_target, .. } => {
+                    InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                         for case in cases {
                             self.check_jump_target(&case.target, &block_metadata);
                         }
@@ -2022,8 +2042,8 @@ impl DriverRwRef<'_> {
         let d = self.read();
         for &block in &func.blocks {
             let block = &d.blocks[block];
-            for &op in &block.ops {
-                if matches!(d.ops[op].as_mir_instr().unwrap(), Instr::Invalid) {
+            for &op in &block.instrs {
+                if matches!(&d.instrs[op].kind, InstrKind::Invalid) {
                     panic!("Found invalid instruction in function");
                 }
             }
@@ -2034,8 +2054,8 @@ impl DriverRwRef<'_> {
         let mut comptime_calls = Vec::new();
         for &block in &func.blocks {
             let block = &self.read().blocks[block];
-            for &instr in &block.ops {
-                if let &Instr::Call { func: called_func, .. } = self.read().ops[instr].as_mir_instr().unwrap()
+            for &instr in &block.instrs {
+                if let &InstrKind::Call { func: called_func, .. } = &self.read().instrs[instr].kind
                     && self.read().mir.functions[called_func].is_comptime {
                         comptime_calls.push((called_func, instr));
                     }
@@ -2058,17 +2078,17 @@ impl DriverRwRef<'_> {
 }
 
 impl Driver {
-    fn generate_type_of(&self, instr: &Instr) -> Type {
+    fn generate_type_of(&self, instr: &InstrKind) -> Type {
         let b = &self.mir;
         match instr {
-            Instr::Void | Instr::Store { .. } => Type::Void,
-            Instr::ObjcClassRef { .. } => Type::Void.ptr(),
-            Instr::Invalid => Type::Error,
-            Instr::Pointer { .. } | Instr::Struct { .. } | Instr::GenericParam(_) | Instr::Enum { .. } | Instr::FunctionTy { .. } => Type::Ty,
-            &Instr::StructLit { ref fields, id } => {
+            InstrKind::Void | InstrKind::Store { .. } => Type::Void,
+            InstrKind::ObjcClassRef { .. } => Type::Void.ptr(),
+            InstrKind::Invalid => Type::Error,
+            InstrKind::Pointer { .. } | InstrKind::Struct { .. } | InstrKind::GenericParam(_) | InstrKind::Enum { .. } | InstrKind::FunctionTy { .. } => Type::Ty,
+            &InstrKind::StructLit { ref fields, id } => {
                 let field_tys = fields.iter()
                     .map(|&op| {
-                        let instr = self.ops[op].as_mir_instr().unwrap();
+                        let instr = &self.instrs[op].kind;
                         self.generate_type_of(instr)
                     })
                     .collect();
@@ -2079,10 +2099,10 @@ impl Driver {
                     }
                 )
             },
-            Instr::Const(konst) => konst.ty(),
-            Instr::Alloca(ty) => ty.clone().mut_ptr(),
-            Instr::LogicalNot(_) => Type::Bool,
-            &Instr::Call { func, ref generic_arguments, .. } => {
+            InstrKind::Const(konst) => konst.ty(),
+            InstrKind::Alloca(ty) => ty.clone().mut_ptr(),
+            InstrKind::LogicalNot(_) => Type::Bool,
+            &InstrKind::Call { func, ref generic_arguments, .. } => {
                 let func = &b.functions[func];
                 let mut replacements = HashMap::new();
                 for (param, arg) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
@@ -2091,37 +2111,37 @@ impl Driver {
 
                 func.ty.return_ty.as_ref().clone().replacing_generic_params(&replacements)
             },
-            &Instr::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
-            Instr::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
-            Instr::LegacyIntrinsic { ty, .. } => ty.clone(),
-            &Instr::Intrinsic { intr, .. } => self.ast.intrinsics[intr].ret_ty.clone(),
-            Instr::Reinterpret(_, ty) | Instr::Truncate(_, ty) | Instr::SignExtend(_, ty)
-            | Instr::ZeroExtend(_, ty) | Instr::FloatCast(_, ty) | Instr::FloatToInt(_, ty)
-            | Instr::IntToFloat(_, ty)
+            &InstrKind::FunctionRef { func, .. } => Type::Function(b.functions[func].ty.clone()),
+            InstrKind::ExternCall { func, .. } => b.extern_mods[&func.extern_mod].imported_functions[func.index].ty.return_ty.as_ref().clone(),
+            InstrKind::LegacyIntrinsic { ty, .. } => ty.clone(),
+            &InstrKind::Intrinsic { intr, .. } => self.ast.intrinsics[intr].ret_ty.clone(),
+            InstrKind::Reinterpret(_, ty) | InstrKind::Truncate(_, ty) | InstrKind::SignExtend(_, ty)
+            | InstrKind::ZeroExtend(_, ty) | InstrKind::FloatCast(_, ty) | InstrKind::FloatToInt(_, ty)
+            | InstrKind::IntToFloat(_, ty)
             => ty.clone(),
-            &Instr::Load(instr) => match self.type_of(instr) {
+            &InstrKind::Load(instr) => match self.type_of(instr) {
                 Type::Pointer(pointee) => pointee.ty.clone(),
                 _ => Type::Error,
             },
-            &Instr::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
-            Instr::Ret(_) | Instr::Jump(_) | Instr::CondBr { .. } | Instr::SwitchBr { .. } => Type::Never,
-            Instr::Parameter(ty) => ty.clone(),
-            &Instr::DirectFieldAccess { val, index } => {
+            &InstrKind::AddressOfStatic(statik) => b.statics[statik].val.ty().mut_ptr(),
+            InstrKind::Ret(_) | InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } => Type::Never,
+            InstrKind::Parameter(ty) => ty.clone(),
+            &InstrKind::DirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val);
                 match base_ty {
                     Type::Struct(strukt) => strukt.field_tys[index].clone(),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
-            &Instr::IndirectFieldAccess { val, index } => {
+            &InstrKind::IndirectFieldAccess { val, index } => {
                 let base_ty = self.type_of(val).deref().unwrap();
                 match base_ty.ty {
                     Type::Struct(ref strukt) => strukt.field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
-            Instr::InternalFieldAccess { field, .. } => field.ty(),
-            &Instr::Variant { enuum, .. } => {
+            InstrKind::InternalFieldAccess { field, .. } => field.ty(),
+            &InstrKind::Variant { enuum, .. } => {
                 let payload_tys = self.mir.enums[&enuum].payload_tys.to_vec();
                 Type::Enum(
                     EnumType {
@@ -2130,43 +2150,41 @@ impl Driver {
                     }
                 )
             },
-            &Instr::PayloadAccess { val, variant_index } => {
+            &InstrKind::PayloadAccess { val, variant_index } => {
                 let base_ty = self.type_of(val);
                 match base_ty {
                     &Type::Enum(EnumType { identity, .. }) => self.mir.enums[&identity].payload_tys[variant_index].clone(),
                     _ => panic!("Cannot directly access payload of non-enum type {:?}!", base_ty),
                 }
             },
-            Instr::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
+            InstrKind::DiscriminantAccess { .. } => TYPE_OF_DISCRIMINANTS, // TODO: update this when discriminants can be other types
         }
     }
 
-    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>) -> OpId {
-        let instr_id = b.instrs.next_idx();
+    fn push_instr(&mut self, b: &FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> InstrId {
         let ty = self.generate_type_of(&instr);
-        let op = self.ops.push(Op::MirInstr(instr, instr_id, ty));
+        let id = self.instrs.push(Instr::new(instr, ty));
         let source_range = self.get_range(item);
-        self.mir.source_ranges.insert(op, source_range);
+        self.mir.source_ranges.insert(id, source_range);
 
         let block = &mut self.blocks[b.current_block];
-        block.ops.push(op);
+        block.instrs.push(id);
 
-        op
+        id
     }
 
-    fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: Instr, item: impl Into<ToSourceRange>, name: impl Into<String>) -> OpId {
-        let instr_id = b.instrs.next_idx();
+    fn push_instr_with_name(&mut self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> InstrId {
         let ty = self.generate_type_of(&instr);
-        let op = self.ops.push(Op::MirInstr(instr, instr_id, ty));
+        let id = self.instrs.push(Instr::new(instr, ty));
         let source_range = self.get_range(item);
-        self.mir.source_ranges.insert(op, source_range);
+        self.mir.source_ranges.insert(id, source_range);
         let name = b.instr_namespace.insert(name.into());
-        self.mir.instr_names.insert(op, name);
+        self.mir.instr_names.insert(id, name);
 
         let block = &mut self.blocks[b.current_block];
-        block.ops.push(op);
+        block.instrs.push(id);
 
-        op
+        id
     }
 }
 
@@ -2183,12 +2201,12 @@ impl DriverRwRef<'_> {
                     drop(d);
                     let ty = tp.ty(root_expr).clone();
                     let name = self.read().display_item(decl).to_string();
-                    let location = self.write().push_instr_with_name(b, Instr::Alloca(ty), decl, name);
+                    let location = self.write().push_instr_with_name(b, InstrKind::Alloca(ty), decl, name);
                     b.stored_decl_locs.push_at(id, location);
                     let val = self.build_expr(b, root_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                     let instr = self.write().handle_indirection(b, val);
                     let range = self.read().get_range(location) + self.read().get_range(instr);
-                    self.write().push_instr(b, Instr::Store { location, value: instr }, range);
+                    self.write().push_instr(b, InstrKind::Store { location, value: instr }, range);
                 },
                 ast::Decl::Function { .. } => {},
                 _ => panic!("Invalid scope item"),
@@ -2255,11 +2273,11 @@ impl DriverRwRef<'_> {
             },
             Decl::Parameter { index } => {
                 let entry_block = b.blocks[0];
-                let value = self.read().blocks[entry_block].ops[index];
+                let value = self.read().blocks[entry_block].instrs[index];
                 DeclRef::Value(value.direct())
             },
             Decl::GenericParam(param) => {
-                DeclRef::Value(self.write().push_instr(b, Instr::GenericParam(param), expr).direct())
+                DeclRef::Value(self.write().push_instr(b, InstrKind::GenericParam(param), expr).direct())
             },
             Decl::LegacyIntrinsic(intr, ref ty) => {
                 let ty = ty.clone();
@@ -2278,10 +2296,10 @@ impl DriverRwRef<'_> {
                 };
 
                 let name = self.read().fmt_const_for_instr_name(&konst).to_string();
-                DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
+                DeclRef::Value(self.write().push_instr_with_name(b, InstrKind::Const(konst), expr, name).direct())
             },
             Decl::Static(statik) => {
-                DeclRef::Value(self.write().push_instr_with_name(b, Instr::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect())
+                DeclRef::Value(self.write().push_instr_with_name(b, InstrKind::AddressOfStatic(statik), expr, format!("static_{}", name)).indirect())
             },
             Decl::Field { index } => {
                 let base = self.read().get_base(decl_ref_id);
@@ -2292,17 +2310,17 @@ impl DriverRwRef<'_> {
                 }
                 if base.indirection > 0 {
                     let base_ptr = self.write().handle_indirection(b, base.get_address());
-                    DeclRef::Value(self.write().push_instr(b, Instr::IndirectFieldAccess { val: base_ptr, index }, expr).indirect())
+                    DeclRef::Value(self.write().push_instr(b, InstrKind::IndirectFieldAccess { val: base_ptr, index }, expr).indirect())
                 } else {
                     debug_assert_eq!(base.indirection, 0, "tried to dereference a struct?!");
-                    DeclRef::Value(self.write().push_instr(b, Instr::DirectFieldAccess { val: base.instr, index }, expr).direct())
+                    DeclRef::Value(self.write().push_instr(b, InstrKind::DirectFieldAccess { val: base.instr, index }, expr).direct())
                 }
             },
             Decl::InternalField(field) => {
                 let base = self.read().get_base(decl_ref_id);
                 let base = self.build_expr(b, base, Context::default(), tp);
                 let base = self.write().handle_indirection(b, base);
-                DeclRef::Value(self.write().push_instr(b, Instr::InternalFieldAccess { val: base, field }, expr).direct())
+                DeclRef::Value(self.write().push_instr(b, InstrKind::InternalFieldAccess { val: base, field }, expr).direct())
             },
             Decl::Variant { enuum, index, payload_ty } => {
                 if payload_ty.is_some() {
@@ -2311,7 +2329,7 @@ impl DriverRwRef<'_> {
                     let payload_tys = self.read().mir.enums[&enuum].payload_tys.to_vec();
                     let konst = Const::Variant { enuum, index, payload_tys };
                     let name = self.read().fmt_const_for_instr_name(&konst).to_string();
-                    DeclRef::Value(self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct())
+                    DeclRef::Value(self.write().push_instr_with_name(b, InstrKind::Const(konst), expr, name).direct())
                 }
             },
             Decl::Invalid => panic!("INVALID DECL"),
@@ -2385,7 +2403,7 @@ impl DriverRwRef<'_> {
             self.write().start_bb(b, post_bb);
             if pass_value_as_argument {
                 // TODO: this might be the wrong type if indirection != 0
-                self.write().push_instr(b, Instr::Parameter(ty.clone()), expr).direct()
+                self.write().push_instr(b, InstrKind::Parameter(ty.clone()), expr).direct()
             } else if else_scope.is_none() {
                 self.handle_context(b, VOID_INSTR.direct(), ctx)
             } else {
@@ -2411,7 +2429,7 @@ impl DriverRwRef<'_> {
                 drop(d);
                 let konst = self.write().expr_to_const(expr, ty);
                 let name = self.read().fmt_const_for_instr_name(&konst).to_string();
-                self.write().push_instr_with_name(b, Instr::Const(konst), expr, name).direct()
+                self.write().push_instr_with_name(b, InstrKind::Const(konst), expr, name).direct()
             },
             Expr::Set { lhs, rhs } => {
                 drop(d);
@@ -2436,14 +2454,14 @@ impl DriverRwRef<'_> {
 
                 match decl_ref {
                     DeclRef::Function { func, generic_args } => {
-                        self.write().push_instr(b, Instr::FunctionRef { func, generic_arguments: generic_args }, expr).direct()
+                        self.write().push_instr(b, InstrKind::FunctionRef { func, generic_arguments: generic_args }, expr).direct()
                     },
                     DeclRef::LegacyIntrinsic { intrinsic, ty } => {
                         assert!(tp.ty(expr).return_ty().is_none(), "referring to intrinsic functions is not yet supported");
-                        self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
+                        self.write().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty, intr: intrinsic }, expr).direct()
                     },
                     DeclRef::Value(value) => value,
-                    DeclRef::ObjcClassRef { extern_mod, index } => self.write().push_instr(b, Instr::ObjcClassRef { extern_mod, index }, expr).direct(),
+                    DeclRef::ObjcClassRef { extern_mod, index } => self.write().push_instr(b, InstrKind::ObjcClassRef { extern_mod, index }, expr).direct(),
                     other => todo!("referring to {:?} not yet supported", other),
                 }
             },
@@ -2452,7 +2470,7 @@ impl DriverRwRef<'_> {
                 drop(d);
                 let decl_ref = self.get_callee_declref(b, tp, callee);
 
-                fn get_args(d: &mut DriverRwRef, b: &mut FunctionBuilder, tp: &dyn TypeProvider, arguments: &[ExprId]) -> SmallVec<[OpId; 2]> {
+                fn get_args(d: &mut DriverRwRef, b: &mut FunctionBuilder, tp: &dyn TypeProvider, arguments: &[ExprId]) -> SmallVec<[InstrId; 2]> {
                     arguments.iter().map(|&argument| {
                         let val = d.build_expr(b, argument, Context::default(), tp);
                         d.write().handle_indirection(b, val)
@@ -2484,11 +2502,11 @@ impl DriverRwRef<'_> {
                         } else {
                             drop(d);
                         }
-                        self.write().push_instr(b, Instr::Call { func, arguments, generic_arguments: generic_args }, expr).direct()
+                        self.write().push_instr(b, InstrKind::Call { func, arguments, generic_arguments: generic_args }, expr).direct()
                     },
                     DeclRef::ExternFunction { func } => {
                         let arguments = get_args(self, b, tp, &arguments);
-                        self.write().push_instr(b, Instr::ExternCall { arguments, func }, expr).direct()
+                        self.write().push_instr(b, InstrKind::ExternCall { arguments, func }, expr).direct()
                     },
                     DeclRef::LegacyIntrinsic { intrinsic, ty } => match intrinsic {
                         LegacyIntrinsic::LogicalAnd => {
@@ -2529,12 +2547,12 @@ impl DriverRwRef<'_> {
                                 self.write().start_bb(b, left_false_bb);
                                 let false_const = Const::Bool(false);
                                 let name = self.read().fmt_const_for_instr_name(&false_const).to_string();
-                                let false_val = self.write().push_instr_with_name(b, Instr::Const(false_const), expr, name).direct();
+                                let false_val = self.write().push_instr_with_name(b, InstrKind::Const(false_const), expr, name).direct();
                                 self.handle_context(b, false_val, branch_ctx);
 
                                 self.write().start_bb(b, after_bb);
                                 if pass_value_as_argument {
-                                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
+                                    self.write().push_instr(b, InstrKind::Parameter(ty), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -2573,7 +2591,7 @@ impl DriverRwRef<'_> {
                                 self.write().start_bb(b, left_true_bb);
                                 let true_const = Const::Bool(true);
                                 let name = self.read().fmt_const_for_instr_name(&true_const).to_string();
-                                let true_val = self.write().push_instr_with_name(b, Instr::Const(true_const), expr, name).direct();
+                                let true_val = self.write().push_instr_with_name(b, InstrKind::Const(true_const), expr, name).direct();
                                 let branch_ctx = ctx.redirect(after_bb, pass_value_as_argument);
                                 self.handle_context(b, true_val, branch_ctx);
 
@@ -2582,7 +2600,7 @@ impl DriverRwRef<'_> {
 
                                 self.write().start_bb(b, after_bb);
                                 if pass_value_as_argument {
-                                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
+                                    self.write().push_instr(b, InstrKind::Parameter(ty), expr).direct()
                                 } else {
                                     return VOID_INSTR.direct()
                                 }
@@ -2595,7 +2613,7 @@ impl DriverRwRef<'_> {
                                 return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
                             } else {
                                 let operand = self.build_expr(b, operand, Context::default(), tp);
-                                self.write().push_instr(b, Instr::LogicalNot(operand.instr), expr).direct()
+                                self.write().push_instr(b, InstrKind::LogicalNot(operand.instr), expr).direct()
                             }
                         },
                         LegacyIntrinsic::MultAssign | LegacyIntrinsic::DivAssign | LegacyIntrinsic::ModAssign | LegacyIntrinsic::AddAssign
@@ -2609,7 +2627,7 @@ impl DriverRwRef<'_> {
 
                             let address = self.build_expr(b, lhs, Context::new(1, DataDest::Read, ControlDest::Continue), tp);
                             let address = self.write().handle_indirection(b, address);
-                            let loaded = self.write().push_instr(b, Instr::Load(address), lhs);
+                            let loaded = self.write().push_instr(b, InstrKind::Load(address), lhs);
                             let modifier = self.build_expr(b, rhs, Context::default(), tp);
                             let modifier = self.write().handle_indirection(b, modifier);
                             let intr = match intrinsic {
@@ -2625,17 +2643,17 @@ impl DriverRwRef<'_> {
                                 LegacyIntrinsic::RightShiftAssign => LegacyIntrinsic::RightShift,
                                 intrinsic => todo!("intrinsic {:?}", intrinsic),
                             };
-                            let value = self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: smallvec![loaded, modifier], ty, intr }, expr);
-                            self.write().push_instr(b, Instr::Store { location: address, value }, expr).direct()
+                            let value = self.write().push_instr(b, InstrKind::LegacyIntrinsic { arguments: smallvec![loaded, modifier], ty, intr }, expr);
+                            self.write().push_instr(b, InstrKind::Store { location: address, value }, expr).direct()
                         },
                         intrinsic => {
                             let arguments = get_args(self, b, tp, &arguments);
-                            self.write().push_instr(b, Instr::LegacyIntrinsic { arguments, ty, intr: intrinsic }, expr).direct()
+                            self.write().push_instr(b, InstrKind::LegacyIntrinsic { arguments, ty, intr: intrinsic }, expr).direct()
                         }
                     },
                     DeclRef::Intrinsic(intr) => {
                         let arguments = get_args(self, b, tp, &arguments);
-                        self.write().push_instr(b, Instr::Intrinsic { arguments, intr }, expr).direct()
+                        self.write().push_instr(b, InstrKind::Intrinsic { arguments, intr }, expr).direct()
                     },
                     DeclRef::MethodIntrinsic(intr) => {
                         let d = self.read();
@@ -2652,11 +2670,11 @@ impl DriverRwRef<'_> {
                         let base = self.write().handle_indirection(b, base);
                         let mut arguments = get_args(self, b, tp, &arguments);
                         arguments.insert(0, base);
-                        self.write().push_instr(b, Instr::Intrinsic { arguments, intr }, expr).direct()
+                        self.write().push_instr(b, InstrKind::Intrinsic { arguments, intr }, expr).direct()
                     },
                     DeclRef::EnumVariantWithPayload { enuum, index, .. } => {
                         let arguments = get_args(self, b, tp, &arguments);
-                        self.write().push_instr(b, Instr::Variant { enuum, index, payload: arguments[0] }, expr).direct()
+                        self.write().push_instr(b, InstrKind::Variant { enuum, index, payload: arguments[0] }, expr).direct()
                     },
                     DeclRef::Value(_) => todo!("calling function pointers is not yet supported"),
                     DeclRef::ObjcClassRef { .. } => unimplemented!("can't call obj-c class ref"),
@@ -2670,7 +2688,7 @@ impl DriverRwRef<'_> {
                     CastMethod::Reinterpret => {
                         let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
-                        self.write().push_instr(b, Instr::Reinterpret(value, dest_ty), expr).direct()
+                        self.write().push_instr(b, InstrKind::Reinterpret(value, dest_ty), expr).direct()
                     },
                     CastMethod::Int => {
                         let (src_width, _src_is_signed, dest_width, dest_is_signed) = match (tp.ty(operand), &dest_ty) {
@@ -2685,35 +2703,35 @@ impl DriverRwRef<'_> {
                         match src_bit_width.cmp(&dest_bit_width) {
                             Ordering::Less => if dest_is_signed {
                                 // TODO: Bounds checking
-                                self.write().push_instr(b, Instr::SignExtend(value, dest_ty), expr)
+                                self.write().push_instr(b, InstrKind::SignExtend(value, dest_ty), expr)
                             } else {
                                 // TODO: Bounds checking
-                                self.write().push_instr(b, Instr::ZeroExtend(value, dest_ty), expr)
+                                self.write().push_instr(b, InstrKind::ZeroExtend(value, dest_ty), expr)
                             },
                             Ordering::Equal => {
                                 // TODO: Bounds checking
-                                self.write().push_instr(b, Instr::Reinterpret(value, dest_ty), expr)
+                                self.write().push_instr(b, InstrKind::Reinterpret(value, dest_ty), expr)
                             },
                             Ordering::Greater => {
                                 // TODO: Bounds checking
-                                self.write().push_instr(b, Instr::Truncate(value, dest_ty), expr)
+                                self.write().push_instr(b, InstrKind::Truncate(value, dest_ty), expr)
                             },
                         }.direct()
                     },
                     CastMethod::Float => {
                         let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
-                        self.write().push_instr(b, Instr::FloatCast(value, dest_ty), expr).direct()
+                        self.write().push_instr(b, InstrKind::FloatCast(value, dest_ty), expr).direct()
                     },
                     CastMethod::FloatToInt => {
                         let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
-                        self.write().push_instr(b, Instr::FloatToInt(value, dest_ty), expr).direct()
+                        self.write().push_instr(b, InstrKind::FloatToInt(value, dest_ty), expr).direct()
                     },
                     CastMethod::IntToFloat => {
                         let value = self.build_expr(b, operand, Context::default(), tp);
                         let value = self.write().handle_indirection(b, value);
-                        self.write().push_instr(b, Instr::IntToFloat(value, dest_ty), expr).direct()
+                        self.write().push_instr(b, InstrKind::IntToFloat(value, dest_ty), expr).direct()
                     },
                     CastMethod::Invalid => panic!("FOUND INVALID CAST"),
                 }
@@ -2736,7 +2754,7 @@ impl DriverRwRef<'_> {
                     tp,
                 );
                 let op = self.write().handle_indirection(b, op);
-                self.write().push_instr(b, Instr::Pointer { op, is_mut }, expr).direct()
+                self.write().push_instr(b, InstrKind::Pointer { op, is_mut }, expr).direct()
             },
             Expr::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                 let param_tys = param_tys.clone();
@@ -2759,7 +2777,7 @@ impl DriverRwRef<'_> {
                 );
                 let ret_ty = self.write().handle_indirection(b, ret_ty);
 
-                self.write().push_instr(b, Instr::FunctionTy { param_tys, has_c_variadic_param, ret_ty }, expr).direct()
+                self.write().push_instr(b, InstrKind::FunctionTy { param_tys, has_c_variadic_param, ret_ty }, expr).direct()
             }
             Expr::Struct(id) => {
                 drop(d);
@@ -2776,7 +2794,7 @@ impl DriverRwRef<'_> {
                     let field = self.write().handle_indirection(b, field);
                     fields.push(field);
                 }
-                self.write().push_instr(b, Instr::Struct { fields, id }, expr).direct()
+                self.write().push_instr(b, InstrKind::Struct { fields, id }, expr).direct()
             },
             Expr::Enum(id) => {
                 drop(d);
@@ -2793,7 +2811,7 @@ impl DriverRwRef<'_> {
                     let variant = self.write().handle_indirection(b, variant);
                     variants.push(variant);
                 }
-                self.write().push_instr(b, Instr::Enum { variants, id }, expr).direct()
+                self.write().push_instr(b, InstrKind::Enum { variants, id }, expr).direct()
             },
             Expr::StructLit { id, .. } => {
                 drop(d);
@@ -2809,7 +2827,7 @@ impl DriverRwRef<'_> {
                     let field = self.write().handle_indirection(b, field);
                     fields.push(field);
                 }
-                self.write().push_instr(b, Instr::StructLit { fields, id: lit.strukt }, expr).direct()
+                self.write().push_instr(b, InstrKind::StructLit { fields, id: lit.strukt }, expr).direct()
             },
             Expr::Deref(operand) => {
                 drop(d);
@@ -2843,7 +2861,7 @@ impl DriverRwRef<'_> {
                 self.write().start_bb(b, post_bb);
                 if pass_value_as_argument {
                     // TODO: this will be the wrong type if indirection != 0
-                    self.write().push_instr(b, Instr::Parameter(ty), expr).direct()
+                    self.write().push_instr(b, InstrKind::Parameter(ty), expr).direct()
                 } else {
                     self.write().handle_control(b, VOID_INSTR.direct(), ctx.control)
                 }
@@ -2857,7 +2875,7 @@ impl DriverRwRef<'_> {
                     ControlDest::Jump(block) => block,
                 };
 
-                self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
+                self.write().push_instr(b, InstrKind::Jump(test_bb.into()), expr);
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
                 self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
@@ -2887,12 +2905,12 @@ impl DriverRwRef<'_> {
                 drop(d);
                 let binding_ty = tp.ty(lower_bound).clone();
                 let binding_name = self.read().display_item(binding).to_string();
-                let binding_location = self.write().push_instr_with_name(b, Instr::Alloca(binding_ty), binding, &binding_name);
+                let binding_location = self.write().push_instr_with_name(b, InstrKind::Alloca(binding_ty), binding, &binding_name);
                 b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
                 let val = self.build_expr(b, lower_bound, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 let instr = self.write().handle_indirection(b, val);
                 let range = self.read().get_range(binding_location) + self.read().get_range(instr);
-                self.write().push_instr(b, Instr::Store { location: binding_location, value: instr }, range);
+                self.write().push_instr(b, InstrKind::Store { location: binding_location, value: instr }, range);
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.write().handle_indirection(b, upper_bound);
 
@@ -2903,12 +2921,12 @@ impl DriverRwRef<'_> {
                     ControlDest::Jump(target) => target,
                 };
 
-                self.write().push_instr(b, Instr::Jump(test_bb.into()), expr);
+                self.write().push_instr(b, InstrKind::Jump(test_bb.into()), expr);
                 self.write().end_current_bb(b);
                 self.write().start_bb(b, test_bb);
-                let cur_binding_value = self.write().push_instr_with_name(b, Instr::Load(binding_location), binding, &binding_name);
-                let less_than = self.write().push_instr_with_name(b, Instr::LegacyIntrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: LegacyIntrinsic::Less }, binding, &binding_name);
-                self.write().push_instr_with_name(b, Instr::CondBr { condition: less_than, true_target: loop_bb.into(), false_target: post_bb.into() }, binding, &binding_name);
+                let cur_binding_value = self.write().push_instr_with_name(b, InstrKind::Load(binding_location), binding, &binding_name);
+                let less_than = self.write().push_instr_with_name(b, InstrKind::LegacyIntrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: LegacyIntrinsic::Less }, binding, &binding_name);
+                self.write().push_instr_with_name(b, InstrKind::CondBr { condition: less_than, true_target: loop_bb.into(), false_target: post_bb.into() }, binding, &binding_name);
                 self.write().end_current_bb(b);
 
                 self.write().start_bb(b, loop_bb);
@@ -2933,7 +2951,7 @@ impl DriverRwRef<'_> {
                 drop(d);
                 let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
                 let loop_state = b.loops[loop_id].clone();
-                let branch = self.write().push_instr(b, Instr::Jump(loop_state.break_block.into()), expr);
+                let branch = self.write().push_instr(b, InstrKind::Jump(loop_state.break_block.into()), expr);
                 self.write().end_current_bb(b);
                 // Must create unreachable basic block in case there are more statements in this loop
                 let unreachable_bb = self.write().create_bb(b);
@@ -2948,7 +2966,7 @@ impl DriverRwRef<'_> {
                 if let Some(variable_to_increment) = loop_state.continue_location_of_variable_to_increment {
                     self.write().increment_variable(b, variable_to_increment);
                 }
-                let branch = self.write().push_instr(b, Instr::Jump(loop_state.continue_block.into()), expr);
+                let branch = self.write().push_instr(b, InstrKind::Jump(loop_state.continue_block.into()), expr);
                 self.write().end_current_bb(b);
                 // Must create unreachable basic block in case there are more statements in this loop
                 let unreachable_bb = self.write().create_bb(b);
@@ -2980,7 +2998,7 @@ impl DriverRwRef<'_> {
             TypedSwitchScrutineeValueKind::EnumPayload { enum_value, variant_index } => {
                 let val = self.get_scrutinee_value(b, tp, og_scrutinee, enum_value, pattern_matching_ctx, pattern_matching_ctx_id);
                 let val = self.write().handle_indirection(b, val);
-                self.write().push_instr(b, Instr::PayloadAccess { val, variant_index }, og_scrutinee).direct()
+                self.write().push_instr(b, InstrKind::PayloadAccess { val, variant_index }, og_scrutinee).direct()
             },
             TypedSwitchScrutineeValueKind::OriginalScrutinee => {
                 self.build_expr(b, og_scrutinee, Context::new(0, DataDest::Read, ControlDest::Continue), tp)
@@ -3005,7 +3023,7 @@ impl DriverRwRef<'_> {
                 let scrutinee_ty = self.read().type_of(scrutinee).clone();
 
                 let mut discriminant_enum_ty = None;
-                let discriminant: OpId = match scrutinee_ty {
+                let discriminant: InstrId = match scrutinee_ty {
                     Type::Enum(ref enum_ty) => {
                         discriminant_enum_ty = Some(enum_ty.clone());
                         self.write().get_discriminant(b, Value { instr: scrutinee, indirection: 0 })
@@ -3030,7 +3048,7 @@ impl DriverRwRef<'_> {
 
                 let default_bb = self.write().create_bb(b);
 
-                self.write().push_instr(b, Instr::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_target: default_bb.into() }, expr);
+                self.write().push_instr(b, InstrKind::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_target: default_bb.into() }, expr);
                 self.write().end_current_bb(b);
 
                 for (mir_case, node) in mir_cases.iter().zip(nodes) {
@@ -3043,7 +3061,7 @@ impl DriverRwRef<'_> {
                     self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx_id, pattern_matching_ctx, scope_blocks, scrutinee_values, post_bb);
                 } else {
                     // TODO: add unreachable instruction I guess?
-                    self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
+                    self.write().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
                     self.write().end_current_bb(b);
                 }
             },
@@ -3052,7 +3070,7 @@ impl DriverRwRef<'_> {
             },
             SwitchDecisionNode::Failure => {
                 self.read().diag.report_error_no_range_msg("Pattern matching failure", expr);
-                self.write().push_instr(b, Instr::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
+                self.write().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
                 self.write().end_current_bb(b);
             }
         }
@@ -3065,23 +3083,23 @@ impl Driver {
         Const::Int { lit: BigInt::from(variant_index), ty: TYPE_OF_DISCRIMINANTS }
     }
 
-    fn get_discriminant(&mut self, b: &mut FunctionBuilder, val: Value) -> OpId {
+    fn get_discriminant(&mut self, b: &mut FunctionBuilder, val: Value) -> InstrId {
         // TODO: handle indirect enum discriminant accesses, without loading the entire value.
         let val = self.handle_indirection(b, val);
-        self.push_instr_with_name(b, Instr::DiscriminantAccess { val }, val, format!("{}.disc", self.display_instr_name(val)))
+        self.push_instr_with_name(b, InstrKind::DiscriminantAccess { val }, val, format!("{}.disc", self.display_instr_name(val)))
     }
 
-    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> OpId {
+    fn handle_indirection(&mut self, b: &mut FunctionBuilder, mut val: Value) -> InstrId {
         if val.indirection > 0 {
             while val.indirection > 0 {
-                val.instr = self.push_instr(b, Instr::Load(val.instr), val.instr);
+                val.instr = self.push_instr(b, InstrKind::Load(val.instr), val.instr);
                 val.indirection -= 1;
             }
         } else if val.indirection < 0 {
             let mut ty = self.type_of(val.instr).clone();
             while val.indirection < 0 {
-                let location = self.push_instr(b, Instr::Alloca(ty.clone()), val.instr);
-                self.push_instr(b, Instr::Store { location, value: val.instr }, val.instr);
+                let location = self.push_instr(b, InstrKind::Alloca(ty.clone()), val.instr);
+                self.push_instr(b, InstrKind::Store { location, value: val.instr }, val.instr);
                 val.instr = location;
                 val.indirection += 1;
                 // Mutability doesn't matter for now
@@ -3091,18 +3109,18 @@ impl Driver {
         val.instr
     }
 
-    fn increment_variable(&mut self, b: &mut FunctionBuilder, location: OpId) {
+    fn increment_variable(&mut self, b: &mut FunctionBuilder, location: InstrId) {
         let ty = self.type_of(location).deref().unwrap().clone().ty;
-        let loaded = self.push_instr(b, Instr::Load(location), location);
-        let one = self.push_instr(b, Instr::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
-        let value = self.push_instr(b, Instr::LegacyIntrinsic { arguments: smallvec![loaded, one], ty, intr: LegacyIntrinsic::Add }, location);
-        self.push_instr(b, Instr::Store { location, value }, location);
+        let loaded = self.push_instr(b, InstrKind::Load(location), location);
+        let one = self.push_instr(b, InstrKind::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
+        let value = self.push_instr(b, InstrKind::LegacyIntrinsic { arguments: smallvec![loaded, one], ty, intr: LegacyIntrinsic::Add }, location);
+        self.push_instr(b, InstrKind::Store { location, value }, location);
     }
 
     fn handle_control(&mut self, b: &mut FunctionBuilder, val: Value, control: ControlDest) -> Value {
         match control {
             ControlDest::Jump(target) => {
-                let val: Value = self.push_instr(b, Instr::Jump(target.into()), val.instr).direct();
+                let val: Value = self.push_instr(b, InstrKind::Jump(target.into()), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -3111,13 +3129,13 @@ impl Driver {
                 self.increment_variable(b, location);
 
                 // br block
-                let val = self.push_instr(b, Instr::Jump(target.into()), val.instr).direct();
+                let val = self.push_instr(b, InstrKind::Jump(target.into()), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
             ControlDest::Continue => val,
             ControlDest::RetVoid => {
-                let val = self.push_instr(b, Instr::Ret(VOID_INSTR), val.instr).direct();
+                let val = self.push_instr(b, InstrKind::Ret(VOID_INSTR), val.instr).direct();
                 self.end_current_bb(b);
                 val
             },
@@ -3133,27 +3151,27 @@ impl DriverRwRef<'_> {
             DataDest::Read => return val,
             DataDest::Ret => {
                 let instr = self.write().handle_indirection(b, val);
-                let val = self.write().push_instr(b, Instr::Ret(instr), instr).direct();
+                let val = self.write().push_instr(b, InstrKind::Ret(instr), instr).direct();
                 self.write().end_current_bb(b);
                 return val;
             },
             DataDest::JumpWithArgument(bb) => {
                 let instr = self.write().handle_indirection(b, val);
-                let val = self.write().push_instr(b, Instr::Jump(JumpTarget { bb, arguments: smallvec![instr] }), instr).direct();
+                let val = self.write().push_instr(b, InstrKind::Jump(JumpTarget { bb, arguments: smallvec![instr] }), instr).direct();
                 self.write().end_current_bb(b);
                 return val;
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let op = self.write().handle_indirection(b, val);
-                let instr = if let &Instr::Const(Const::Bool(val)) = self.read().ops[op].as_mir_instr().unwrap() {
+                let instr = if let &InstrKind::Const(Const::Bool(val)) = &self.read().instrs[op].kind {
                     let bb = if val {
                         true_bb
                     } else {
                         false_bb
                     };
-                    Instr::Jump(bb.into())
+                    InstrKind::Jump(bb.into())
                 } else {
-                    Instr::CondBr { condition: op, true_target: true_bb.into(), false_target: false_bb.into() }
+                    InstrKind::CondBr { condition: op, true_target: true_bb.into(), false_target: false_bb.into() }
                 };
                 let val = self.write().push_instr(b, instr, op).direct();
                 self.write().end_current_bb(b);
@@ -3162,7 +3180,7 @@ impl DriverRwRef<'_> {
             DataDest::Receive { value } => {
                 let location = self.write().handle_indirection(b, val.get_address());
                 let range = self.read().get_range(location) + self.read().get_range(value);
-                self.write().push_instr(b, Instr::Store { location, value }, range);
+                self.write().push_instr(b, InstrKind::Store { location, value }, range);
             },
             DataDest::Void => {},
         }

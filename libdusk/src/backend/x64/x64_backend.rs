@@ -1,6 +1,6 @@
 use crate::driver::Driver;
 use crate::ast::LegacyIntrinsic;
-use crate::mir::{FuncId, Instr, Const};
+use crate::mir::{FuncId, InstrKind, Const};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
 use crate::backend::Backend;
@@ -33,10 +33,10 @@ impl Backend for X64Backend {
         let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
         code.sub64_imm(Reg64::Rsp, 72);
-        for &op in &d.blocks[func.blocks[0]].ops {
-            let instr = d.ops[op].as_mir_instr().unwrap();
+        for &op in &d.blocks[func.blocks[0]].instrs {
+            let instr = &d.instrs[op].kind;
             match instr {
-                Instr::Const(konst) => {
+                InstrKind::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
                             code.lea64(Reg64::Rax, exe.use_cstring(&d.mir.strings[id]));
@@ -44,7 +44,7 @@ impl Backend for X64Backend {
                         _ => todo!("{}", d.display_const(konst)),
                     }
                 },
-                Instr::LegacyIntrinsic { intr, .. } => {
+                InstrKind::LegacyIntrinsic { intr, .. } => {
                     match intr {
                         LegacyIntrinsic::Print => {
                             // Store string address in R12 (assuming it's already in rax for now, which is obviously dumb)
@@ -71,11 +71,11 @@ impl Backend for X64Backend {
                         _ => todo!("{}", d.display_mir_instr(op)),
                     }
                 },
-                &Instr::Ret(value) => {
-                    let value = d.ops[value].as_mir_instr().unwrap();
+                &InstrKind::Ret(value) => {
+                    let value = &d.instrs[value].kind;
                     // If this is the main function, we should call ExitProcess.
                     if is_main {
-                        assert_eq!(value, &Instr::Void);
+                        assert_eq!(value, &InstrKind::Void);
                         code.mov32_imm(Reg32::Ecx, 0);
                         code.call(exe.use_imported_symbol(exit_process));
                     } else {

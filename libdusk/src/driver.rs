@@ -3,7 +3,7 @@ use string_interner::DefaultStringInterner as StringInterner;
 
 use crate::index_vec::*;
 use crate::ast::{Ast, ExprId, GenericCtx};
-use crate::mir::{Const, Instr, InstrId, Mir, VOID_INSTR};
+use crate::mir::{Block, BlockId, Const, Instr, InstrId, InstrKind, Mir, VOID_INSTR};
 use crate::target::{Arch, OperatingSystem};
 use crate::source_info::SourceRange;
 use crate::internal_types::InternalFieldDecls;
@@ -16,67 +16,6 @@ use crate::mir::FunctionRef;
 use crate::type_provider::TypeProvider;
 use crate::rw_ref::RwRef;
 use crate::interpreter::EvalError;
-use crate::index_vec::define_index_type;
-use crate::display_adapter;
-
-define_index_type!(pub struct OpId = u32;);
-define_index_type!(pub struct BlockId = u32;);
-
-#[derive(Clone, Debug)]
-pub enum Op {
-    MirInstr(Instr, InstrId, Type),
-}
-
-impl Op {
-    #[inline]
-    pub fn as_mir_instr(&self) -> Option<&Instr> {
-        match self {
-            Op::MirInstr(instr, _, _) => Some(instr),
-        }
-    }
-
-    #[inline]
-    pub fn as_mir_instr_mut(&mut self) -> Option<&mut Instr> {
-        match self {
-            Op::MirInstr(instr, _, _) => Some(instr),
-        }
-    }
-
-    #[inline]
-    pub fn get_mir_instr_id(&self) -> Option<InstrId> {
-        match self {
-            &Op::MirInstr(_, id, _) => Some(id),
-        }
-    }
-
-    #[inline]
-    pub fn get_mir_instr_type(&self) -> Option<&Type> {
-        match self {
-            Op::MirInstr(_, _, ty) => Some(ty),
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct Block {
-    pub ops: Vec<OpId>,
-}
-
-impl Driver {
-    #[display_adapter]
-    pub fn display_block(&self, block: BlockId, w: &mut Formatter) {
-        let block = &self.blocks[block];
-        for &id in &block.ops {
-            write!(w, "    %op{}", id.index())?;
-            match self.ops[id] {
-                Op::MirInstr(ref instr, _, _) => {
-                    writeln!(w, " = mir.{:?}", instr)?;
-                },
-            }
-        }
-        Ok(())
-    }
-}
 
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
@@ -97,7 +36,7 @@ pub struct Driver {
     // Mutable state
     pub tir_builder: tir::Builder,
     pub blocks: IndexVec<BlockId, Block>,
-    pub ops: IndexVec<OpId, Op>,
+    pub instrs: IndexVec<InstrId, Instr>,
     pub ast: Ast,
     pub mir: Mir,
 }
@@ -117,7 +56,7 @@ impl Driver {
             no_core,
 
             blocks: IndexVec::default(),
-            ops: index_vec![Op::MirInstr(Instr::Void, InstrId::new(0), Type::Void)],
+            instrs: index_vec![Instr::new(InstrKind::Void, Type::Void)],
             ast: Ast::default(),
             mir: Mir::default(),
         };

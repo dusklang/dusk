@@ -2,7 +2,7 @@ use crate::backend::arm64::*;
 use crate::backend::Backend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
-use crate::mir::{Const, FuncId, Instr};
+use crate::mir::{Const, FuncId, InstrKind};
 use crate::linker::exe::*;
 use crate::target::{Arch, OperatingSystem};
 
@@ -32,10 +32,10 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
-                for &op in &d.blocks[func.blocks[0]].ops {
-                    let instr = d.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].instrs {
+                    let instr = &d.instrs[op].kind;
                     match instr {
-                        Instr::Const(konst) => {
+                        InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
                                     let libobjc = exe.import_dynamic_library("libobjc");
@@ -59,7 +59,7 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_const(konst)),
                             }
                         },
-                        Instr::LegacyIntrinsic { intr, .. } => {
+                        InstrKind::LegacyIntrinsic { intr, .. } => {
                             match intr {
                                 LegacyIntrinsic::Print => {
                                     let foundation = exe.import_framework("Foundation");
@@ -73,11 +73,11 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_mir_instr(op)),
                             }
                         },
-                        &Instr::Ret(value) => {
-                            let value = d.ops[value].as_mir_instr().unwrap();
+                        &InstrKind::Ret(value) => {
+                            let value = &d.instrs[value].kind;
                             // If this is the main function, we should return 0 despite the high-level return type being `void`.
                             if is_main {
-                                assert_eq!(value, &Instr::Void);
+                                assert_eq!(value, &InstrKind::Void);
                                 // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
                                 code.movz64(Reg::R0, 0, 0);
                             } else {
@@ -101,10 +101,10 @@ impl Backend for Arm64Backend {
                 let frame_size = 16;
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
-                for &op in &d.blocks[func.blocks[0]].ops {
-                    let instr = d.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].instrs {
+                    let instr = &d.instrs[op].kind;
                     match instr {
-                        Instr::Const(konst) => {
+                        InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
                                     code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
@@ -112,7 +112,7 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_const(konst)),
                             }
                         },
-                        Instr::LegacyIntrinsic { intr, .. } => {
+                        InstrKind::LegacyIntrinsic { intr, .. } => {
                             match intr {
                                 LegacyIntrinsic::Print => {
                                     // Store string address in x19 (assuming it's already in x0 for now, which is obviously dumb)
@@ -143,11 +143,11 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_mir_instr(op)),
                             }
                         },
-                        &Instr::Ret(value) => {
-                            let value = d.ops[value].as_mir_instr().unwrap();
+                        &InstrKind::Ret(value) => {
+                            let value = &d.instrs[value].kind;
                             // If this is the main function, we should call ExitProcess.
                             if is_main {
-                                assert_eq!(value, &Instr::Void);
+                                assert_eq!(value, &InstrKind::Void);
                                 // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
                                 code.movz64(Reg::R0, 0, 0);
                                 code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
@@ -166,10 +166,10 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
                 code.mov64(Reg::R29, Reg::SP);
 
-                for &op in &d.blocks[func.blocks[0]].ops {
-                    let instr = d.ops[op].as_mir_instr().unwrap();
+                for &op in &d.blocks[func.blocks[0]].instrs {
+                    let instr = &d.instrs[op].kind;
                     match instr {
-                        Instr::Const(konst) => {
+                        InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
                                     code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
@@ -177,7 +177,7 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_const(konst)),
                             }
                         },
-                        Instr::LegacyIntrinsic { intr, .. } => {
+                        InstrKind::LegacyIntrinsic { intr, .. } => {
                             match intr {
                                 LegacyIntrinsic::Print => {
                                     // String address (assuming it's already in x0 for now, which is obviously dumb)
@@ -199,11 +199,11 @@ impl Backend for Arm64Backend {
                                 _ => todo!("{}", d.display_mir_instr(op)),
                             }
                         }
-                        &Instr::Ret(value) => {
-                            let value = d.ops[value].as_mir_instr().unwrap();
+                        &InstrKind::Ret(value) => {
+                            let value = &d.instrs[value].kind;
                             // If this is the main function, we should call exit().
                             if is_main {
-                                assert_eq!(value, &Instr::Void);
+                                assert_eq!(value, &InstrKind::Void);
                                 // exit code
                                 code.movz64(Reg::R0, 7, 0);
                                 // syscall number
