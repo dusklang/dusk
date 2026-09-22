@@ -33,9 +33,8 @@ impl Backend for X64Backend {
         let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
         code.sub64_imm(Reg64::Rsp, 72);
-        for &op in &d.blocks[func.blocks[0]].instrs {
-            let instr = &d.instrs[op].kind;
-            match instr {
+        for &instr in &d.blocks[func.blocks[0]].instrs {
+            match &d.instrs[instr].kind {
                 InstrKind::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
@@ -68,7 +67,7 @@ impl Backend for X64Backend {
                             code.mov64(Reg64::Rcx, Reg64::R13);
                             code.call(exe.use_imported_symbol(write_console));
                         },
-                        _ => todo!("{}", d.display_mir_instr(op)),
+                        _ => todo!("{}", d.display_mir_instr(instr)),
                     }
                 },
                 &InstrKind::Ret(value) => {
@@ -82,7 +81,7 @@ impl Backend for X64Backend {
                         todo!();
                     }
                 },
-                _ => todo!("{}", d.display_mir_instr(op)),
+                _ => todo!("{}", d.display_mir_instr(instr)),
             }
         }
 

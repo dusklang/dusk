@@ -686,7 +686,7 @@ impl Driver {
         results.insert(VOID_INSTR, Value::Nothing); // void
         for (i, arg) in arguments.into_iter().enumerate() {
             let instr_id = self.blocks[start_block].instrs[i];
-            let param = self.instrs[instr_id].kind.clone();
+            let param = &self.instrs[instr_id].kind;
             assert!(matches!(param, InstrKind::Parameter(_)));
             results.insert(instr_id, arg);
         }
@@ -1252,9 +1252,9 @@ impl DriverRwRef<'_> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last_mut().unwrap();
-            let next_op = self.read().blocks[frame.block].instrs[frame.pc];
+            let next_instr = self.read().blocks[frame.block].instrs[frame.pc];
             let d = self.read();
-            match &d.instrs[next_op].kind {
+            match &d.instrs[next_instr].kind {
                 InstrKind::Void => Value::Nothing,
                 InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
                 InstrKind::Alloca(ty) => {
@@ -1418,7 +1418,7 @@ impl DriverRwRef<'_> {
                             assert!(arguments.len() <= 1);
                             let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
                             drop(d);
-                            self.read().diag.report_error(panic_message, next_op, "panic occured here");
+                            self.read().diag.report_error(panic_message, next_instr, "panic occured here");
                             return Err(EvalError);
                         },
                         LegacyIntrinsic::Print => {
@@ -1529,7 +1529,7 @@ impl DriverRwRef<'_> {
 
                             let str = unsafe { CStr::from_ptr(ptr as _) };
                             let path = str.to_str().unwrap();
-                            let (file, _) = d.lookup_file(next_op);
+                            let (file, _) = d.lookup_file(next_instr);
                             let base_path = d.src_map.files[file].location.as_path();
                             let path = base_path
                                 .map(|base| base.parent().unwrap().join(path))
@@ -1650,8 +1650,8 @@ impl DriverRwRef<'_> {
                 }
                 &InstrKind::Load(location) => {
                     let frame = stack.last().unwrap();
-                    let op = self.read().blocks[frame.block].instrs[frame.pc];
-                    let ty = d.type_of(op);
+                    let instr: InstrId = self.read().blocks[frame.block].instrs[frame.pc];
+                    let ty = d.type_of(instr);
                     let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
                     let frame = stack.last_mut().unwrap();
@@ -1674,8 +1674,8 @@ impl DriverRwRef<'_> {
                         .as_ptr();
                     Value::from_usize(statik as usize)
                 },
-                &InstrKind::Pointer { op, is_mut } => {
-                    let ty = frame.get_val(op, &self.read()).as_ty().ptr_with_mut(is_mut);
+                &InstrKind::Pointer { instr, is_mut } => {
+                    let ty = frame.get_val(instr, &self.read()).as_ty().ptr_with_mut(is_mut);
                     Value::from_new_internal(ty, &d)
                 },
                 &InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
@@ -1750,7 +1750,7 @@ impl DriverRwRef<'_> {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
                     let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
                     let interp = INTERP.read().unwrap();
-                    let target = if let Some(table) = interp.switch_cache.get(&next_op) {
+                    let target = if let Some(table) = interp.switch_cache.get(&next_instr) {
                         let target = table.get(scrutinee.as_ref()).cloned();
                         drop(interp);
                         target
@@ -1762,7 +1762,7 @@ impl DriverRwRef<'_> {
                             let val = val.as_bytes_without_driver();
                             table.insert(val.as_ref().to_owned().into_boxed_slice(), case.target);
                         }
-                        INTERP.write().unwrap().switch_cache.entry(next_op).or_insert(table)
+                        INTERP.write().unwrap().switch_cache.entry(next_instr).or_insert(table)
                             .get(scrutinee.as_ref()).cloned()
                     }.unwrap_or(catch_all_target.clone());
 
@@ -1828,8 +1828,8 @@ impl DriverRwRef<'_> {
 
         let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
-        let op = self.read().blocks[frame.block].instrs[frame.pc];
-        *frame.get_val_mut(op, &self.read()) = val;
+        let instr = self.read().blocks[frame.block].instrs[frame.pc];
+        *frame.get_val_mut(instr, &self.read()) = val;
         frame.pc += 1;
         Ok(None)
     }

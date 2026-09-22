@@ -712,12 +712,12 @@ impl Driver {
             () => {
                 let rhs = expr_stack.pop().unwrap();
                 let lhs = expr_stack.pop().unwrap();
-                let next_op = op_stack.pop().unwrap();
+                let next_instr = op_stack.pop().unwrap();
                 let range = source_info::concat(
                     self.get_range(lhs),
                     self.get_range(rhs),
                 );
-                expr_stack.push(self.bin_op(b, next_op, lhs, rhs, range));
+                expr_stack.push(self.bin_op(b, next_instr, lhs, rhs, range));
             }
         }
 

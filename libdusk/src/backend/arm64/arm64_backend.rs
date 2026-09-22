@@ -32,9 +32,8 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
-                for &op in &d.blocks[func.blocks[0]].instrs {
-                    let instr = &d.instrs[op].kind;
-                    match instr {
+                for &instr in &d.blocks[func.blocks[0]].instrs {
+                    match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -70,7 +69,7 @@ impl Backend for Arm64Backend {
                                     // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
                                     code.blr(Reg::R16);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(op)),
+                                _ => todo!("{}", d.display_mir_instr(instr)),
                             }
                         },
                         &InstrKind::Ret(value) => {
@@ -84,7 +83,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(op)),
+                        _ => todo!("{}", d.display_mir_instr(instr)),
                     }
                 }
                 code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
@@ -101,9 +100,8 @@ impl Backend for Arm64Backend {
                 let frame_size = 16;
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
-                for &op in &d.blocks[func.blocks[0]].instrs {
-                    let instr = &d.instrs[op].kind;
-                    match instr {
+                for &instr in &d.blocks[func.blocks[0]].instrs {
+                    match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -140,7 +138,7 @@ impl Backend for Arm64Backend {
                                     code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(write_console));
                                     code.blr(Reg::R16);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(op)),
+                                _ => todo!("{}", d.display_mir_instr(instr)),
                             }
                         },
                         &InstrKind::Ret(value) => {
@@ -156,7 +154,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(op)),
+                        _ => todo!("{}", d.display_mir_instr(instr)),
                     }
                 }
                 code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
@@ -166,9 +164,8 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
                 code.mov64(Reg::R29, Reg::SP);
 
-                for &op in &d.blocks[func.blocks[0]].instrs {
-                    let instr = &d.instrs[op].kind;
-                    match instr {
+                for &instr in &d.blocks[func.blocks[0]].instrs {
+                    match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -196,7 +193,7 @@ impl Backend for Arm64Backend {
                                     // syscall
                                     code.svc(0);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(op)),
+                                _ => todo!("{}", d.display_mir_instr(instr)),
                             }
                         }
                         &InstrKind::Ret(value) => {
@@ -215,7 +212,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(op)),
+                        _ => todo!("{}", d.display_mir_instr(instr)),
                     }
                 }
                 code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
