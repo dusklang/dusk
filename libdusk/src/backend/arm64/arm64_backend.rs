@@ -25,7 +25,7 @@ impl Backend for Arm64Backend {
 
         let func = &d.mir.functions[func_index];
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
-        assert_eq!(d.num_parameters(func), 0);
+        assert_eq!(func.num_parameters(), 0);
 
         match d.os {
             OperatingSystem::MacOS => {
@@ -34,7 +34,7 @@ impl Backend for Arm64Backend {
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
                 for &instr in &func.blocks[func.entry_block].instrs {
-                    match &d.instrs[instr].kind {
+                    match &func.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -70,11 +70,11 @@ impl Backend for Arm64Backend {
                                     // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
                                     code.blr(Reg::R16);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(instr)),
+                                _ => todo!("{}", d.display_mir_instr(func, instr)),
                             }
                         },
                         &InstrKind::Ret(value) => {
-                            let value = &d.instrs[value].kind;
+                            let value = &func.instrs[value].kind;
                             // If this is the main function, we should return 0 despite the high-level return type being `void`.
                             if is_main {
                                 assert_eq!(value, &InstrKind::Void);
@@ -84,7 +84,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(instr)),
+                        _ => todo!("{}", d.display_mir_instr(func, instr)),
                     }
                 }
                 code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
@@ -102,7 +102,7 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
                 for &instr in &func.blocks[func.entry_block].instrs {
-                    match &d.instrs[instr].kind {
+                    match &func.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -139,11 +139,11 @@ impl Backend for Arm64Backend {
                                     code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(write_console));
                                     code.blr(Reg::R16);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(instr)),
+                                _ => todo!("{}", d.display_mir_instr(func, instr)),
                             }
                         },
                         &InstrKind::Ret(value) => {
-                            let value = &d.instrs[value].kind;
+                            let value = &func.instrs[value].kind;
                             // If this is the main function, we should call ExitProcess.
                             if is_main {
                                 assert_eq!(value, &InstrKind::Void);
@@ -155,7 +155,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(instr)),
+                        _ => todo!("{}", d.display_mir_instr(func, instr)),
                     }
                 }
                 code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
@@ -166,7 +166,7 @@ impl Backend for Arm64Backend {
                 code.mov64(Reg::R29, Reg::SP);
 
                 for &instr in &func.blocks[func.entry_block].instrs {
-                    match &d.instrs[instr].kind {
+                    match &func.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
                                 &Const::Str { id, .. } => {
@@ -194,11 +194,11 @@ impl Backend for Arm64Backend {
                                     // syscall
                                     code.svc(0);
                                 },
-                                _ => todo!("{}", d.display_mir_instr(instr)),
+                                _ => todo!("{}", d.display_mir_instr(func, instr)),
                             }
                         }
                         &InstrKind::Ret(value) => {
-                            let value = &d.instrs[value].kind;
+                            let value = &func.instrs[value].kind;
                             // If this is the main function, we should call exit().
                             if is_main {
                                 assert_eq!(value, &InstrKind::Void);
@@ -213,7 +213,7 @@ impl Backend for Arm64Backend {
                                 todo!();
                             }
                         },
-                        _ => todo!("{}", d.display_mir_instr(instr)),
+                        _ => todo!("{}", d.display_mir_instr(func, instr)),
                     }
                 }
                 code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);

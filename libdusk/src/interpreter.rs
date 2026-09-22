@@ -22,7 +22,7 @@ use crate::index_vec::range_iter;
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
-use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId, VOID_INSTR};
+use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -361,7 +361,7 @@ impl StackFrame {
         let func = function_by_ref(&d.mir, &self.func_ref);
         for (i, &arg) in target.arguments.iter().enumerate() {
             let param_instr_id = func.blocks[target.bb].instrs[i];
-            let param = &d.instrs[param_instr_id].kind;
+            let param = &func.instrs[param_instr_id].kind;
             assert!(matches!(param, InstrKind::Parameter(_)));
             self.results.insert(param_instr_id, self.results[&arg].clone());
         }
@@ -468,81 +468,80 @@ impl Interpreter {
 }
 
 macro_rules! bin_op {
-    ($salf:ident, $stack:ident, $args:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $stack, $args, lhs, rhs, ty, final_val);
-        bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $first_ty | $($ty)|+, {$sign}, final_val);
+    ($salf:ident, $func:ident, $stack:ident, $args:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $func, $stack, $args, lhs, rhs, ty, final_val);
+        bin_op!(@kontinue $salf, $func, ty, lhs, rhs, $conv, $first_ty | $($ty)|+, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
-    ($salf:ident, $stack:ident, $args:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
-        bin_op!(@preamble $salf, $stack, $args, lhs, rhs, ty, final_val);
-        bin_op!(@kontinue $salf, ty, lhs, rhs, $conv, $ty, {$sign}, final_val);
+    ($salf:ident, $func:ident, $stack:ident, $args:ident, $conv:ident, $ty:ident, {$sign:tt}) => {{
+        bin_op!(@preamble $salf, $func, $stack, $args, lhs, rhs, ty, final_val);
+        bin_op!(@kontinue $salf, $func, ty, lhs, rhs, $conv, $ty, {$sign}, final_val);
         final_val.expect("Unexpected type for arguments")
     }};
-    (@kontinue $salf:ident, $ty_var:ident, $lhs:ident, $rhs:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}, $final_val:ident) => {
-        bin_op!(@kontinue $salf, $ty_var, $lhs, $rhs, $conv, $first_ty, {$sign}, $final_val);
-        bin_op!(@kontinue $salf, $ty_var, $lhs, $rhs, $conv, $($ty)|+, {$sign}, $final_val);
+    (@kontinue $salf:ident, $func:ident, $ty_var:ident, $lhs:ident, $rhs:ident, $conv:ident, $first_ty:ident | $($ty:ident)|+, {$sign:tt}, $final_val:ident) => {
+        bin_op!(@kontinue $salf, $func, $ty_var, $lhs, $rhs, $conv, $first_ty, {$sign}, $final_val);
+        bin_op!(@kontinue $salf, $func, $ty_var, $lhs, $rhs, $conv, $($ty)|+, {$sign}, $final_val);
     };
-    (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, SignedInt, {$sign:tt}, $final_val:ident) => {
+    (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, SignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
             assert_eq!($salf.read().arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
-                (W8, true) => bin_op!(@out $final_val, $conv, i8, $lhs, $rhs, {$sign}),
-                (W16, true) => bin_op!(@out $final_val, $conv, i16, $lhs, $rhs, {$sign}),
-                (W32, true) => bin_op!(@out $final_val, $conv, i32, $lhs, $rhs, {$sign}),
-                (W64, true) | (Pointer, true) => bin_op!(@out $final_val, $conv, i64, $lhs, $rhs, {$sign}),
+                (W8, true) => bin_op!(@out $final_val, $func, $conv, i8, $lhs, $rhs, {$sign}),
+                (W16, true) => bin_op!(@out $final_val, $func, $conv, i16, $lhs, $rhs, {$sign}),
+                (W32, true) => bin_op!(@out $final_val, $func, $conv, i32, $lhs, $rhs, {$sign}),
+                (W64, true) | (Pointer, true) => bin_op!(@out $final_val, $func, $conv, i64, $lhs, $rhs, {$sign}),
                 _ => {},
             }
         }
     };
-    (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, UnsignedInt, {$sign:tt}, $final_val:ident) => {
+    (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, UnsignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
             assert_eq!($salf.read().arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
-                (W8, false) => bin_op!(@out $final_val, $conv, u8, $lhs, $rhs, {$sign}),
-                (W16, false) => bin_op!(@out $final_val, $conv, u16, $lhs, $rhs, {$sign}),
-                (W32, false) => bin_op!(@out $final_val, $conv, u32, $lhs, $rhs, {$sign}),
-                (W64, false) | (Pointer, false) => bin_op!(@out $final_val, $conv, u64, $lhs, $rhs, {$sign}),
+                (W8, false) => bin_op!(@out $final_val, $func, $conv, u8, $lhs, $rhs, {$sign}),
+                (W16, false) => bin_op!(@out $final_val, $func, $conv, u16, $lhs, $rhs, {$sign}),
+                (W32, false) => bin_op!(@out $final_val, $func, $conv, u32, $lhs, $rhs, {$sign}),
+                (W64, false) | (Pointer, false) => bin_op!(@out $final_val, $func, $conv, u64, $lhs, $rhs, {$sign}),
                 _ => {},
             }
         }
     };
-    (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Float, {$sign:tt}, $final_val:ident) => {
+    (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Float, {$sign:tt}, $final_val:ident) => {
         if let Type::Float(width) = $ty {
             match width {
-                FloatWidth::W32 => bin_op!(@out $final_val, $conv, f32, $lhs, $rhs, {$sign}),
-                FloatWidth::W64 => bin_op!(@out $final_val, $conv, f64, $lhs, $rhs, {$sign}),
+                FloatWidth::W32 => bin_op!(@out $final_val, $func, $conv, f32, $lhs, $rhs, {$sign}),
+                FloatWidth::W64 => bin_op!(@out $final_val, $func, $conv, f64, $lhs, $rhs, {$sign}),
             }
         }
     };
-    (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Bool, {$sign:tt}, $final_val:ident) => {
+    (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Bool, {$sign:tt}, $final_val:ident) => {
         if let Type::Bool = $ty {
-            bin_op!(@out $final_val, $conv, bool, $lhs, $rhs, {$sign});
+            bin_op!(@out $final_val, $func, $conv, bool, $lhs, $rhs, {$sign});
         }
     };
-    (@kontinue $salf:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Int, {$sign:tt}, $final_val:ident) => {
-        bin_op!(@kontinue $salf, $ty, $lhs, $rhs, $conv, UnsignedInt | SignedInt, {$sign}, $final_val);
+    (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, Int, {$sign:tt}, $final_val:ident) => {
+        bin_op!(@kontinue $salf, $func, $ty, $lhs, $rhs, $conv, UnsignedInt | SignedInt, {$sign}, $final_val);
     };
-    (@preamble $salf:ident, $stack:ident, $args:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
+    (@preamble $salf:ident, $func:ident, $stack:ident, $args:ident, $lhs:ident, $rhs:ident, $ty:ident, $final_val:ident) => {
         let frame = $stack.last().unwrap();
         assert_eq!($args.len(), 2);
         let ($lhs, $rhs) = ($args[0], $args[1]);
-        let salf = $salf.read();
-        let $ty = salf.type_of($lhs);
-        assert_eq!($ty, $salf.read().type_of($rhs));
+        let $ty = $func.type_of($lhs);
+        assert_eq!($ty, $func.type_of($rhs));
         let ($lhs, $rhs) = (frame.get_val($lhs, &*$salf.read()), frame.get_val($rhs, &*$salf.read()));
         let mut $final_val = None;
     };
-    (@out $final_val:ident, no_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
+    (@out $final_val:ident, $func:ident, no_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
         paste!($final_val = Some($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]()));
     };
-    (@out $final_val:ident, convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
+    (@out $final_val:ident, $func:ident, convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
         paste!($final_val = Some(Value::[<from_ $ty>]($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())))
     };
-    (@out $final_val:ident, bool_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
+    (@out $final_val:ident, $func:ident, bool_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
         paste!($final_val = Some(Value::from_bool($lhs.[<as_ $ty>]() $sign $rhs.[<as_ $ty>]())))
     };
 }
@@ -674,11 +673,11 @@ impl Driver {
 
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
         let func = function_by_ref(&self.mir, &func_ref);
-        let entry_block = func.entry_block;
+        let entry_block_id = func.entry_block;
 
         let mut results = HashMap::new();
 
-        let num_parameters = self.num_parameters(func);
+        let num_parameters = func.num_parameters();
         if num_parameters != arguments.len() {
             let interner = self.interner.read().unwrap();
             let func_name = func.name.map(|name| interner.resolve(name).unwrap()).unwrap_or("<anonymous func>");
@@ -689,11 +688,10 @@ impl Driver {
                 num_parameters
             );
         }
-        let start_block = &func.blocks[entry_block];
-        results.insert(VOID_INSTR, Value::Nothing); // void
+        let entry_block = &func.blocks[entry_block_id];
         for (i, arg) in arguments.into_iter().enumerate() {
-            let instr_id = start_block.instrs[i];
-            let param = &self.instrs[instr_id].kind;
+            let instr_id = entry_block.instrs[i];
+            let param = &func.instrs[instr_id].kind;
             assert!(matches!(param, InstrKind::Parameter(_)));
             results.insert(instr_id, arg);
         }
@@ -706,7 +704,7 @@ impl Driver {
 
         StackFrame {
             func_ref,
-            block: entry_block,
+            block: entry_block_id,
             pc: num_parameters,
             generic_ctx,
             results,
@@ -1258,24 +1256,25 @@ impl DriverRwRef<'_> {
     fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
-            let frame = stack.last_mut().unwrap();
+            let frame = stack.last().unwrap();
             let next_instr = frame.cur_instr(&self.read().mir);
             let d = self.read();
-            match &d.instrs[next_instr].kind {
+            let func = function_by_ref(&d.mir, &frame.func_ref);
+            match func.instrs[next_instr].kind.clone() {
                 InstrKind::Void => Value::Nothing,
                 InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
                 InstrKind::Alloca(ty) => {
-                    let storage = vec![0; self.read().size_of(ty)];
+                    let storage = vec![0; self.read().size_of(&ty)];
                     Value::Dynamic(storage.into_boxed_slice())
                 },
-                &InstrKind::LogicalNot(val) => {
+                InstrKind::LogicalNot(val) => {
                     let val = frame.get_val(val, &self.read()).as_bool();
                     Value::from_bool(!val)
                 },
-                &InstrKind::FunctionRef { ref generic_arguments, func } => {
+                InstrKind::FunctionRef { ref generic_arguments, func } => {
                     Value::from_internal(InternalValue::FunctionPointer { generic_arguments: generic_arguments.clone(), func })
                 },
-                &InstrKind::Call { ref arguments, ref generic_arguments, func } => {
+                InstrKind::Call { ref arguments, ref generic_arguments, func } => {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
                     for &arg in arguments {
@@ -1289,22 +1288,22 @@ impl DriverRwRef<'_> {
                     drop(d);
                     self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
                 },
-                &InstrKind::ExternCall { ref arguments, func } => {
+                InstrKind::ExternCall { ref arguments, func: callee } => {
                     let mut copied_args = Vec::new();
                     copied_args.reserve_exact(arguments.len());
                     let mut arg_tys = Vec::new();
                     arg_tys.reserve_exact(arguments.len());
                     for &arg in arguments {
                         copied_args.push(frame.get_val(arg, &self.read()).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
-                        arg_tys.push(d.type_of(arg).clone());
+                        arg_tys.push(func.type_of(arg).clone());
                     }
                     drop(stack);
                     drop(d);
                     self.read_only();
-                    self.extern_call(func, copied_args, arg_tys)
+                    self.extern_call(callee, copied_args, arg_tys)
                 },
                 #[cfg(target_os = "macos")]
-                &InstrKind::ObjcClassRef { extern_mod, index } => {
+                InstrKind::ObjcClassRef { extern_mod, index } => {
                     let library = &self.read().mir.extern_mods[&extern_mod];
                     let mut interp = INTERP.write().unwrap();
                     let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
@@ -1327,25 +1326,25 @@ impl DriverRwRef<'_> {
                     Value::from_usize(cache.objc_classes[index] as usize)
                 },
                 #[cfg(not(target_os = "macos"))]
-                &InstrKind::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
-                &InstrKind::GenericParam(id) => {
+                InstrKind::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
+                InstrKind::GenericParam(id) => {
                     let ty = Type::GenericParam(id);
                     let ty = frame.canonicalize_type(&ty);
                     Value::from_new_internal(ty, &d)
                 },
-                &InstrKind::LegacyIntrinsic { ref arguments, intr, .. } => {
+                InstrKind::LegacyIntrinsic { ref arguments, intr, .. } => {
                     match intr {
-                        LegacyIntrinsic::Mult => bin_op!(self, stack, arguments, convert, Int | Float, {*}),
-                        LegacyIntrinsic::Div => bin_op!(self, stack, arguments, convert, Int | Float, {/}),
-                        LegacyIntrinsic::Mod => bin_op!(self, stack, arguments, convert, Int | Float, {%}),
-                        LegacyIntrinsic::Add => bin_op!(self, stack, arguments, convert, Int | Float, {+}),
-                        LegacyIntrinsic::Sub => bin_op!(self, stack, arguments, convert, Int | Float, {-}),
-                        LegacyIntrinsic::Less => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<}),
-                        LegacyIntrinsic::LessOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {<=}),
-                        LegacyIntrinsic::Greater => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>}),
-                        LegacyIntrinsic::GreaterOrEq => bin_op!(self, stack, arguments, bool_convert, Int | Float, {>=}),
+                        LegacyIntrinsic::Mult => bin_op!(self, func, stack, arguments, convert, Int | Float, {*}),
+                        LegacyIntrinsic::Div => bin_op!(self, func, stack, arguments, convert, Int | Float, {/}),
+                        LegacyIntrinsic::Mod => bin_op!(self, func, stack, arguments, convert, Int | Float, {%}),
+                        LegacyIntrinsic::Add => bin_op!(self, func, stack, arguments, convert, Int | Float, {+}),
+                        LegacyIntrinsic::Sub => bin_op!(self, func, stack, arguments, convert, Int | Float, {-}),
+                        LegacyIntrinsic::Less => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<}),
+                        LegacyIntrinsic::LessOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<=}),
+                        LegacyIntrinsic::Greater => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>}),
+                        LegacyIntrinsic::GreaterOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>=}),
                         LegacyIntrinsic::Eq => {
-                            let ty = d.type_of(arguments[0]);
+                            let ty = func.type_of(arguments[0]);
                             match ty {
                                 Type::Enum(_) => {
                                     assert_eq!(arguments.len(), 2);
@@ -1356,11 +1355,11 @@ impl DriverRwRef<'_> {
                                     let b = b.as_big_int(false);
                                     Value::from_bool(a == b)
                                 }
-                                _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {==}),
+                                _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {==}),
                             }
                         },
                         LegacyIntrinsic::NotEq => {
-                            let ty = d.type_of(arguments[0]);
+                            let ty = func.type_of(arguments[0]);
                             match ty {
                                 Type::Enum(_) => {
                                     assert_eq!(arguments.len(), 2);
@@ -1371,20 +1370,20 @@ impl DriverRwRef<'_> {
                                     let b = b.as_big_int(false);
                                     Value::from_bool(a != b)
                                 }
-                                _ => bin_op!(self, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
+                                _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
                             }
                         },
-                        LegacyIntrinsic::BitwiseAnd => bin_op!(self, stack, arguments, convert, Int | Bool, {&}),
-                        LegacyIntrinsic::BitwiseOr => bin_op!(self, stack, arguments, convert, Int | Bool, {|}),
-                        LegacyIntrinsic::BitwiseXor => bin_op!(self, stack, arguments, convert, Int | Bool, {^}),
-                        LegacyIntrinsic::LeftShift => bin_op!(self, stack, arguments, convert, Int, {<<}),
-                        LegacyIntrinsic::RightShift => bin_op!(self, stack, arguments, convert, Int, {>>}),
+                        LegacyIntrinsic::BitwiseAnd => bin_op!(self, func, stack, arguments, convert, Int | Bool, {&}),
+                        LegacyIntrinsic::BitwiseOr => bin_op!(self, func, stack, arguments, convert, Int | Bool, {|}),
+                        LegacyIntrinsic::BitwiseXor => bin_op!(self, func, stack, arguments, convert, Int | Bool, {^}),
+                        LegacyIntrinsic::LeftShift => bin_op!(self, func, stack, arguments, convert, Int, {<<}),
+                        LegacyIntrinsic::RightShift => bin_op!(self, func, stack, arguments, convert, Int, {>>}),
                         LegacyIntrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
                         LegacyIntrinsic::Neg => {
                             assert_eq!(arguments.len(), 1);
                             let frame = stack.last().unwrap();
                             let arg = arguments[0];
-                            let ty = d.type_of(arg);
+                            let ty = func.type_of(arg);
                             let arg = frame.get_val(arg, &self.read());
                             match *ty {
                                 Type::Int { width, is_signed } => {
@@ -1400,7 +1399,7 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::BitwiseNot => {
                             assert_eq!(arguments.len(), 1);
                             let arg = arguments[0];
-                            let ty = d.type_of(arg);
+                            let ty = func.type_of(arg);
                             let arg = frame.get_val(arg, &self.read());
                             match ty {
                                 &Type::Int { width, .. } => {
@@ -1433,7 +1432,7 @@ impl DriverRwRef<'_> {
                             assert_eq!(arguments.len(), 1);
                             let id = arguments[0];
                             let val = frame.get_val(id, &self.read());
-                            let ty = d.type_of(id);
+                            let ty = func.type_of(id);
                             match ty {
                                 Type::Pointer(_) => unsafe {
                                     let mut ptr = val.as_raw_ptr();
@@ -1551,22 +1550,22 @@ impl DriverRwRef<'_> {
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
                     }
                 },
-                &InstrKind::Intrinsic { ref arguments, intr } => {
+                InstrKind::Intrinsic { ref arguments, intr } => {
                     let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
                     let implementation = d.ast.intrinsics[intr].implementation;
                     drop(d);
                     implementation(self, arguments)
                 },
-                &InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
-                &InstrKind::Truncate(instr, ref ty) => {
+                InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
+                InstrKind::Truncate(instr, ref ty) => {
                     let frame = stack.last().unwrap();
                     let bytes = frame.get_val(instr, &self.read()).as_bytes_without_driver();
                     let new_size = self.read().size_of(ty);
                     Value::from_bytes(&bytes[0..new_size])
                 },
-                &InstrKind::SignExtend(val, ref dest_ty) => {
+                InstrKind::SignExtend(val, ref dest_ty) => {
                     let frame = stack.last().unwrap();
-                    let src_ty = d.type_of(val);
+                    let src_ty = func.type_of(val);
                     let val = frame.get_val(val, &self.read());
                     match (src_ty, dest_ty) {
                         (
@@ -1576,9 +1575,9 @@ impl DriverRwRef<'_> {
                         (_, _) => panic!("Invalid operand types to sign extension")
                     }
                 },
-                &InstrKind::ZeroExtend(val, ref dest_ty) => {
+                InstrKind::ZeroExtend(val, ref dest_ty) => {
                     let frame = stack.last().unwrap();
-                    let src_ty = d.type_of(val);
+                    let src_ty = func.type_of(val);
                     let val = frame.get_val(val, &self.read());
                     match (src_ty, dest_ty) {
                         (
@@ -1588,7 +1587,7 @@ impl DriverRwRef<'_> {
                         (_, _) => panic!("Invalid operand types to zero extension")
                     }
                 },
-                &InstrKind::FloatCast(instr, ref ty) => {
+                InstrKind::FloatCast(instr, ref ty) => {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, &self.read());
                     match (val.as_bytes_without_driver().len(), self.read().size_of(ty)) {
@@ -1600,10 +1599,10 @@ impl DriverRwRef<'_> {
                         (_, _) => panic!("Unexpected float cast type sizes"),
                     }
                 },
-                &InstrKind::FloatToInt(instr, ref dest_ty) => {
+                InstrKind::FloatToInt(instr, ref dest_ty) => {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, &self.read());
-                    let src_ty = d.type_of(instr);
+                    let src_ty = func.type_of(instr);
                     let src_size = self.read().size_of(src_ty);
 
                     match dest_ty {
@@ -1628,10 +1627,10 @@ impl DriverRwRef<'_> {
                         _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                     }
                 }
-                &InstrKind::IntToFloat(instr, ref dest_ty) => {
+                InstrKind::IntToFloat(instr, ref dest_ty) => {
                     let frame = stack.last().unwrap();
                     let val = frame.get_val(instr, &self.read());
-                    let src_ty = d.type_of(instr);
+                    let src_ty = func.type_of(instr);
                     let dest_size = self.read().size_of(dest_ty);
                     match src_ty {
                         &Type::Int { is_signed, .. } => {
@@ -1655,22 +1654,23 @@ impl DriverRwRef<'_> {
                         _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
                     }
                 }
-                &InstrKind::Load(location) => {
+                InstrKind::Load(location) => {
                     let frame = stack.last().unwrap();
                     let instr = frame.cur_instr(&d.mir);
-                    let ty = d.type_of(instr);
+                    let ty = func.type_of(instr);
                     let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
                     let frame = stack.last_mut().unwrap();
                     frame.get_val(location, &self.read()).load(size)
                 },
-                &InstrKind::Store { location, value } => {
+                InstrKind::Store { location, value } => {
                     let val = frame.get_val(value, &self.read()).clone();
+                    let frame = stack.last_mut().unwrap();
                     let result = frame.get_val_mut(location, &self.read());
                     result.store(val);
                     Value::Nothing
                 },
-                &InstrKind::AddressOfStatic(statik) => {
+                InstrKind::AddressOfStatic(statik) => {
                     if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
                         panic!("Can't access static at compile time!");
                     }
@@ -1681,11 +1681,11 @@ impl DriverRwRef<'_> {
                         .as_ptr();
                     Value::from_usize(statik as usize)
                 },
-                &InstrKind::Pointer { instr, is_mut } => {
+                InstrKind::Pointer { instr, is_mut } => {
                     let ty = frame.get_val(instr, &self.read()).as_ty().ptr_with_mut(is_mut);
                     Value::from_new_internal(ty, &d)
                 },
-                &InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
+                InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                     let param_tys = param_tys.iter()
                         .map(|&ty| frame.get_val(ty, &self.read()).as_ty())
                         .collect();
@@ -1693,7 +1693,7 @@ impl DriverRwRef<'_> {
                     let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
                     Value::from_new_internal(ty, &d)
                 }
-                &InstrKind::Struct { ref fields, id } => {
+                InstrKind::Struct { ref fields, id } => {
                     let mut field_tys = Vec::new();
                     for &field in fields {
                         field_tys.push(frame.get_val(field, &self.read()).as_ty());
@@ -1705,7 +1705,7 @@ impl DriverRwRef<'_> {
                     };
                     Value::from_new_internal(Type::Struct(strukt), &self.read())
                 },
-                &InstrKind::Enum { ref variants, id } => {
+                InstrKind::Enum { ref variants, id } => {
                     if !self.read().mir.enums.contains_key(&id) {
                         let mut payload_tys = Vec::new();
                         for &variant in variants {
@@ -1721,11 +1721,11 @@ impl DriverRwRef<'_> {
                     let payload_tys = self.read().mir.enums[&id].payload_tys.to_vec();
                     Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
                 }
-                &InstrKind::StructLit { ref fields, id } => {
+                InstrKind::StructLit { ref fields, id } => {
                     let frame = stack.last().unwrap();
                     let field_tys: Vec<_> = fields.iter()
                         .map(|&instr| {
-                            let ty = d.type_of(instr);
+                            let ty = func.type_of(instr);
                             frame.canonicalize_type(ty)
                         })
                         .collect();
@@ -1739,21 +1739,23 @@ impl DriverRwRef<'_> {
                     };
                     self.read().eval_struct_lit(&strukt, fields.into_iter())
                 },
-                &InstrKind::Ret(instr) => {
+                InstrKind::Ret(instr) => {
                     let val = frame.get_val(instr, &self.read()).clone();
                     return Ok(Some(val));
                 },
                 InstrKind::Jump(target) => {
-                    frame.jump_to(target, &d);
+                    let frame = stack.last_mut().unwrap();
+                    frame.jump_to(&target, &d);
                     return Ok(None);
                 },
                 InstrKind::CondBr { condition, true_target, false_target } => {
-                    let condition = frame.get_val(*condition, &d).as_bool();
+                    let condition = frame.get_val(condition, &d).as_bool();
                     let target = if condition { true_target } else { false_target };
-                    frame.jump_to(target, &d);
+                    let frame = stack.last_mut().unwrap();
+                    frame.jump_to(&target, &d);
                     return Ok(None);
                 },
-                &InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
+                InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
                     // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
                     let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
                     let interp = INTERP.read().unwrap();
@@ -1777,24 +1779,24 @@ impl DriverRwRef<'_> {
                     frame.jump_to(&target, &d);
                     return Ok(None);
                 },
-                &InstrKind::Variant { enuum, index, payload } => {
+                InstrKind::Variant { enuum, index, payload } => {
                     let payload = frame.get_val(payload, &self.read()).clone();
                     Value::from_variant(&self.read(), enuum, index, payload)
                 },
-                &InstrKind::PayloadAccess { val, variant_index: _ } => {
-                    let enum_ty = d.type_of(val).as_enum().unwrap();
+                InstrKind::PayloadAccess { val, variant_index: _ } => {
+                    let enum_ty = func.type_of(val).as_enum().unwrap();
                     let enum_val = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
                     enum_val.payload
                 },
-                &InstrKind::DiscriminantAccess { val } => {
-                    let enum_ty = d.type_of(val).as_enum().unwrap();
+                InstrKind::DiscriminantAccess { val } => {
+                    let enum_ty = func.type_of(val).as_enum().unwrap();
                     let enuum = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
                     Value::from_u32(enuum.discriminant)
                 },
-                &InstrKind::DirectFieldAccess { val, index } => {
+                InstrKind::DirectFieldAccess { val, index } => {
                     let frame = stack.last().unwrap();
                     let bytes = frame.get_val(val, &self.read()).as_bytes_without_driver();
-                    let strukt = match d.type_of(val) {
+                    let strukt = match func.type_of(val) {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
@@ -1803,17 +1805,17 @@ impl DriverRwRef<'_> {
                     let offset = layout.field_offsets[index];
                     Value::from_bytes(&bytes[offset..][..size])
                 },
-                &InstrKind::IndirectFieldAccess { val, index } => {
+                InstrKind::IndirectFieldAccess { val, index } => {
                     let addr = frame.get_val(val, &self.read()).as_usize();
-                    let base_ty = &d.type_of(val).deref().unwrap().ty;
+                    let base_ty = &func.type_of(val).deref().unwrap().ty;
                     let strukt = match base_ty {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
-                    let offset = self.read().layout_struct(strukt).field_offsets[index];
+                    let offset = self.read().layout_struct(&strukt).field_offsets[index];
                     Value::from_usize(addr + offset)
                 },
-                &InstrKind::InternalFieldAccess { val, field } => {
+                InstrKind::InternalFieldAccess { val, field } => {
                     let val = frame.get_val(val, &self.read()).as_internal();
                     match (val, field) {
                         (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {

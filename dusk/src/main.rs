@@ -179,7 +179,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let main = driver.read().mir.functions.iter()
         .position(|func| {
             match func.name {
-                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && driver.read().num_parameters(func) == 0,
+                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
             }
         }).map(FuncId::new);

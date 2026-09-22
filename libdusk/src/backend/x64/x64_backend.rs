@@ -25,7 +25,7 @@ impl Backend for X64Backend {
 
         let func = &d.mir.functions[func_index];
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
-        assert_eq!(d.num_parameters(func), 0);
+        assert_eq!(func.num_parameters(), 0);
 
         let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
         let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
@@ -35,7 +35,7 @@ impl Backend for X64Backend {
 
         code.sub64_imm(Reg64::Rsp, 72);
         for &instr in &func.blocks[func.entry_block].instrs {
-            match &d.instrs[instr].kind {
+            match &func.instrs[instr].kind {
                 InstrKind::Const(konst) => {
                     match konst {
                         &Const::Str { id, .. } => {
@@ -68,11 +68,11 @@ impl Backend for X64Backend {
                             code.mov64(Reg64::Rcx, Reg64::R13);
                             code.call(exe.use_imported_symbol(write_console));
                         },
-                        _ => todo!("{}", d.display_mir_instr(instr)),
+                        _ => todo!("{}", d.display_mir_instr(func, instr)),
                     }
                 },
                 &InstrKind::Ret(value) => {
-                    let value = &d.instrs[value].kind;
+                    let value = &func.instrs[value].kind;
                     // If this is the main function, we should call ExitProcess.
                     if is_main {
                         assert_eq!(value, &InstrKind::Void);
@@ -82,7 +82,7 @@ impl Backend for X64Backend {
                         todo!();
                     }
                 },
-                _ => todo!("{}", d.display_mir_instr(instr)),
+                _ => todo!("{}", d.display_mir_instr(func, instr)),
             }
         }
 

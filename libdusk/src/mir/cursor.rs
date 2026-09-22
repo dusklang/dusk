@@ -1,6 +1,6 @@
 use crate::index_vec::*;
 
-use crate::mir::{Block, BlockId, Function, FunctionBuilder, InstrId};
+use crate::mir::{Block, BlockId, Function, FunctionBuilder, Instr, InstrId};
 
 // This pattern is heavily inspired by Cranelift
 #[derive(Copy, Clone)]
@@ -9,6 +9,7 @@ pub struct FuncCursor<'func> {
     pub first_block: &'func BlockId,
     pub last_block: &'func BlockId,
     pub entry_block: &'func BlockId,
+    pub instrs: &'func IndexVec<InstrId, Instr>,
     pub position: CursorPosition,
 }
 
@@ -17,6 +18,7 @@ pub struct FuncCursorMut<'func> {
     pub first_block: &'func mut BlockId,
     pub last_block: &'func mut BlockId,
     pub entry_block: &'func mut BlockId,
+    pub instrs: &'func mut IndexVec<InstrId, Instr>,
     pub position: CursorPosition,
 }
 
@@ -129,6 +131,7 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
             first_block: self.first_block,
             last_block: self.last_block,
             entry_block: self.entry_block,
+            instrs: self.instrs,
             position: CursorPosition::None,
         }
     }
@@ -193,6 +196,7 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
             first_block: self.first_block,
             last_block: self.last_block,
             entry_block: self.entry_block,
+            instrs: self.instrs,
             position: CursorPosition::None,
         }
     }
@@ -205,6 +209,7 @@ impl Function {
             first_block: &self.first_block,
             last_block: &self.last_block,
             entry_block: &self.entry_block,
+            instrs: &self.instrs,
             position: CursorPosition::None,
         }
     }
@@ -215,6 +220,7 @@ impl Function {
             first_block: &mut self.first_block,
             last_block: &mut self.last_block,
             entry_block: &mut self.entry_block,
+            instrs: &mut self.instrs,
             position: CursorPosition::None,
         }
     }
@@ -227,6 +233,7 @@ impl FunctionBuilder {
             first_block: &self.first_block,
             last_block: &self.last_block,
             entry_block: &self.entry_block,
+            instrs: &self.instrs,
             position: CursorPosition::None,
         }
     }
@@ -237,6 +244,7 @@ impl FunctionBuilder {
             first_block: &mut self.first_block,
             last_block: &mut self.last_block,
             entry_block: &mut self.entry_block,
+            instrs: &mut self.instrs,
             position: CursorPosition::None,
         }
     }

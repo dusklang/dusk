@@ -1,14 +1,11 @@
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use string_interner::DefaultStringInterner as StringInterner;
 
-use crate::index_vec::*;
 use crate::ast::{Ast, ExprId, GenericCtx};
-use crate::mir::{Const, Instr, InstrId, InstrKind, Mir, VOID_INSTR};
+use crate::mir::{Const, Mir};
 use crate::target::{Arch, OperatingSystem};
-use crate::source_info::SourceRange;
 use crate::internal_types::InternalFieldDecls;
 use crate::source_info::SourceMap;
-use crate::ty::Type;
 use crate::type_interner::TypeInterner;
 use crate::tir;
 use crate::error::DiagnosticReporter;
@@ -35,7 +32,6 @@ pub struct Driver {
 
     // Mutable state
     pub tir_builder: tir::Builder,
-    pub instrs: IndexVec<InstrId, Instr>,
     pub ast: Ast,
     pub mir: Mir,
 }
@@ -53,12 +49,9 @@ impl Driver {
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
-            instrs: index_vec![Instr::new(InstrKind::Void, Type::Void)],
             ast: Ast::default(),
             mir: Mir::default(),
         };
-        val.mir.source_ranges.insert(VOID_INSTR, SourceRange::default());
-        val.mir.instr_names.insert(VOID_INSTR, "void".to_string());
         val.ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
