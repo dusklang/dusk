@@ -51,9 +51,10 @@ impl Instr {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct Block {
     pub instrs: Vec<InstrId>,
+    pub inactive: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -299,14 +300,50 @@ impl InstrNamespace {
 pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
-    /// Index 0 is defined to be the entry block
-    pub blocks: Vec<BlockId>,
+    pub blocks: IndexVec<BlockId, Block>,
+    pub entry_block: BlockId,
     pub decl: Option<DeclId>,
-    // Note: Is a Vec, not a Range, because generic params might not always be contiguous in
-    // GenericParamId space
     pub generic_params: Range<GenericParamId>,
     pub instr_namespace: InstrNamespace,
     pub is_comptime: bool,
+}
+
+impl Function {
+    pub fn blocks_enumerated(&self) -> impl Iterator<Item=(BlockId, &Block)> {
+        self.blocks.iter_enumerated().filter(|(_, block)| !block.inactive)
+    }
+
+    pub fn blocks_mut_enumerated(&mut self) -> impl Iterator<Item=(BlockId, &mut Block)> {
+        self.blocks.iter_mut_enumerated().filter(|(_, block)| !block.inactive)
+    }
+
+    pub fn blocks(&self) -> impl Iterator<Item=&Block> {
+        self.blocks.iter().filter(|block| !block.inactive)
+    }
+
+    pub fn blocks_mut(&mut self) -> impl Iterator<Item=&mut Block> {
+        self.blocks.iter_mut().filter(|block| !block.inactive)
+    }
+}
+
+impl FunctionBuilder {
+    pub fn blocks_enumerated(&self) -> impl Iterator<Item=(BlockId, &Block)> {
+        self.blocks.iter_enumerated().filter(|(_, block)| !block.inactive)
+    }
+
+    #[allow(unused)]
+    pub fn blocks_mut_enumerated(&mut self) -> impl Iterator<Item=(BlockId, &mut Block)> {
+        self.blocks.iter_mut_enumerated().filter(|(_, block)| !block.inactive)
+    }
+
+    #[allow(unused)]
+    pub fn blocks(&self) -> impl Iterator<Item=&Block> {
+        self.blocks.iter().filter(|block| !block.inactive)
+    }
+
+    pub fn blocks_mut(&mut self) -> impl Iterator<Item=&mut Block> {
+        self.blocks.iter_mut().filter(|block| !block.inactive)
+    }
 }
 
 impl Default for Function {
@@ -315,6 +352,7 @@ impl Default for Function {
             name: Default::default(),
             ty: Default::default(),
             blocks: Default::default(),
+            entry_block: BlockId::new(0),
             decl: Default::default(),
             generic_params: empty_range(),
             instr_namespace: Default::default(),
@@ -325,8 +363,7 @@ impl Default for Function {
 
 impl Driver {
     pub fn parameter_tys(&self, func: &Function) -> impl Iterator<Item=&Type> {
-        let entry = func.blocks[0];
-        let block = &self.blocks[entry];
+        let block = &func.blocks[func.entry_block];
         block.instrs.iter()
             .filter_map(|&instr| {
                 match &self.instrs[instr].kind {
@@ -341,18 +378,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_func(&self, func: &Function, name: &str, w: &mut Formatter) {
-        writeln!(w, "fn {}() {{", name)?;
-        for &block in &func.blocks {
-            write!(w, "%bb{}:\n{}", block.index(), self.display_block(block))?;
-        }
-        writeln!(w, "}}")?;
-        Ok(())
-    }
-
-    #[display_adapter]
-    pub fn display_block(&self, block: BlockId, w: &mut Formatter) {
-        let block = &self.blocks[block];
+    pub fn display_block(&self, block: &Block, w: &mut Formatter) {
         for &id in &block.instrs {
             writeln!(w, "    %instr{} = mir.{:?}", id.index(), self.instrs[id].kind)?;
         }
@@ -412,8 +438,6 @@ pub struct Mir {
 
     // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
     pub poisoned_instrs: HashSet<InstrId>,
-
-    block_states: HashMap<BlockId, BlockState>,
 }
 
 #[derive(Debug)]
@@ -427,22 +451,7 @@ pub enum EndBlockError {
     BlockNotStarted,
 }
 
-impl Mir {
-    pub fn new() -> Self {
-        Mir {
-            strings: IndexVec::new(),
-            functions: IndexVec::new(),
-            statics: IndexVec::new(),
-            extern_mods: HashMap::new(),
-            enums: HashMap::new(),
-            source_ranges: HashMap::new(),
-            instr_names: HashMap::new(),
-            poisoned_instrs: HashSet::new(),
-            block_states: HashMap::new(),
-            decls: HashMap::new(),
-        }
-    }
-
+impl FunctionBuilder {
     fn get_block_state(&mut self, block: BlockId) -> &mut BlockState {
         self.block_states.entry(block).or_insert(BlockState::Created)
     }
@@ -471,16 +480,32 @@ impl Mir {
         }
     }
 
-    pub fn first_unended_block(&self, func: &Function) -> Option<BlockId> {
-        func.blocks.iter().find(|&block| {
-            let state = &self.block_states[block];
-            !matches!(state, BlockState::Ended)
-        }).copied()
+    pub fn first_unended_block(&self) -> Option<BlockId> {
+        self.blocks_enumerated().find_map(|(block_id, _)| {
+            let state = &self.block_states[&block_id];
+            (!matches!(state, BlockState::Ended)).then_some(block_id)
+        })
     }
 
-    pub fn check_all_blocks_ended(&self, func: &Function) {
-        if let Some(block) = self.first_unended_block(func) {
+    pub fn check_all_blocks_ended(&self) {
+        if let Some(block) = self.first_unended_block() {
             panic!("MIR: Block {} was not ended", block.index());
+        }
+    }
+}
+
+impl Mir {
+    pub fn new() -> Self {
+        Mir {
+            strings: IndexVec::new(),
+            functions: IndexVec::new(),
+            statics: IndexVec::new(),
+            extern_mods: HashMap::new(),
+            enums: HashMap::new(),
+            source_ranges: HashMap::new(),
+            instr_names: HashMap::new(),
+            poisoned_instrs: HashSet::new(),
+            decls: HashMap::new(),
         }
     }
 }
@@ -1331,10 +1356,10 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_mir_block(&self, block_index: usize, id: BlockId, f: &mut Formatter) {
-        let block = &self.blocks[id];
+    pub fn display_mir_block(&self, func: &Function, id: BlockId, f: &mut Formatter) {
+        let block = &func.blocks[id];
         write!(f, "%bb{}", id.index())?;
-        if block_index > 0 && matches!(block.instrs.first().map(|&instr| &self.instrs[instr].kind), Some(InstrKind::Parameter(_))) {
+        if id != func.entry_block && matches!(block.instrs.first().map(|&instr| &self.instrs[instr].kind), Some(InstrKind::Parameter(_))) {
             write!(f, "(")?;
             let mut first = true;
             for &instr in &block.instrs {
@@ -1388,7 +1413,7 @@ impl Driver {
             write!(f, "|>")?;
         }
         write!(f, "(")?;
-        let entry_block = &self.blocks[func.blocks[0]];
+        let entry_block = &func.blocks[func.entry_block];
         let mut first = true;
         for &instr in &entry_block.instrs {
             if let InstrKind::Parameter(ty) = &self.instrs[instr].kind {
@@ -1403,9 +1428,11 @@ impl Driver {
             }
         }
         writeln!(f, "): {:?} {{", func.ty.return_ty.as_ref())?;
-        for i in 0..func.blocks.len() {
-            let block_id = func.blocks[i];
-            write!(f, "{}", self.display_mir_block(i, block_id))?;
+        write!(f, "{}", self.display_mir_block(func, func.entry_block))?;
+        for (block_id, _) in func.blocks_enumerated() {
+            if block_id != func.entry_block {
+                write!(f, "{}", self.display_mir_block(func, block_id))?;
+            }
         }
         write!(f, "}}")
     }
@@ -1446,7 +1473,9 @@ struct LoopState {
 struct FunctionBuilder {
     name: Option<Sym>,
     ty: FunctionType,
-    blocks: Vec<BlockId>,
+    blocks: IndexVec<BlockId, Block>,
+    entry_block: BlockId,
+    block_states: HashMap<BlockId, BlockState>,
     current_block: BlockId,
     stored_decl_locs: IndexVec<StoredDeclId, InstrId>,
     instr_namespace: InstrNamespace,
@@ -1468,21 +1497,19 @@ enum DeclRef {
 }
 
 impl Driver {
-    fn create_bb(&mut self, b: &mut FunctionBuilder) -> BlockId {
-        let block = self.blocks.push(Block::default());
-        b.blocks.push(block);
-        block
+    fn create_bb(&self, b: &mut FunctionBuilder) -> BlockId {
+        b.blocks.push(Block::default())
     }
-    fn start_bb(&mut self, b: &mut FunctionBuilder, block: BlockId) {
-        self.mir.start_block(block).unwrap();
+    fn start_bb(&self, b: &mut FunctionBuilder, block: BlockId) {
+        b.start_block(block).unwrap();
         b.current_block = block;
     }
-    fn end_current_bb(&mut self, b: &FunctionBuilder) {
+    fn end_current_bb(&self, b: &mut FunctionBuilder) {
         let bb = b.current_block;
-        if self.mir.end_block(bb).is_err() {
-            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.display_block(bb));
+        if b.end_block(bb).is_err() {
+            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.display_block(&b.blocks[bb]));
         }
-        let block = &self.blocks[bb];
+        let block = &b.blocks[bb];
         let last_instr = &self.instrs[block.instrs.last().copied().unwrap()].kind;
         assert!(
             matches!(last_instr, InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } | InstrKind::Ret { .. } | InstrKind::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
@@ -1517,18 +1544,21 @@ impl DriverRwRef<'_> {
             self.write().mir.instr_names.insert(id, name);
             entry.instrs.push(id);
         }
-        let entry = self.write().blocks.push(entry);
+        let mut blocks = IndexVec::new();
+        let entry_block = blocks.push(entry);
         let mut b = FunctionBuilder {
             name,
             ty: func_ty,
-            blocks: vec![entry],
-            current_block: entry,
+            blocks,
+            entry_block,
+            block_states: HashMap::new(),
+            current_block: entry_block,
             stored_decl_locs: IndexVec::new(),
             instr_namespace,
             loops: Default::default(),
             pattern_matching_scrutinees: Default::default(),
         };
-        self.write().start_bb(&mut b, entry);
+        self.write().start_bb(&mut b, entry_block);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
         let decl = match body {
             FunctionBody::Expr(expr) => {
@@ -1549,24 +1579,32 @@ impl DriverRwRef<'_> {
                         }
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, instr);
                         self.write().push_instr(&mut b, InstrKind::Ret(result), result);
-                        self.write().end_current_bb(&b);
+                        self.write().end_current_bb(&mut b);
                     },
                     InstrKind::DiscriminantAccess { val } | InstrKind::SignExtend(val, _) | InstrKind::ZeroExtend(val, _) => {
                         let mut copier = MirCopier::default();
                         self.copy_instruction_if_needed(&mut b, &mut copier, val);
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, instr);
                         self.write().push_instr(&mut b, InstrKind::Ret(result), result);
-                        self.write().end_current_bb(&b);
+                        self.write().end_current_bb(&mut b);
                     }
                     _ => unimplemented!("{:?}", instruction),
                 }
                 None
             },
         };
+        // Mark inactive blocks
+        for block in b.blocks_mut() {
+            if block.instrs.is_empty() {
+                block.inactive = true;
+            }
+        }
+        b.check_all_blocks_ended();
         let mut function = Function {
             name: b.name,
             ty: b.ty,
             blocks: b.blocks,
+            entry_block: b.entry_block,
             instr_namespace: b.instr_namespace,
             decl,
             generic_params,
@@ -1582,7 +1620,6 @@ impl DriverRwRef<'_> {
         if !function.is_comptime {
             self.check_no_comptime_calls(&function);
         }
-        self.read().mir.check_all_blocks_ended(&function);
         function
     }
 }
@@ -1612,13 +1649,12 @@ impl MirTransformer {
         self.replace_list.push((to_replace, instr));
     }
 
-    fn transform(self, func: &Function, d: &mut Driver) -> bool {
+    fn transform(self, func: &mut Function, d: &mut Driver) -> bool {
         if self.delete_list.is_empty() && self.ref_replace_list.is_empty() && self.replace_list.is_empty() {
             return false;
         }
 
-        for &block_id in &func.blocks {
-            let block = &mut d.blocks[block_id];
+        for block in func.blocks_mut() {
             block.instrs.retain(|instr| !self.delete_list.contains(instr));
             for &instr in &block.instrs {
                 for &(old, new) in &self.ref_replace_list {
@@ -1635,11 +1671,10 @@ impl MirTransformer {
 }
 
 impl Driver {
-    fn remove_redundant_loads(&mut self, func: &Function) -> bool {
+    fn remove_redundant_loads(&mut self, func: &mut Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
         let mut transformer = MirTransformer::default();
-        for &block_id in &func.blocks {
-            let block = &self.blocks[block_id];
+        for block in func.blocks() {
             for (i, &instr_id) in block.instrs.iter().enumerate() {
                 let instr = &self.instrs[instr_id].kind;
                 if let &InstrKind::Store { location, value } = instr
@@ -1655,18 +1690,15 @@ impl Driver {
         transformer.transform(func, self)
     }
 
-    fn remove_unused_allocas(&mut self, func: &Function) -> bool {
+    fn remove_unused_allocas(&mut self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for &block_id in &func.blocks {
-            let block = &self.blocks[block_id];
+        for block in func.blocks() {
             for &instr_id in &block.instrs {
                 let instr = &self.instrs[instr_id].kind;
                 let mut potential_deletions = Vec::new();
                 if let InstrKind::Alloca(_) = instr {
                     let mut is_used = false;
-                    'check_uses: for &other_block_id in &func.blocks {
-                        let other_block = &self.blocks[other_block_id];
-
+                    'check_uses: for other_block in func.blocks() {
                         for &other_instr_id in &other_block.instrs {
                             let other_instr = &self.instrs[other_instr_id].kind;
                             if other_instr.references_value(instr_id) {
@@ -1698,18 +1730,14 @@ impl Driver {
         transformer.transform(func, self)
     }
 
-    fn remove_unused_values(&mut self, func: &Function) -> bool {
+    fn remove_unused_values(&mut self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for &block_id in &func.blocks {
-            let block = &self.blocks[block_id];
-
+        for block in func.blocks() {
             for &instr_id in &block.instrs {
                 let instr = &self.instrs[instr_id].kind;
                 if let InstrKind::Const(_) | InstrKind::Load(_) = instr {
                     let mut is_used = false;
-                    'check_uses: for &other_block_id in &func.blocks {
-                        let other_block = &self.blocks[other_block_id];
-
+                    'check_uses: for other_block in func.blocks() {
                         for &other_instr_id in &other_block.instrs {
                             let other_instr = &self.instrs[other_instr_id].kind;
                             if other_instr.references_value(instr_id) {
@@ -1733,8 +1761,7 @@ impl Driver {
         let mut delete_list = HashSet::new();
         let mut new_entry_block = None;
         let mut did_something = false;
-        for (i, &block_id) in func.blocks.iter().enumerate() {
-            let block = &self.blocks[block_id];
+        for (block_id, block) in func.blocks_enumerated() {
             let mut num_parameters = 0;
             for &instr in &block.instrs {
                 if !matches!(&self.instrs[instr].kind, InstrKind::Parameter(_)) {
@@ -1751,7 +1778,7 @@ impl Driver {
                 replace_list.push((block_id, other.bb));
                 delete_list.insert(block_id);
                 did_something = true;
-                if i == 0 {
+                if block_id == func.entry_block {
                     let parameters = block.instrs[..num_parameters].to_vec();
                     new_entry_block = Some((other.bb, parameters));
                 }
@@ -1760,31 +1787,29 @@ impl Driver {
                 }
             }
         }
-        func.blocks.retain(|block| !delete_list.contains(block));
-        let mut new_entry_block_index = None;
-        for (i, &block_id) in func.blocks.iter().enumerate() {
-            let block = &self.blocks[block_id];
+        for (block_id, block) in func.blocks_mut_enumerated() {
+            if delete_list.contains(&block_id) {
+                block.inactive = true;
+            }
+        }
+        for block in func.blocks() {
             let terminal = *block.instrs.last().unwrap();
             let terminal = &mut self.instrs[terminal].kind;
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
             }
-            if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
-                new_entry_block_index = Some(i);
-            }
         }
         if let Some((new_entry_block, parameters)) = new_entry_block {
-            func.blocks.swap(0, new_entry_block_index.unwrap());
-
-            self.blocks[new_entry_block].instrs.splice(0..0, parameters);
+            func.entry_block = new_entry_block;
+            func.blocks[new_entry_block].instrs.splice(0..0, parameters);
         }
         did_something
     }
 
-    fn traverse_descendants(&self, func: &mut Function, visited: &mut HashSet<BlockId>, block: BlockId) {
+    fn traverse_descendants(&self, func: &Function, visited: &mut HashSet<BlockId>, block: BlockId) {
         if !visited.insert(block) { return; }
 
-        let terminal = *self.blocks[block].instrs.last().unwrap();
+        let terminal = *func.blocks[block].instrs.last().unwrap();
         let terminal = &self.instrs[terminal].kind;
         match terminal {
             InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.bb),
@@ -1803,20 +1828,22 @@ impl Driver {
     }
 
     fn remove_unreachable_blocks(&self, func: &mut Function) -> bool {
-        let num_blocks_before = func.blocks.len();
-
         let mut visited = HashSet::new();
-        self.traverse_descendants(func, &mut visited, func.blocks[0]);
-        func.blocks.retain(|block| visited.contains(block));
+        self.traverse_descendants(func, &mut visited, func.entry_block);
+        let mut removed_blocks = false;
+        for (block_id, block) in func.blocks_mut_enumerated() {
+            if !visited.contains(&block_id) {
+                block.inactive = true;
+                removed_blocks = true;
+            }
+        }
 
-        let num_blocks_after = func.blocks.len();
-        num_blocks_before != num_blocks_after
+        removed_blocks
     }
 
-    fn remove_constant_branches(&mut self, func: &Function) -> bool {
+    fn remove_constant_branches(&mut self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for &block_id in &func.blocks {
-            let block = &self.blocks[block_id];
+        for block in func.blocks() {
             if let Some(&terminal) = block.instrs.last() {
                 match &self.instrs[terminal].kind {
                     InstrKind::CondBr { condition, true_target, false_target } => {
@@ -1848,11 +1875,10 @@ impl Driver {
         transformer.transform(func, self)
     }
 
-    fn remove_return_non_shared_void(&mut self, func: &Function) -> bool {
+    fn remove_return_non_shared_void(&mut self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for &block_id in &func.blocks {
-            let block = &self.blocks[block_id];
-            for instr_id in block.instrs.clone() {
+        for block in func.blocks() {
+            for &instr_id in &block.instrs {
                 let instr = &self.instrs[instr_id].kind;
                 if let &InstrKind::Ret(ret_val) = instr
                     && *func.ty.return_ty == Type::Void && ret_val != VOID_INSTR {
@@ -1924,9 +1950,8 @@ impl DriverRwRef<'_> {
     fn eval_constants(&mut self, func: &Function, tp: &dyn TypeProvider) -> bool {
         let mut did_something = false;
         self.write();
-        for &block in &func.blocks {
-            let instrs = self.read().blocks[block].instrs.clone();
-            for instr in instrs {
+        for block in func.blocks() {
+            for &instr in &block.instrs {
                 // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
                 // functions built. For example, in the MIR equivalent of 2 + 3 + 4, the current implementation would
                 // evaluate 2 + 3 as its own function, then 5 + 4 as another. We should put both operations in the same
@@ -1956,14 +1981,6 @@ impl DriverRwRef<'_> {
     }
 
     fn optimize_function(&mut self, func: &mut Function, should_eval_constants: bool, tp: &dyn TypeProvider) {
-        // Get rid of empty blocks
-        // TODO: get rid of unreachable blocks instead. Otherwise we might accidentally remove an
-        // empty, reachable block and fail silently (at MIR generation time).
-        func.blocks.retain(|&block| {
-            let block = &self.read().blocks[block];
-            !block.instrs.is_empty()
-        });
-
         let mut did_something = true;
         while did_something {
             did_something = false;
@@ -1995,8 +2012,7 @@ impl DriverRwRef<'_> {
     fn check_basic_block_params(&self, func: &Function) {
         let mut block_metadata = HashMap::<BlockId, BlockMetadata>::new();
         let d = self.read();
-        for &bb in &func.blocks {
-            let block = &d.blocks[bb];
+        for (bb, block) in func.blocks_enumerated() {
             let mut expecting_parameters = true;
             let mut param_tys = SmallVec::new();
             for &instr in &block.instrs {
@@ -2012,8 +2028,7 @@ impl DriverRwRef<'_> {
             block_metadata.insert(bb, BlockMetadata { param_tys });
         }
 
-        for &bb in &func.blocks {
-            let block = &d.blocks[bb];
+        for (bb, block) in func.blocks_enumerated() {
             let metadata = &block_metadata[&bb];
             for &instr in &block.instrs[metadata.param_tys.len()..] {
                 let instr = &d.instrs[instr].kind;
@@ -2037,8 +2052,7 @@ impl DriverRwRef<'_> {
 
     fn check_no_invalid_instructions(&self, func: &Function) {
         let d = self.read();
-        for &block in &func.blocks {
-            let block = &d.blocks[block];
+        for block in func.blocks() {
             for &instr in &block.instrs {
                 if matches!(&d.instrs[instr].kind, InstrKind::Invalid) {
                     panic!("Found invalid instruction in function");
@@ -2049,8 +2063,7 @@ impl DriverRwRef<'_> {
 
     fn check_no_comptime_calls(&self, func: &Function) {
         let mut comptime_calls = Vec::new();
-        for &block in &func.blocks {
-            let block = &self.read().blocks[block];
+        for block in func.blocks() {
             for &instr in &block.instrs {
                 if let &InstrKind::Call { func: called_func, .. } = &self.read().instrs[instr].kind
                     && self.read().mir.functions[called_func].is_comptime {
@@ -2067,10 +2080,19 @@ impl DriverRwRef<'_> {
         }
     }
 
+    fn check_all_reachable_blocks_are_active(&self, func: &Function) {
+        let mut visited = HashSet::new();
+        self.read().traverse_descendants(func, &mut visited, func.entry_block);
+
+        for visited_block in visited {
+            assert!(!func.blocks[visited_block].inactive, "Found reachable inactive block");
+        }
+    }
+
     fn validate_function(&self, func: &Function) {
-        self.read().mir.check_all_blocks_ended(func);
         self.check_no_invalid_instructions(func);
         self.check_basic_block_params(func);
+        self.check_all_reachable_blocks_are_active(func);
     }
 }
 
@@ -2158,14 +2180,12 @@ impl Driver {
         }
     }
 
-    fn push_instr(&mut self, b: &FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> InstrId {
+    fn push_instr(&mut self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> InstrId {
         let ty = self.generate_type_of(&instr);
         let id = self.instrs.push(Instr::new(instr, ty));
         let source_range = self.get_range(item);
         self.mir.source_ranges.insert(id, source_range);
-
-        let block = &mut self.blocks[b.current_block];
-        block.instrs.push(id);
+        b.blocks[b.current_block].instrs.push(id);
 
         id
     }
@@ -2177,9 +2197,7 @@ impl Driver {
         self.mir.source_ranges.insert(id, source_range);
         let name = b.instr_namespace.insert(name.into());
         self.mir.instr_names.insert(id, name);
-
-        let block = &mut self.blocks[b.current_block];
-        block.instrs.push(id);
+        b.blocks[b.current_block].instrs.push(id);
 
         id
     }
@@ -2269,8 +2287,7 @@ impl DriverRwRef<'_> {
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
-                let entry_block = b.blocks[0];
-                let value = self.read().blocks[entry_block].instrs[index];
+                let value = b.blocks[b.entry_block].instrs[index];
                 DeclRef::Value(value.direct())
             },
             Decl::GenericParam(param) => {

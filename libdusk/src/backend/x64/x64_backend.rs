@@ -23,7 +23,7 @@ impl Backend for X64Backend {
         let mut code = X64Encoder::new();
 
         let func = &d.mir.functions[func_index];
-        assert_eq!(func.blocks.len(), 1);
+        assert_eq!(func.blocks().count(), 1);
         assert_eq!(d.num_parameters(func), 0);
 
         let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
@@ -33,7 +33,7 @@ impl Backend for X64Backend {
         let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
         code.sub64_imm(Reg64::Rsp, 72);
-        for &instr in &d.blocks[func.blocks[0]].instrs {
+        for &instr in &func.blocks[func.entry_block].instrs {
             match &d.instrs[instr].kind {
                 InstrKind::Const(konst) => {
                     match konst {

@@ -22,7 +22,7 @@ use crate::index_vec::range_iter;
 use crate::target::Arch;
 use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
 use crate::dvm::{MessageKind, Call, self};
-use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, StaticId, VOID_INSTR};
+use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId, VOID_INSTR};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -358,8 +358,9 @@ pub struct StackFrame {
 impl StackFrame {
     fn jump_to(&mut self, target: &JumpTarget, d: &Driver) {
         self.block = target.bb;
+        let func = function_by_ref(&d.mir, &self.func_ref);
         for (i, &arg) in target.arguments.iter().enumerate() {
-            let param_instr_id = d.blocks[target.bb].instrs[i];
+            let param_instr_id = func.blocks[target.bb].instrs[i];
             let param = &d.instrs[param_instr_id].kind;
             assert!(matches!(param, InstrKind::Parameter(_)));
             self.results.insert(param_instr_id, self.results[&arg].clone());
@@ -409,6 +410,11 @@ impl StackFrame {
 
     fn get_val_mut(&mut self, instr_id: InstrId, _d: &Driver) -> &mut Value {
         self.results.entry(instr_id).or_insert(Value::Nothing)
+    }
+
+    fn cur_instr(&self, mir: &Mir) -> InstrId {
+        let function = function_by_ref(mir, &self.func_ref);
+        function.blocks[self.block].instrs[self.pc]
     }
 }
 
@@ -668,6 +674,7 @@ impl Driver {
 
     fn new_stack_frame(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> StackFrame {
         let func = function_by_ref(&self.mir, &func_ref);
+        let entry_block = func.entry_block;
 
         let mut results = HashMap::new();
 
@@ -682,10 +689,10 @@ impl Driver {
                 num_parameters
             );
         }
-        let start_block = func.blocks[0];
+        let start_block = &func.blocks[entry_block];
         results.insert(VOID_INSTR, Value::Nothing); // void
         for (i, arg) in arguments.into_iter().enumerate() {
-            let instr_id = self.blocks[start_block].instrs[i];
+            let instr_id = start_block.instrs[i];
             let param = &self.instrs[instr_id].kind;
             assert!(matches!(param, InstrKind::Parameter(_)));
             results.insert(instr_id, arg);
@@ -699,7 +706,7 @@ impl Driver {
 
         StackFrame {
             func_ref,
-            block: start_block,
+            block: entry_block,
             pc: num_parameters,
             generic_ctx,
             results,
@@ -1252,7 +1259,7 @@ impl DriverRwRef<'_> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last_mut().unwrap();
-            let next_instr = self.read().blocks[frame.block].instrs[frame.pc];
+            let next_instr = frame.cur_instr(&self.read().mir);
             let d = self.read();
             match &d.instrs[next_instr].kind {
                 InstrKind::Void => Value::Nothing,
@@ -1650,7 +1657,7 @@ impl DriverRwRef<'_> {
                 }
                 &InstrKind::Load(location) => {
                     let frame = stack.last().unwrap();
-                    let instr: InstrId = self.read().blocks[frame.block].instrs[frame.pc];
+                    let instr = frame.cur_instr(&d.mir);
                     let ty = d.type_of(instr);
                     let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
@@ -1828,7 +1835,7 @@ impl DriverRwRef<'_> {
 
         let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
-        let instr = self.read().blocks[frame.block].instrs[frame.pc];
+        let instr = frame.cur_instr(&self.read().mir);
         *frame.get_val_mut(instr, &self.read()) = val;
         frame.pc += 1;
         Ok(None)

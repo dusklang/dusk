@@ -3,7 +3,7 @@ use string_interner::DefaultStringInterner as StringInterner;
 
 use crate::index_vec::*;
 use crate::ast::{Ast, ExprId, GenericCtx};
-use crate::mir::{Block, BlockId, Const, Instr, InstrId, InstrKind, Mir, VOID_INSTR};
+use crate::mir::{Const, Instr, InstrId, InstrKind, Mir, VOID_INSTR};
 use crate::target::{Arch, OperatingSystem};
 use crate::source_info::SourceRange;
 use crate::internal_types::InternalFieldDecls;
@@ -35,7 +35,6 @@ pub struct Driver {
 
     // Mutable state
     pub tir_builder: tir::Builder,
-    pub blocks: IndexVec<BlockId, Block>,
     pub instrs: IndexVec<InstrId, Instr>,
     pub ast: Ast,
     pub mir: Mir,
@@ -54,8 +53,6 @@ impl Driver {
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
-
-            blocks: IndexVec::default(),
             instrs: index_vec![Instr::new(InstrKind::Void, Type::Void)],
             ast: Ast::default(),
             mir: Mir::default(),

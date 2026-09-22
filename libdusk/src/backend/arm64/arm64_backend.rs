@@ -23,7 +23,7 @@ impl Backend for Arm64Backend {
         let mut code = Arm64Encoder::new();
 
         let func = &d.mir.functions[func_index];
-        assert_eq!(func.blocks.len(), 1);
+        assert_eq!(func.blocks().count(), 1);
         assert_eq!(d.num_parameters(func), 0);
 
         match d.os {
@@ -32,7 +32,7 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
-                for &instr in &d.blocks[func.blocks[0]].instrs {
+                for &instr in &func.blocks[func.entry_block].instrs {
                     match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
@@ -100,7 +100,7 @@ impl Backend for Arm64Backend {
                 let frame_size = 16;
                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
                 code.mov64(Reg::FP, Reg::SP);
-                for &instr in &d.blocks[func.blocks[0]].instrs {
+                for &instr in &func.blocks[func.entry_block].instrs {
                     match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
@@ -164,7 +164,7 @@ impl Backend for Arm64Backend {
                 code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
                 code.mov64(Reg::R29, Reg::SP);
 
-                for &instr in &d.blocks[func.blocks[0]].instrs {
+                for &instr in &func.blocks[func.entry_block].instrs {
                     match &d.instrs[instr].kind {
                         InstrKind::Const(konst) => {
                             match konst {
