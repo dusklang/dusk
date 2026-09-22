@@ -1,5 +1,6 @@
 use crate::driver::Driver;
 use crate::ast::LegacyIntrinsic;
+use crate::mir::cursor::Cursor;
 use crate::mir::{FuncId, InstrKind, Const};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
@@ -23,7 +24,7 @@ impl Backend for X64Backend {
         let mut code = X64Encoder::new();
 
         let func = &d.mir.functions[func_index];
-        assert_eq!(func.blocks().count(), 1);
+        assert_eq!(func.make_cursor().blocks_iter().count(), 1);
         assert_eq!(d.num_parameters(func), 0);
 
         let kernel32 = exe.import_dynamic_library("KERNEL32.dll");

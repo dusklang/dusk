@@ -2,6 +2,7 @@ use crate::backend::arm64::*;
 use crate::backend::Backend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
+use crate::mir::cursor::Cursor;
 use crate::mir::{Const, FuncId, InstrKind};
 use crate::linker::exe::*;
 use crate::target::{Arch, OperatingSystem};
@@ -23,7 +24,7 @@ impl Backend for Arm64Backend {
         let mut code = Arm64Encoder::new();
 
         let func = &d.mir.functions[func_index];
-        assert_eq!(func.blocks().count(), 1);
+        assert_eq!(func.make_cursor().blocks_iter().count(), 1);
         assert_eq!(d.num_parameters(func), 0);
 
         match d.os {
