@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -2171,14 +2171,14 @@ impl Driver {
 }
 
 impl DriverRwRef<'_> {
-    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: Item, tp: &dyn TypeProvider) {
+    fn build_scope_item(&mut self, b: &mut FunctionBuilder, item: ScopedItem, tp: &dyn TypeProvider) {
         let d = self.read();
         match item {
-            Item::Expr(expr) => {
+            ScopedItem::Expr { expr, .. } => {
                 drop(d);
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
-            Item::Decl(decl) => match df!(d, decl.ast) {
+            ScopedItem::Decl(decl) => match df!(d, decl.ast) {
                 ast::Decl::Stored { id, root_expr, .. } => {
                     drop(d);
                     let ty = tp.ty(root_expr).clone();
@@ -2198,11 +2198,9 @@ impl DriverRwRef<'_> {
 
     fn build_scope(&mut self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &dyn TypeProvider) -> Value {
         self.write();
-        let block = self.read().ast.imper_scopes[scope].block;
-        let len = self.read().blocks[block].ops.len();
+        let len = self.read().ast.imper_scopes[scope].items.len();
         for i in 0..len {
-            let op = self.read().blocks[block].ops[i];
-            let item = self.read().ops[op].as_ast_item().unwrap();
+            let item = self.read().ast.imper_scopes[scope].items[i];
             self.build_scope_item(b, item, tp);
         }
         let terminal_expr = self.read().ast.imper_scopes[scope].terminal_expr;
@@ -2361,9 +2359,8 @@ impl DriverRwRef<'_> {
 
             let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
             let terminal_expr = self.read().ast.imper_scopes[cur].terminal_expr;
-            let block = self.read().ast.imper_scopes[cur].block;
             // If the current scope consists of a lone if expression
-            if self.read().blocks[block].ops.is_empty() {
+            if self.read().ast.imper_scopes[cur].items.is_empty() {
                 let d = self.read();
                 if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.ast) {
                     drop(d);

@@ -8,7 +8,7 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, Item, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, StructId, StructLitId, RETURN_VALUE_DECL};
+use crate::ast::{self, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -574,13 +574,10 @@ impl Driver {
     /// the function itself. I think/hope this could also be a cause for some of the mysterious dependency cycles
     /// that have plagued the compiler for some time (though frankly I don't have a good reason to think that).
     fn add_type3_scope_dep(&mut self, a: ItemId, b: ImperScopeId) {
-        let block = self.ast.imper_scopes[b].block;
-        for &op in &self.blocks[block].ops {
-            let op = &self.ops[op];
-            let item = op.as_ast_item().unwrap();
+        for &item in &self.ast.imper_scopes[b].items {
             match item {
-                Item::Expr(expr) => self.tir_builder.graph.add_type3_dep(a, self.ast.expr_to_items[expr]),
-                Item::Decl(decl) => match df!(decl.ast) {
+                ScopedItem::Expr { expr, .. } => self.tir_builder.graph.add_type3_dep(a, self.ast.expr_to_items[expr]),
+                ScopedItem::Decl(decl) => match df!(decl.ast) {
                     ast::Decl::Stored { .. } => self.tir_builder.graph.add_type3_dep(a, self.ast.decl_to_items[decl]),
                     ast::Decl::Function { .. } => {},
                     _ => panic!("Invalid scope item"),
@@ -1129,18 +1126,15 @@ impl Driver {
         }
         self.flush_staged_ret_groups(sp);
         for scope in &self.ast.imper_scopes {
-            for &op in &self.blocks[scope.block].ops {
-                let op = &self.ops[op];
-                let item = op.as_ast_item().unwrap();
+            for &item in &scope.items {
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
-                    Item::Expr(expr) => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(expr.item)) {
-                        let has_semicolon = op.has_semicolon();
+                    ScopedItem::Expr { expr, has_semicolon } => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(expr.item)) {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr, has_semicolon });
                     },
-                    Item::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Function { .. }), "Invalid scope item"),
+                    ScopedItem::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Function { .. }), "Invalid scope item"),
                 }
             }
         }

@@ -12,7 +12,6 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
 use crate::mir::Const;
-use crate::driver::{Op, Block, BlockId};
 use crate::index_counter::IndexCounter;
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
@@ -144,7 +143,7 @@ pub struct NewNamespace {
 
 #[derive(Debug)]
 pub struct ImperScope {
-    pub block: BlockId,
+    pub items: Vec<ScopedItem>,
     pub terminal_expr: ExprId,
 }
 
@@ -275,6 +274,12 @@ pub enum Expr {
 #[derive(Copy, Clone, Debug)]
 pub enum Item {
     Expr(ExprId),
+    Decl(DeclId),
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ScopedItem {
+    Expr { expr: ExprId, has_semicolon: bool },
     Decl(DeclId),
 }
 
@@ -868,7 +873,7 @@ impl Driver {
                 let id = b.next_stored_decl();
 
                 let decl_id = self.add_decl(b, Decl::Stored { id, is_mut, root_expr }, name, explicit_ty, range);
-                self.scope_item(b, Item::Decl(decl_id), false);
+                self.scoped_item(b, ScopedItem::Decl(decl_id));
                 self.imper_scoped_decl(
                     b,
                     ImperScopedDecl {
@@ -1071,7 +1076,7 @@ impl Driver {
         match b.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 b.flush_stmt_buffer(self);
-                self.scope_item(b, Item::Decl(id), false);
+                self.scoped_item(b, ScopedItem::Decl(id));
             },
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(b, StaticDecl { name, decl: id });
@@ -1118,7 +1123,7 @@ impl Driver {
         match b.scope_stack.peek().unwrap() {
             ScopeState::Imper { .. } => {
                 b.flush_stmt_buffer(self);
-                self.scope_item(b, Item::Decl(id), false);
+                self.scoped_item(b, ScopedItem::Decl(id));
             },
             ScopeState::Mod { .. } => {
                 self.mod_scoped_decl(b, StaticDecl { name, decl: id });
@@ -1218,11 +1223,9 @@ impl Driver {
         b.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 
-    fn scope_item(&mut self, b: &Builder, item: Item, has_semicolon: bool) {
+    fn scoped_item(&mut self, b: &Builder, item: ScopedItem) {
         if let ScopeState::Imper { id, .. } = b.scope_stack.peek().unwrap() {
-            let block = self.ast.imper_scopes[id].block;
-            let op = self.ops.push(Op::AstItem { item, has_semicolon });
-            self.blocks[block].ops.push(op);
+            self.ast.imper_scopes[id].items.push(item);
         }
     }
 
@@ -1258,10 +1261,9 @@ impl Driver {
     pub fn begin_imper_scope(&mut self, b: &mut Builder) -> AutoPopStackEntry<ScopeState, ImperScopeId> {
         let parent = b.cur_namespace(self);
 
-        let block = self.blocks.push(Block::default());
         let id = self.ast.imper_scopes.push(
             ImperScope {
-                block,
+                items: Default::default(),
                 terminal_expr: VOID_EXPR,
             }
         );
@@ -1434,9 +1436,7 @@ impl Builder {
         self.scope_stack.peek_mut(|state| {
             if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state
                 && let Some(stmt) = *stmt_buffer {
-                    let block = d.ast.imper_scopes[*id].block;
-                    let op = d.ops.push(Op::AstItem { item: Item::Expr(stmt.expr), has_semicolon: stmt.has_semicolon });
-                    d.blocks[block].ops.push(op);
+                    d.ast.imper_scopes[*id].items.push(ScopedItem::Expr { expr: stmt.expr, has_semicolon: stmt.has_semicolon });
                     *stmt_buffer = None;
                 }
         });

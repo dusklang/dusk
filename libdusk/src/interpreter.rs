@@ -361,9 +361,7 @@ impl StackFrame {
         self.block = target.bb;
         for (i, &arg) in target.arguments.iter().enumerate() {
             let op = d.blocks[target.bb].ops[i];
-            let Op::MirInstr(ref param, param_instr_id, _) = d.ops[op] else {
-                panic!("expected MIR instruction");
-            };
+            let Op::MirInstr(ref param, param_instr_id, _) = d.ops[op];
             assert!(matches!(param, Instr::Parameter(_)));
             let arg_instr_id = d.ops[arg].get_mir_instr_id().expect("MIR instruction");
             self.results[param_instr_id] = self.results[arg_instr_id].clone();
