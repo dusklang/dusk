@@ -12,7 +12,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
 use crate::mir::{Const, InstrId};
-use crate::index_counter::IndexCounter;
+use crate::index_counter::{IndexCounter, ConcurrentIndexCounter};
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
 
@@ -556,6 +556,7 @@ pub struct Ast {
     pub bridged_types: papaya::HashMap<any::TypeId, Type>,
     pub generic_arg_type_variables: papaya::HashMap<(DeclRefId, GenericParamId), TypeVarId>,
     pub debug_marked_exprs: papaya::HashSet<ExprId>,
+    pub type_vars: ConcurrentIndexCounter<TypeVarId>,
 
     pub items: IndexVec<ItemId, Item>,
     pub exprs: IndexVec<ExprId, Expr>,
@@ -584,7 +585,6 @@ pub struct Ast {
     pub extern_mods: IndexVec<ExternModId, ExternMod>,
     pub extend_blocks: IndexVec<ExtendBlockId, ExtendBlock>,
     pub struct_lits: IndexCounter<StructLitId>,
-    pub type_vars: IndexCounter<TypeVarId>,
     pub expr_to_type_vars: IndexVec<ExprId, TypeVarId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
     pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,

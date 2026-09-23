@@ -1,4 +1,4 @@
-use std::ops::AddAssign;
+use std::{marker::PhantomData, ops::AddAssign, sync::atomic::{AtomicUsize, Ordering}};
 
 use crate::index_vec::Idx;
 
@@ -35,5 +35,38 @@ impl<I: Idx + AddAssign<usize>> AddAssign<usize> for IndexCounter<I> {
 impl<I: Idx + AddAssign<usize>> Default for IndexCounter<I> {
     fn default() -> Self {
         IndexCounter::new()
+    }
+}
+
+#[derive(Debug)]
+pub struct ConcurrentIndexCounter<I: Idx> {
+    next_idx: AtomicUsize,
+    _phantom: PhantomData<I>,
+}
+
+impl<I: Idx + AddAssign<usize>> ConcurrentIndexCounter<I> {
+    pub fn new() -> Self {
+        ConcurrentIndexCounter {
+            next_idx: AtomicUsize::new(0),
+            _phantom: PhantomData
+        }
+    }
+
+    pub fn next_idx(&self) -> I {
+        let val = self.next_idx.fetch_add(1, Ordering::Relaxed);
+        I::from_usize(val)
+    }
+
+    pub fn peek_next_idx(&self) -> I {
+        I::from_usize(self.next_idx.load(Ordering::Relaxed))
+    }
+
+    pub fn len(&self) -> usize { self.next_idx.load(Ordering::Relaxed) }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+}
+
+impl<I: Idx + AddAssign<usize>> Default for ConcurrentIndexCounter<I> {
+    fn default() -> Self {
+        ConcurrentIndexCounter::new()
     }
 }
