@@ -1561,11 +1561,9 @@ impl DriverRwRef<'_> {
         for param in range_iter(params.clone()) {
             let d = self.read();
             assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
-            drop(d);
             let ty = self.read().decl_type(param, tp);
             let instr = InstrKind::Parameter(ty.clone());
             let id = instrs.push(Instr::new(instr, ty));
-            let d = self.read();
             let range = df!(d, param.range);
             let name = instr_namespace.insert(self.read().display_item(&source_ranges, range).to_string());
             source_ranges.insert(id, range);

@@ -485,7 +485,11 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             .unwrap_or_else(|| String::from(""));
                         method.attrs.retain(|attr| !attr.path.is_ident("path"));
 
-                        let mut has_driver = false;
+                        struct DriverReceiver {
+                            is_mut: bool,
+                        }
+
+                        let mut driver: Option<DriverReceiver> = None;
                         let mut has_self = false;
                         let mut param_index = 0usize;
 
@@ -496,12 +500,12 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         for input in &mut method.sig.inputs {
                             match input {
                                 FnArg::Receiver(receiver) => {
-                                    assert!(!has_driver);
+                                    assert!(driver.is_none());
                                     assert!(param_index == 0);
                                     assert!(receiver.lifetime().is_none());
                                     assert!(receiver.reference.is_some());
 
-                                    has_driver = true;
+                                    driver = Some(DriverReceiver { is_mut: receiver.mutability.is_some() });
                                 },
                                 FnArg::Typed(ty) => {
                                     if ty.attrs.iter().find(|attr| attr.path.is_ident("self")).is_some() {
@@ -554,8 +558,12 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         method.sig.ident = mangled_name.clone();
                         method.attrs.extend(new_attrs.attrs);
 
-                        let implementation = if has_driver {
-                            quote! { d.write().#mangled_name }
+                        let implementation = if let Some(driver) = driver {
+                            if driver.is_mut {
+                                quote! { d.write().#mangled_name }
+                            } else {
+                                quote! { d.read().#mangled_name }
+                            }
                         } else {
                             quote! { Driver::#mangled_name }
                         };

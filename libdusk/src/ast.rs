@@ -1009,7 +1009,7 @@ impl Driver {
     pub fn error_expr(&mut self, b: &Builder, range: SourceRange) -> ExprId {
         self.add_expr(b, Expr::Error, range)
     }
-    fn get_pattern_bindings_impl(&mut self, pattern: &Pattern, decls: &mut Vec<ImperScopedDecl>) {
+    fn get_pattern_bindings_impl(&self, pattern: &Pattern, decls: &mut Vec<ImperScopedDecl>) {
         match pattern.kind {
             PatternKind::AnonymousCatchAll(_) | PatternKind::IntLit { .. } => {},
             PatternKind::ContextualMember { ref payload, .. } => {
@@ -1022,7 +1022,7 @@ impl Driver {
             },
         }
     }
-    pub fn get_pattern_bindings(&mut self, pattern: &Pattern) -> Vec<ImperScopedDecl> {
+    pub fn get_pattern_bindings(&self, pattern: &Pattern) -> Vec<ImperScopedDecl> {
         let mut decls = Vec::new();
         self.get_pattern_bindings_impl(pattern, &mut decls);
         decls

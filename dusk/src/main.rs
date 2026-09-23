@@ -124,7 +124,6 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
                 match command {
                     MockStateCommand::Mock => {
                         assert!(suhmm_tp.is_none());
-                        drop(suhmm_tp);
                         suhmm_tp = Some(MockTypeProvider::new(&mut *tp_ref));
                     },
                     MockStateCommand::Discard => {

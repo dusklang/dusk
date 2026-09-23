@@ -107,7 +107,7 @@ impl tir::Expr<tir::BoolLit> {
         *tp.ty_mut(self.id) = Type::Bool;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -117,7 +117,7 @@ impl tir::Expr<tir::Break> {
         *tp.ty_mut(self.id) = Type::Never;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -127,7 +127,7 @@ impl tir::Expr<tir::Continue> {
         *tp.ty_mut(self.id) = Type::Never;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -138,7 +138,7 @@ impl tir::Expr<tir::ConstExpr> {
         *tp.ty_mut(self.id) = ty;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -148,16 +148,16 @@ impl tir::Expr<tir::ErrorExpr> {
         *tp.ty_mut(self.id) = Type::Error;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
 impl tir::GenericParam {
-    fn run_pass_1(&self, _driver: &mut Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1(&self, _driver: &Driver, tp: &mut dyn TypeProvider) {
         *tp.decl_type_mut(self.id) = Type::Ty.into();
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -220,7 +220,7 @@ impl tir::PatternBinding {
         }
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -422,7 +422,7 @@ impl tir::Expr<tir::For> {
 }
 
 impl tir::Expr<tir::Switch> {
-    fn run_pass_1(&self, driver: &mut Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
         driver.get_typed_pattern_matching_context(tp, self.context);
         let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
 
@@ -474,7 +474,7 @@ impl tir::Expr<tir::ExplicitRet> {
         *tp.ty_mut(self.id) = Type::Never;
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -1293,12 +1293,12 @@ impl tir::Stmt {
         }
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
     }
 }
 
 impl tir::RetGroup {
-    fn run_pass_1(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {}
+    fn run_pass_1(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {}
 
     fn run_pass_2(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
@@ -1339,7 +1339,7 @@ impl tir::FunctionDecl {
         tp.set_decl_type_to_explicit_type_if_exists(driver, self.id);
     }
 
-    fn run_pass_2(&self, _driver: &mut Driver, _tp: &mut dyn TypeProvider) {}
+    fn run_pass_2(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {}
 }
 
 impl Driver {
@@ -1428,7 +1428,7 @@ impl Driver {
         run_pass_1_flat!(stmts);
     }
 
-    fn run_pass_2(&mut self, unit: &UnitItems, tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, unit: &UnitItems, tp: &mut dyn TypeProvider) {
         for level in (0..unit.num_levels()).rev() {
             macro_rules! run_pass_2 {
                 ($($name:ident$(,)*)+) => {
@@ -1480,7 +1480,7 @@ impl DriverRwRef<'_> {
             self.write().run_pass_1(&unit.items, 0, tp);
 
             // Pass 2: propagate info up from roots to leaves
-            self.write().run_pass_2(&unit.items, tp);
+            self.read().run_pass_2(&unit.items, tp);
 
             if self.read().diag.has_errors() {
                 return Err(());
@@ -1572,7 +1572,7 @@ impl DriverRwRef<'_> {
                     let mut macro_info = None;
                     let ns = match ty {
                         Type::Mod => {
-                            self.write().run_pass_2(&unit.items, &mut mock_tp);
+                            self.read().run_pass_2(&unit.items, &mut mock_tp);
                             let Ok(module) = self.eval_expr(unit.main_expr, &mock_tp) else {
                                 self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
@@ -1596,7 +1596,7 @@ impl DriverRwRef<'_> {
                             }
                         },
                         Type::Ty => {
-                            self.write().run_pass_2(&unit.items, &mut mock_tp);
+                            self.read().run_pass_2(&unit.items, &mut mock_tp);
                             let Ok(ty) = self.eval_expr(unit.main_expr, &mock_tp) else {
                                 self.write().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;

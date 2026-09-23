@@ -1429,7 +1429,6 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::Panic => {
                             assert!(arguments.len() <= 1);
                             let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
-                            drop(d);
                             self.read().diag.report_error(panic_message, next_instr, "panic occured here");
                             return Err(EvalError);
                         },
@@ -1704,7 +1703,6 @@ impl DriverRwRef<'_> {
                     for &field in fields {
                         field_tys.push(frame.get_val(field, &self.read()).as_ty());
                     }
-                    drop(d);
                     let strukt = StructType {
                         field_tys,
                         identity: id,
@@ -1718,8 +1716,7 @@ impl DriverRwRef<'_> {
                             payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
                         }
                         let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
-                        drop(d);
-                        self.write().mir.enums.pin().insert(
+                        self.read().mir.enums.pin().insert(
                             id,
                             layout,
                         );
@@ -1738,7 +1735,6 @@ impl DriverRwRef<'_> {
                     let fields: Vec<_> = fields.iter()
                         .map(|&instr| frame.get_val(instr, &self.read()).clone())
                         .collect();
-                    drop(d);
                     let strukt = StructType {
                         field_tys,
                         identity: id,
@@ -1766,9 +1762,7 @@ impl DriverRwRef<'_> {
                     let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
                     let interp = INTERP.read().unwrap();
                     let target = if let Some(table) = interp.switch_cache.get(&next_instr) {
-                        let target = table.get(scrutinee.as_ref()).cloned();
-                        drop(interp);
-                        target
+                        table.get(scrutinee.as_ref()).cloned()
                     } else {
                         drop(interp);
                         let mut table = HashMap::new();

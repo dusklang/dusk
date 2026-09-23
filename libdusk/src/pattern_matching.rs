@@ -142,7 +142,7 @@ impl Driver {
     }
 }
 
-pub fn match_scrutinee(driver: &mut Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, context: PatternMatchingContextId, mut scrutinees: Vec<SwitchScrutinee>, mut pattern_matrix: Vec<Vec<Pattern>>, destinations: Vec<ImperScopeId>) -> SwitchDecisionNode {
+pub fn match_scrutinee(driver: &Driver, tp: &mut dyn TypeProvider, scrutinee: ExprId, context: PatternMatchingContextId, mut scrutinees: Vec<SwitchScrutinee>, mut pattern_matrix: Vec<Vec<Pattern>>, destinations: Vec<ImperScopeId>) -> SwitchDecisionNode {
     if pattern_matrix.is_empty() {
         return SwitchDecisionNode::Failure;
     }

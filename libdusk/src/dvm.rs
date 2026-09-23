@@ -79,22 +79,20 @@ impl DvmServerCoordinator {
                 _ = call_response_tx.send(res);
             }
         });
-        let mut driver = DriverRwRef::new(&DRIVER);
         loop {
-            driver.unlock();
             let Ok(message) = self.receiver.recv() else { continue; };
             match message.kind {
                 MessageKind::Call(call) => {
                     call_tx.send(call).unwrap();
 
-                    self.wait_for_response(&mut driver, &call_response_rx, message.id);
+                    self.wait_for_response(&call_response_rx, message.id);
                 },
-                MessageKind::Connect(_) => self.handle_message(&mut driver, message),
+                MessageKind::Connect(_) => self.handle_message(message),
             }
         }
     }
 
-    fn wait_for_response(&mut self, driver: &mut DriverRwRef, call_response_rx: &mpsc::Receiver<EvalResult<Value>>, id: ThreadId) {
+    fn wait_for_response(&mut self, call_response_rx: &mpsc::Receiver<EvalResult<Value>>, id: ThreadId) {
         loop {
             if let Ok(response) = call_response_rx.try_recv() {
                 self.senders[&id].send(Response(response)).unwrap();
@@ -102,11 +100,11 @@ impl DvmServerCoordinator {
             }
 
             let Ok(message) = self.receiver.try_recv() else { continue; };
-            self.handle_message(driver, message);
+            self.handle_message(message);
         }
     }
 
-    fn handle_message(&mut self, _driver: &mut DriverRwRef, message: Message) {
+    fn handle_message(&mut self, message: Message) {
         match message.kind {
             MessageKind::Call(_) => unimplemented!("unable to accept another call while the previous one is still in-flight"),
             MessageKind::Connect(new_sender) => {
