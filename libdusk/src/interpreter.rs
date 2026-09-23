@@ -787,8 +787,9 @@ impl Driver {
             return Value::from_usize(alloc.0.as_ptr::<()>() as usize);
         }
 
-        let func = &self.mir.functions[func_id];
-        let param_tys = func.ty.param_tys.clone();
+        let function_sigs = self.mir.function_sigs.pin();
+        let signature = function_sigs.get(&func_id).unwrap();
+        let param_tys = signature.ty.param_tys.clone();
 
         let mut thunk = X64Encoder::new();
         // Store the first four parameters in shadow space in reverse order
@@ -817,7 +818,7 @@ impl Driver {
         let param_address_array_space = param_tys.len() as i32 * 8;
         // round up to the nearest multiple of 8 if necessary, to make sure that the parameter address array is 8-byte
         // aligned.
-        let return_value_space = nearest_multiple_of_8(self.size_of(&func.ty.return_ty) as i32);
+        let return_value_space = nearest_multiple_of_8(self.size_of(&signature.ty.return_ty) as i32);
         assert!(return_value_space <= 8, "return values bigger than 8 bytes are not yet supported in inverse thunks!");
         let call_space = 4 * 8;
         let total_stack_allocation = nearest_multiple_of_16(param_address_array_space + return_value_space + call_space) + 8;
@@ -853,15 +854,15 @@ impl Driver {
         thunk.call_direct(Reg64::Rax);
 
         // Move return value into *ax
-        match &*func.ty.return_ty {
+        match &*signature.ty.return_ty {
             Type::Int { width: IntWidth::W16, .. } => thunk.load16(Reg16::Ax, Reg64::Rsp + return_value_offset),
             Type::Int { width: IntWidth::W32, .. } => thunk.load32(Reg32::Eax, Reg64::Rsp + return_value_offset),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
                 assert_eq!(self.arch.pointer_size(), 64);
                 thunk.load64(Reg64::Rax, Reg64::Rsp + return_value_offset);
             },
-            _ if self.size_of(&func.ty.return_ty) == 0 => {},
-            _ => todo!("return type {:?}", func.ty.return_ty),
+            _ if self.size_of(&signature.ty.return_ty) == 0 => {},
+            _ => todo!("return type {:?}", signature.ty.return_ty),
         }
 
         // Return the stack to its previous state

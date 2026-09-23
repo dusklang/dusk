@@ -230,7 +230,7 @@ pub enum GenericCtx {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Void,
     Error,
