@@ -35,6 +35,8 @@ use dusk_proc_macros::*;
 // TODO: fix potential data race when adding values to hashmaps in MIR
 // TODO: make instructions a linked list just like blocks are, instead of each block individually owning a Vec of InstrIds. Then we can support inserting/deleting instructions by cursor as well.
 // TODO: decouple values (the outputs of instructions) from the instructions themselves. That way each instruction can in principle output no value, or even multiple values.
+// TODO: add back VOID_INSTR (or VOID_VALUE) at a known, static index, so we can return that again instead of creating one. That, or allow functions like build_expr to return an Option<Value> or
+// even some "no value" state.
 
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
