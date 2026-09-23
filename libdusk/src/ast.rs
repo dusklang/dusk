@@ -28,30 +28,31 @@ use crate::driver::DriverRwRef;
 
 use dusk_proc_macros::*;
 
-define_index_type!(pub struct ExprId = u32;);
-define_index_type!(pub struct DeclRefId = u32;);
-define_index_type!(pub struct ImperScopeId = u32;);
-define_index_type!(pub struct CastId = u32;);
-define_index_type!(pub struct DeclId = u32;);
-define_index_type!(pub struct ItemId = u32;);
-define_index_type!(pub struct NewNamespaceId = u32;);
-define_index_type!(pub struct StructId = u32;);
-define_index_type!(pub struct StructLitId = u32;);
-define_index_type!(pub struct EnumId = u32;);
-define_index_type!(pub struct PatternMatchingContextId = u32;);
-define_index_type!(pub struct StoredDeclId = u32;);
-define_index_type!(pub struct ImperScopeNsId = u32;);
-define_index_type!(pub struct ModScopeNsId = u32;);
-define_index_type!(pub struct ExtendBlockNsId = u32;);
-define_index_type!(pub struct ConditionNsId = u32;);
-define_index_type!(pub struct GenericContextNsId = u32;);
-define_index_type!(pub struct GenericParamId = u32;);
-define_index_type!(pub struct TypeVarId = u32;);
-define_index_type!(pub struct ExternModId = u32;);
-define_index_type!(pub struct ExtendBlockId = u32;);
-define_index_type!(pub struct GenericCtxId = u32;);
-define_index_type!(pub struct LoopId = u32;);
-define_index_type!(pub struct IntrinsicId = u32;);
+define_index_type!(pub struct SegmentId = u32;);
+define_segmented_index_type!(pub struct ExprId = u32;);
+define_segmented_index_type!(pub struct DeclRefId = u32;);
+define_segmented_index_type!(pub struct ImperScopeId = u32;);
+define_segmented_index_type!(pub struct CastId = u32;);
+define_segmented_index_type!(pub struct DeclId = u32;);
+define_segmented_index_type!(pub struct ItemId = u32;);
+define_segmented_index_type!(pub struct NewNamespaceId = u32;);
+define_segmented_index_type!(pub struct StructId = u32;);
+define_segmented_index_type!(pub struct StructLitId = u32;);
+define_segmented_index_type!(pub struct EnumId = u32;);
+define_segmented_index_type!(pub struct PatternMatchingContextId = u32;);
+define_segmented_index_type!(pub struct StoredDeclId = u32;);
+define_segmented_index_type!(pub struct ImperScopeNsId = u32;);
+define_segmented_index_type!(pub struct ModScopeNsId = u32;);
+define_segmented_index_type!(pub struct ExtendBlockNsId = u32;);
+define_segmented_index_type!(pub struct ConditionNsId = u32;);
+define_segmented_index_type!(pub struct GenericContextNsId = u32;);
+define_segmented_index_type!(pub struct GenericParamId = u32;);
+define_segmented_index_type!(pub struct TypeVarId = u32;);
+define_segmented_index_type!(pub struct ExternModId = u32;);
+define_segmented_index_type!(pub struct ExtendBlockId = u32;);
+define_segmented_index_type!(pub struct GenericCtxId = u32;);
+define_segmented_index_type!(pub struct LoopId = u32;);
+define_segmented_index_type!(pub struct IntrinsicId = u32;);
 
 #[derive(Debug, Clone)]
 pub struct FieldAssignment {
@@ -584,6 +585,10 @@ pub struct Ast {
     pub generic_params: IndexCounter<GenericParamId>,
 
     pub known_idents: KnownIdents,
+}
+
+#[derive(Default)]
+struct Segment {
 }
 
 #[derive(Default)]

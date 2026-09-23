@@ -4,6 +4,12 @@ use std::marker::PhantomData;
 use index_vec::IdxRangeBounds;
 pub use index_vec::{IndexVec, Idx, define_index_type, index_vec};
 
+macro_rules! define_segmented_index_type {
+    (pub struct $name: ident = $typ:ident;) => {
+        define_index_type!(pub struct $name = $typ;);
+    }
+}
+
 #[derive(Clone)]
 pub struct ConcurrentIndexVec<I: Idx, T> {
     raw: boxcar::Vec<T>,
