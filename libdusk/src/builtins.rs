@@ -128,7 +128,7 @@ impl Drop for EnumBuilder {
 
 impl Driver {
     pub fn add_prelude(&mut self, b: &mut ast::Builder) {
-        assert!(self.ast.prelude_namespace.is_none());
+        assert!(self.ast.prelude_namespace.get().is_none());
         let prelude_scope = self.ast.new_namespaces.push(NewNamespace::default());
         let prelude_namespace = self.ast.mod_ns.push(
             ModScopeNs {
@@ -137,7 +137,7 @@ impl Driver {
             }
         );
         let _prelude_scope = b.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
-        self.ast.prelude_namespace = Some(prelude_namespace);
+        self.ast.prelude_namespace.set(prelude_namespace).unwrap();
 
         // Add intrinsics to prelude
 
@@ -391,7 +391,7 @@ impl Driver {
     fn add_virtual_file_module(&mut self, b: &ast::Builder, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
         self.parse_file(file)?;
-        let scope = self.ast.global_scopes[&file];
+        let scope = *self.ast.global_scopes.pin().get(&file).expect("no global scope found for virtual file");
         self.add_constant_decl(b, name, Const::Mod(scope));
         Ok(())
     }

@@ -5,8 +5,30 @@ use index_vec::IdxRangeBounds;
 pub use index_vec::{IndexVec, Idx, define_index_type, index_vec};
 
 macro_rules! define_segmented_index_type {
-    (pub struct $name: ident = $typ:ident;) => {
-        define_index_type!(pub struct $name = $typ;);
+    ($v:vis struct $name: ident($segment_id: ident) = $typ:ident;) => {
+        ::paste::paste! {
+            define_index_type!($v struct [<Local $name>] = $typ;);
+            #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+            $v struct $name($segment_id, [<Local $name>]);
+
+            impl $name {
+                const fn new(segment_id: $segment_id, local_id: [<Local $name>]) -> Self {
+                    Self(segment_id, local_id)
+                }
+
+                const fn new_hardcoded(value: usize) -> Self {
+                    Self::new($segment_id::from_usize_unchecked(0), [<Local $name>]::from_usize_unchecked(value))
+                }
+
+                const fn segment_id(&self) -> $segment_id {
+                    self.0
+                }
+
+                const fn local_id(&self) -> [<Local $name>] {
+                    self.1
+                }
+            }
+        }
     }
 }
 

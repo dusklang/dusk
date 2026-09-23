@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use string_interner::DefaultStringInterner as StringInterner;
 
-use crate::ast::{Ast, ExprId, GenericCtx};
+use crate::ast::{Ast, ExprId, GenericCtx, KnownIdents};
 use crate::mir::{Const, Mir};
 use crate::target::{Arch, OperatingSystem};
 use crate::internal_types::InternalFieldDecls;
@@ -39,17 +39,22 @@ pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
 impl Driver {
     pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool) -> Self {
+        let interner: Arc<RwLock<StringInterner>> = Default::default();
+        let ast = Ast {
+            known_idents: KnownIdents::new(&interner),
+            ..Default::default()
+        };
         let mut val = Self {
             arch,
             os,
             src_map: Arc::new(src_map),
-            interner: Default::default(),
+            interner,
             types: Default::default(),
             tir_builder: tir::Builder::default(),
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
-            ast: Ast::default(),
+            ast,
             mir: Mir::default(),
         };
         val.ast.generic_ctxs.push(GenericCtx::Blank);

@@ -390,7 +390,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(b, konst);
                     d.add_decl_to_path(b, #bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.ast.bridged_types.insert(any::TypeId::of::<Self>(), ty);
+                    d.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -415,9 +415,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.ast.bridged_types.get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.ast.bridged_types.insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {

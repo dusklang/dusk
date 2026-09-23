@@ -3,7 +3,7 @@ use std::ffi::CString;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::fmt::Debug;
-use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use crate::display_adapter;
 use crate::pattern_matching::{SwitchScrutineeValueId, PatternMatchingContext};
@@ -29,30 +29,30 @@ use crate::driver::DriverRwRef;
 use dusk_proc_macros::*;
 
 define_index_type!(pub struct SegmentId = u32;);
-define_segmented_index_type!(pub struct ExprId = u32;);
-define_segmented_index_type!(pub struct DeclRefId = u32;);
-define_segmented_index_type!(pub struct ImperScopeId = u32;);
-define_segmented_index_type!(pub struct CastId = u32;);
-define_segmented_index_type!(pub struct DeclId = u32;);
-define_segmented_index_type!(pub struct ItemId = u32;);
-define_segmented_index_type!(pub struct NewNamespaceId = u32;);
-define_segmented_index_type!(pub struct StructId = u32;);
-define_segmented_index_type!(pub struct StructLitId = u32;);
-define_segmented_index_type!(pub struct EnumId = u32;);
-define_segmented_index_type!(pub struct PatternMatchingContextId = u32;);
-define_segmented_index_type!(pub struct StoredDeclId = u32;);
-define_segmented_index_type!(pub struct ImperScopeNsId = u32;);
-define_segmented_index_type!(pub struct ModScopeNsId = u32;);
-define_segmented_index_type!(pub struct ExtendBlockNsId = u32;);
-define_segmented_index_type!(pub struct ConditionNsId = u32;);
-define_segmented_index_type!(pub struct GenericContextNsId = u32;);
-define_segmented_index_type!(pub struct GenericParamId = u32;);
-define_segmented_index_type!(pub struct TypeVarId = u32;);
-define_segmented_index_type!(pub struct ExternModId = u32;);
-define_segmented_index_type!(pub struct ExtendBlockId = u32;);
-define_segmented_index_type!(pub struct GenericCtxId = u32;);
-define_segmented_index_type!(pub struct LoopId = u32;);
-define_segmented_index_type!(pub struct IntrinsicId = u32;);
+define_index_type!(pub struct ExprId = u32;);
+define_index_type!(pub struct DeclRefId = u32;);
+define_index_type!(pub struct ImperScopeId = u32;);
+define_index_type!(pub struct CastId = u32;);
+define_index_type!(pub struct DeclId = u32;);
+define_index_type!(pub struct ItemId = u32;);
+define_index_type!(pub struct NewNamespaceId = u32;);
+define_index_type!(pub struct StructId = u32;);
+define_index_type!(pub struct StructLitId = u32;);
+define_index_type!(pub struct EnumId = u32;);
+define_index_type!(pub struct PatternMatchingContextId = u32;);
+define_index_type!(pub struct StoredDeclId = u32;);
+define_index_type!(pub struct ImperScopeNsId = u32;);
+define_index_type!(pub struct ModScopeNsId = u32;);
+define_index_type!(pub struct ExtendBlockNsId = u32;);
+define_index_type!(pub struct ConditionNsId = u32;);
+define_index_type!(pub struct GenericContextNsId = u32;);
+define_index_type!(pub struct GenericParamId = u32;);
+define_index_type!(pub struct TypeVarId = u32;);
+define_index_type!(pub struct ExternModId = u32;);
+define_index_type!(pub struct ExtendBlockId = u32;);
+define_index_type!(pub struct GenericCtxId = u32;);
+define_index_type!(pub struct LoopId = u32;);
+define_index_type!(pub struct IntrinsicId = u32;);
 
 #[derive(Debug, Clone)]
 pub struct FieldAssignment {
@@ -510,6 +510,7 @@ impl LegacyIntrinsic {
     }
 }
 
+pub const THE_ONE_SEGMENT: SegmentId = SegmentId::from_raw_unchecked(0);
 pub const VOID_EXPR: ExprId = ExprId::from_raw_unchecked(0);
 pub const VOID_EXPR_ITEM: ItemId = ItemId::from_raw_unchecked(0);
 pub const ERROR_EXPR: ExprId = ExprId::from_raw_unchecked(1);
@@ -544,6 +545,14 @@ pub struct SelfParameter {
 
 #[derive(Default)]
 pub struct Ast {
+    pub known_idents: KnownIdents,
+    pub prelude_namespace: OnceLock<ModScopeNsId>,
+
+    pub global_scopes: papaya::HashMap<SourceFileId, NewNamespaceId>,
+    pub bridged_types: papaya::HashMap<any::TypeId, Type>,
+    pub generic_arg_type_variables: papaya::HashMap<(DeclRefId, GenericParamId), TypeVarId>,
+    pub debug_marked_exprs: papaya::HashSet<ExprId>,
+
     pub items: IndexVec<ItemId, Item>,
     pub exprs: IndexVec<ExprId, Expr>,
     pub source_ranges: IndexVec<ItemId, SourceRange>,
@@ -556,7 +565,6 @@ pub struct Ast {
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
     pub intrinsics: IndexVec<IntrinsicId, Intrinsic>,
-    pub global_scopes: HashMap<SourceFileId, NewNamespaceId>,
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
@@ -566,7 +574,6 @@ pub struct Ast {
     pub new_namespaces: IndexVec<NewNamespaceId, NewNamespace>,
     pub cast_counter: IndexCounter<CastId>,
     pub internal_types: IndexVec<InternalTypeId, InternalType>,
-    pub bridged_types: HashMap<any::TypeId, Type>,
     pub structs: IndexVec<StructId, Struct>,
     pub enums: IndexVec<EnumId, Enum>,
     pub pattern_matching_contexts: IndexVec<PatternMatchingContextId, PatternMatchingContext>,
@@ -577,14 +584,7 @@ pub struct Ast {
     pub expr_to_type_vars: IndexVec<ExprId, TypeVarId>,
     pub generic_ctxs: IndexVec<GenericCtxId, GenericCtx>,
     pub item_generic_ctxs: IndexVec<ItemId, GenericCtxId>,
-    pub generic_arg_type_variables: HashMap<(DeclRefId, GenericParamId), TypeVarId>,
-
-    debug_marked_exprs: HashSet<ExprId>,
-
-    pub prelude_namespace: Option<ModScopeNsId>,
     pub generic_params: IndexCounter<GenericParamId>,
-
-    pub known_idents: KnownIdents,
 }
 
 #[derive(Default)]
@@ -711,13 +711,13 @@ macro_rules! declare_known_idents {
                 }
             }
 
-            fn init(&mut self, interner: &std::sync::RwLock<StringInterner>) {
+            pub fn new(interner: &std::sync::RwLock<StringInterner>) -> Self {
                 let mut interner = interner.write().unwrap();
-                *self = KnownIdents {
+                KnownIdents {
                     $(
                         $name: declare_known_idents!(@init interner, $name $(= $assignment)?)
                     ),*
-                };
+                }
             }
         }
     };
@@ -797,20 +797,19 @@ impl Driver {
         self.add_const_ty(b, Type::Error);
         assert_eq!(self.ast.exprs.len(), 5);
 
-        self.ast.known_idents.init(&self.interner);
         self.add_decl(b, Decl::ReturnValue, self.ast.known_idents.return_value, None, SourceRange::default());
 
         self.register_internal_fields(b);
         self.add_prelude(b);
     }
 
-    pub fn debug_mark_expr(&mut self, expr: ExprId) {
-        self.ast.debug_marked_exprs.insert(expr);
+    pub fn debug_mark_expr(&self, expr: ExprId) {
+        self.ast.debug_marked_exprs.pin().insert(expr);
     }
 
     #[allow(unused)]
     pub fn expr_is_debug_marked(&self, expr: ExprId) -> bool {
-        self.ast.debug_marked_exprs.contains(&expr)
+        self.ast.debug_marked_exprs.pin().contains(&expr)
     }
 
     fn add_expr(&mut self, b: &Builder, expr: Expr, range: SourceRange) -> ExprId {
@@ -1216,7 +1215,7 @@ impl Driver {
     pub fn begin_new_file(&mut self, b: &Builder, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();
         // Use all of prelude
-        global_scope.blanket_uses.push(Namespace::Mod(self.ast.prelude_namespace.unwrap()));
+        global_scope.blanket_uses.push(Namespace::Mod(*self.ast.prelude_namespace.get().unwrap()));
         let global_scope = self.ast.new_namespaces.push(global_scope);
         let global_namespace = self.ast.mod_ns.push(
             ModScopeNs {
@@ -1224,7 +1223,7 @@ impl Driver {
                 parent: None
             }
         );
-        self.ast.global_scopes.insert(file, global_scope);
+        self.ast.global_scopes.pin().insert(file, global_scope);
         b.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 

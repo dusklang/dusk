@@ -1544,7 +1544,7 @@ impl DriverRwRef<'_> {
                             let file = self.read().src_map.add_file_on_disk(path).unwrap();
                             self.write().parse_file(file).unwrap();
 
-                            let added_module = self.read().ast.global_scopes[&file];
+                            let added_module = *self.read().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
                             Value::from_mod(added_module)
                         },
                         _ => panic!("Call to unimplemented intrinsic {:?}", intr),
