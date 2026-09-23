@@ -341,14 +341,7 @@ impl Default for Function {
 
 impl Function {
     pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
-        let block = &self.blocks[self.entry_block];
-        block.instrs.iter()
-            .filter_map(|&instr| {
-                match &self.instrs[instr].kind {
-                    InstrKind::Parameter(ty) => Some(ty),
-                    _ => None,
-                }
-            })
+        self.ty.param_tys.iter()
     }
 
     pub fn num_parameters(&self) -> usize {
@@ -434,9 +427,16 @@ pub struct ExternFunction {
     pub ty: FunctionType,
 }
 
+pub struct FunctionSignature {
+    pub ty: FunctionType,
+    pub generic_params: Range<GenericParamId>,
+    pub is_comptime: bool,
+}
+
 pub struct Mir {
     pub strings: ConcurrentIndexVec<StrId, CString>,
     pub functions: ConcurrentIndexVec<FuncId, OnceLock<Function>>,
+    pub function_sigs: papaya::HashMap<FuncId, FunctionSignature>,
     pub statics: ConcurrentIndexVec<StaticId, Static>,
     pub extern_mods: papaya::HashMap<ExternModId, ExternMod>,
     pub enums: papaya::HashMap<EnumId, EnumLayout>,
@@ -505,6 +505,7 @@ impl Mir {
         Mir {
             strings: Default::default(),
             functions: Default::default(),
+            function_sigs: Default::default(),
             statics: Default::default(),
             extern_mods: Default::default(),
             enums: Default::default(),
@@ -935,10 +936,16 @@ impl DriverRwRef<'_> {
                 let name = d.ast.names[id];
                 let comptime_sym = d.ast.known_idents.comptime;
                 let is_comptime = d.ast.decl_attributes.get(&id)
-                    .map(|attrs|
-                        attrs.iter()
-                            .any(|attr| attr.attr == comptime_sym)
-                    ).unwrap_or(false);
+                .map(|attrs|
+                    attrs.iter()
+                    .any(|attr| attr.attr == comptime_sym)
+                ).unwrap_or(false);
+                let signature = FunctionSignature {
+                    ty: func_ty.clone(),
+                    generic_params: generic_params.clone(),
+                    is_comptime,
+                };
+                d.mir.function_sigs.pin().insert(get, signature);
                 drop(d);
                 let func = self.build_function(
                     Some(name),
@@ -1957,7 +1964,7 @@ impl DriverRwRef<'_> {
                 | InstrKind::FloatCast(val, _) | InstrKind::FloatToInt(val, _) | InstrKind::IntToFloat(val, _)
                 | InstrKind::DiscriminantAccess { val }
                 => self.instruction_is_const(func, val),
-            InstrKind::Call { func: callee, .. } if d.mir.functions[callee].get().unwrap().is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(func, val)),
+            InstrKind::Call { func: callee, .. } if d.mir.function_sigs.pin().get(&callee).unwrap().is_comptime => instr.referenced_values().iter().all(|&val| self.instruction_is_const(func, val)),
             _ => false,
         }
     }
@@ -2103,7 +2110,7 @@ impl DriverRwRef<'_> {
         for block in func.make_cursor().blocks_iter() {
             for &instr in &block.instrs {
                 if let &InstrKind::Call { func: called_func, .. } = &func.instrs[instr].kind
-                    && self.read().mir.functions[called_func].get().unwrap().is_comptime {
+                    && self.read().mir.function_sigs.pin().get(&called_func).unwrap().is_comptime {
                         comptime_calls.push((called_func, instr));
                     }
             }
@@ -2148,13 +2155,14 @@ impl Driver {
             InstrKind::Alloca(ty) => ty.clone().mut_ptr(),
             InstrKind::LogicalNot(_) => Type::Bool,
             &InstrKind::Call { func, ref generic_arguments, .. } => {
-                let func = &self.mir.functions[func].get().unwrap();
+                let function_sigs = self.mir.function_sigs.pin();
+                let signature = function_sigs.get(&func).unwrap();
                 let mut replacements = HashMap::new();
-                for (param, arg) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
+                for (param, arg) in range_iter(signature.generic_params.clone()).zip(generic_arguments) {
                     replacements.insert(param, arg.clone());
                 }
 
-                func.ty.return_ty.as_ref().clone().replacing_generic_params(&replacements)
+                signature.ty.return_ty.as_ref().clone().replacing_generic_params(&replacements)
             },
             &InstrKind::FunctionRef { func, .. } => Type::Function(self.mir.functions[func].get().unwrap().ty.clone()),
             InstrKind::ExternCall { func, .. } => self.mir.extern_mods.pin().get(&func.extern_mod).unwrap().imported_functions[func.index].ty.return_ty.as_ref().clone(),
@@ -2530,11 +2538,11 @@ impl DriverRwRef<'_> {
                         // Handle method calls.
                         // TODO: comparing the number of arguments to the number of parameters to determine whether this is a method call is kind of a horrible hack
                         // TODO: unify code here with the near-identical `DeclRef::MethodIntrinsic` case
-                        if arguments.len() != d.mir.functions[func].get().unwrap().num_parameters() {
+                        if arguments.len() != d.mir.function_sigs.pin().get(&func).unwrap().ty.param_tys.len() {
                             let base = d.get_base(decl_ref_id);
                             drop(d);
                             let base_ty = tp.ty(base);
-                            let self_ty = self.read().mir.functions[func].get().unwrap().parameter_tys().next().unwrap().clone();
+                            let self_ty = self.read().mir.function_sigs.pin().get(&func).unwrap().ty.param_tys.first().unwrap().clone();
                             let indirection = !base_ty.trivially_convertible_to(&self_ty) as i8;
                             let base = self.build_expr(b, base, Context::new(indirection, DataDest::Read, ControlDest::Continue), tp);
                             let base = self.read().handle_indirection(b, base);
