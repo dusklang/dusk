@@ -313,7 +313,8 @@ impl Value {
     }
 
     fn from_variant(d: &Driver, enuum: EnumId, index: usize, payload: Value) -> Value {
-        let layout = &d.mir.enums[&enuum];
+        let enums = d.mir.enums.pin();
+        let layout = enums.get(&enuum).unwrap();
         let payload_offset = layout.payload_offsets[index];
         let mut bytes = Vec::new();
         bytes.extend(Value::from_u32(index as u32).as_bytes_without_driver().as_ref());
@@ -552,7 +553,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
 
     let mut driver = DriverRwRef::new(&DRIVER);
 
-    let func_ty = driver.read().mir.functions[func_id].ty.clone();
+    let func_ty = driver.read().mir.functions[func_id].get().unwrap().ty.clone();
     let return_ty = func_ty.return_ty.as_ref().clone();
     let mut arguments = Vec::with_capacity(func_ty.param_tys.len());
     macro_rules! get_param {
@@ -617,7 +618,7 @@ fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
 fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 
 impl Driver {
-    pub fn value_to_const(&mut self, val: Value, ty: Type, tp: &dyn TypeProvider) -> Const {
+    pub fn value_to_const(&self, val: Value, ty: Type, tp: &dyn TypeProvider) -> Const {
         match ty {
             Type::Int { is_signed, .. } => {
                 let lit = val.as_big_int(is_signed);
@@ -1195,7 +1196,9 @@ impl DriverRwRef<'_> {
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        let library = &self.read().mir.extern_mods[&func_ref.extern_mod];
+        let d = self.read();
+        let extern_mods = d.mir.extern_mods.pin();
+        let library = extern_mods.get(&func_ref.extern_mod).unwrap();
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks when possible)
         let dyn_lib = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
@@ -1304,7 +1307,9 @@ impl DriverRwRef<'_> {
                 },
                 #[cfg(target_os = "macos")]
                 InstrKind::ObjcClassRef { extern_mod, index } => {
-                    let library = &self.read().mir.extern_mods[&extern_mod];
+                    let d = self.read();
+                    let extern_mods = d.mir.extern_mods.pin();
+                    let library = extern_mods.get(&extern_mod).unwrap();
                     let mut interp = INTERP.write().unwrap();
                     let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
                         // TODO: cache library and proc addresses (and thunks when possible)
@@ -1706,19 +1711,19 @@ impl DriverRwRef<'_> {
                     Value::from_new_internal(Type::Struct(strukt), &self.read())
                 },
                 InstrKind::Enum { ref variants, id } => {
-                    if !self.read().mir.enums.contains_key(&id) {
+                    if !self.read().mir.enums.pin().contains_key(&id) {
                         let mut payload_tys = Vec::new();
                         for &variant in variants {
                             payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
                         }
                         let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
                         drop(d);
-                        self.write().mir.enums.insert(
+                        self.write().mir.enums.pin().insert(
                             id,
                             layout,
                         );
                     }
-                    let payload_tys = self.read().mir.enums[&id].payload_tys.to_vec();
+                    let payload_tys = self.read().mir.enums.pin().get(&id).unwrap().payload_tys.to_vec();
                     Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
                 }
                 InstrKind::StructLit { ref fields, id } => {
@@ -1812,7 +1817,7 @@ impl DriverRwRef<'_> {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
-                    let offset = self.read().layout_struct(&strukt).field_offsets[index];
+                    let offset = self.read().layout_struct(strukt).field_offsets[index];
                     Value::from_usize(addr + offset)
                 },
                 InstrKind::InternalFieldAccess { val, field } => {

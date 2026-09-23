@@ -28,12 +28,12 @@ pub struct Driver {
     pub types: Arc<TypeInterner>,
     pub interner: Arc<RwLock<StringInterner>>,
     pub src_map: Arc<SourceMap>,
+    pub mir: Arc<Mir>,
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
     pub tir_builder: tir::Builder,
     pub ast: Ast,
-    pub mir: Mir,
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
@@ -55,18 +55,18 @@ impl Driver {
             internal_field_decls: Default::default(),
             no_core,
             ast,
-            mir: Mir::default(),
+            mir: Default::default(),
         };
         val.ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
 impl DriverRwRef<'_> {
-    pub fn eval_expr(&mut self, expr: ExprId, tp: &dyn TypeProvider) -> Result<Const, EvalError> {
+    pub fn eval_expr(&self, expr: ExprId, tp: &dyn TypeProvider) -> Result<Const, EvalError> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
         let val = self.call(function_ref, Vec::new(), Vec::new())?;
-        Ok(self.write().value_to_const(val, tp.ty(expr).clone(), tp))
+        Ok(self.read().value_to_const(val, tp.ty(expr).clone(), tp))
     }
 }
 

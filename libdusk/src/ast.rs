@@ -588,6 +588,7 @@ pub struct Ast {
 }
 
 #[derive(Default)]
+#[allow(unused)]
 struct Segment {
 }
 

@@ -1490,7 +1490,6 @@ impl DriverRwRef<'_> {
             for i in 0..unit.eval_dependees.len() {
                 let mut stack = vec![unit.eval_dependees[i]];
                 while let Some(expr) = stack.pop() {
-
                     let val = self.eval_expr(expr, tp);
                     tp.insert_eval_result(expr, val.into());
 

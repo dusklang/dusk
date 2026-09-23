@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use index_vec::IdxRangeBounds;
 pub use index_vec::{IndexVec, Idx, define_index_type, index_vec};
 
+#[allow(unused)]
 macro_rules! define_segmented_index_type {
     ($v:vis struct $name: ident($segment_id: ident) = $typ:ident;) => {
         ::paste::paste! {
@@ -55,6 +56,20 @@ impl<I: Idx, T> ConcurrentIndexVec<I, T> {
     pub fn iter_enumerated(&self) -> impl Iterator<Item=(I, &T)> {
         self.raw.iter()
             .map(|(i, value)| (I::from_usize(i), value))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
+        self.raw.iter()
+            .map(|(_, value)| value)
+    }
+
+    pub fn indices(&self) -> impl Iterator<Item = I> {
+        self.raw.iter()
+            .map(|(i, _)| I::from_usize(i))
+    }
+
+    pub fn count(&self) -> usize {
+        self.raw.count()
     }
 }
 

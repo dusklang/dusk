@@ -23,7 +23,7 @@ impl Backend for X64Backend {
     fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = X64Encoder::new();
 
-        let func = &d.mir.functions[func_index];
+        let func = d.mir.functions[func_index].get().unwrap();
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
         assert_eq!(func.num_parameters(), 0);
 

@@ -178,6 +178,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     let main_sym = driver.read().interner.write().unwrap().get_or_intern_static("main");
     let main = driver.read().mir.functions.iter()
         .position(|func| {
+            let func = func.get().unwrap();
             match func.name {
                 Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
