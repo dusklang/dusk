@@ -28,6 +28,10 @@ use crate::driver::DriverRwRef;
 
 use dusk_proc_macros::*;
 
+// TODO: build AST directly in a Segment inside of ast::Builder. Then, when done with the ast::Builder, explicitly commit its segment into something
+// like a ConcurrentIndexVec<SegmentId, Segment>. It should be possible to lookup any AST data structure you want via something like
+// `driver.ast.exprs(expr)`, where expr is an ExprId, where ExprId would then consist of (SegmentId, LocalExprId).
+
 define_index_type!(pub struct SegmentId = u32;);
 define_index_type!(pub struct ExprId = u32;);
 define_index_type!(pub struct DeclRefId = u32;);

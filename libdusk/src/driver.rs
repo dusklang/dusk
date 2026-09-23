@@ -14,6 +14,10 @@ use crate::type_provider::TypeProvider;
 use crate::rw_ref::RwRef;
 use crate::interpreter::EvalError;
 
+// TODO: finish making all fields on Driver either immutable, or mutable from multiple threads through a shared reference
+// The intent is for high-volume mutation during the main passes of the compiler (e.g., creating AST, TIR and MIR) to take place
+// in a more efficient data structure outside of Driver, then merged into the shared data structure when ready.
+
 // This derive is here so that I can initialize the global Driver instance with something. It is *not* recommended that
 // anyone actually uses `Driver` in its default state.
 #[derive(Default)]

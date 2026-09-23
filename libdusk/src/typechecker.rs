@@ -22,6 +22,10 @@ use crate::tir::{self, UnitItems, ExprNamespace, NameLookup, NewNamespaceRefKind
 
 use dusk_proc_macros::*;
 
+// TODO: instead of directly modifying the TypeProvider from each individual TIR item's implementation, let's create a linear collection of slots
+// for each TIR level, such that all inputs and outputs that an item depends on are nearby each other and we can create disjoint views
+// into this collection, such as across threads.
+
 #[derive(Copy, Clone, Debug)]
 #[derive(Default)]
 pub enum CastMethod {
