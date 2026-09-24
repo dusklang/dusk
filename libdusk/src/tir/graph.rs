@@ -273,13 +273,18 @@ impl Graph {
 
     // The whole purpose of this method existing as opposed to just having `find_level` is so we can call `find_level` with an ordinary closure (not a reference), then
     // pass that same closure on recursively without moving it.
-    fn find_level_recursive(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, filter: &mut impl FnMut(ItemId) -> bool) -> u32 {
+    fn find_level_recursive(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, dep_path: &mut Vec<ItemId>, dep_set: &mut HashSet<ItemId>, filter: &mut impl FnMut(ItemId) -> bool) -> u32 {
         if let Some(&level) = levels.get(&item) { return level; }
+
+        dep_path.push(item);
+        if !dep_set.insert(item) {
+            panic!("Internal compiler error: detected dependency cycle! path: {:?}", dep_path);
+        }
 
         let mut max_level = 0;
         let mut offset = 0;
         for &dep in &self.dependees[item] {
-            let level = self.find_level_recursive(dep, levels, filter);
+            let level = self.find_level_recursive(dep, levels, dep_path, dep_set, filter);
             max_level = max(max_level, level);
             // TODO: Call filter at most once for each element
             if filter(dep) {
@@ -293,7 +298,7 @@ impl Graph {
     }
 
     fn find_level(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, mut filter: impl Clone + Fn(ItemId) -> bool) -> u32 {
-        self.find_level_recursive(item, levels, &mut filter)
+        self.find_level_recursive(item, levels, &mut Vec::new(), &mut HashSet::new(), &mut filter)
     }
 
     // Find the weak components of the graph
