@@ -276,9 +276,12 @@ impl Graph {
     fn find_level_recursive(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, dep_path: &mut Vec<ItemId>, dep_set: &mut HashSet<ItemId>, filter: &mut impl FnMut(ItemId) -> bool) -> u32 {
         if let Some(&level) = levels.get(&item) { return level; }
 
-        dep_path.push(item);
-        if !dep_set.insert(item) {
-            panic!("Internal compiler error: detected dependency cycle! path: {:?}", dep_path);
+        // Handle cycles (begin)
+        {
+            dep_path.push(item);
+            if !dep_set.insert(item) {
+                panic!("Internal compiler error: detected dependency cycle! path: {:?}", dep_path);
+            }
         }
 
         let mut max_level = 0;
@@ -291,6 +294,15 @@ impl Graph {
                 offset = 1;
             }
         }
+
+        // Handle cycles (end)
+        {
+            let popped_item = dep_path.pop();
+            let item_was_present = dep_set.remove(&item);
+            debug_assert_eq!(popped_item, Some(item));
+            debug_assert!(item_was_present);
+        }
+
         if !filter(item) { offset = 0; }
         let level = max_level + offset;
         levels.insert(item, level);
