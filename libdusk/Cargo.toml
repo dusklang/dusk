@@ -37,6 +37,7 @@ crossbeam-skiplist = "0.1"
 boxcar = "0.2"
 papaya = "0.2"
 dashmap = "6.2"
+rayon = "1.12"
 
 # LSP-related dependencies
 url = { version = "2.5.8", optional = true }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use smallvec::SmallVec;
+use rayon::prelude::*;
 
 pub mod constraints;
 
@@ -58,11 +59,51 @@ pub struct Overloads {
     pub nonviable_overloads: Vec<DeclId>,
 }
 
+#[derive(Default, Debug)]
+pub struct StupidNaiveTypeProviderView {
+    expr_constraints: HashMap<ExprId, ConstraintList>,
+    expr_tys: HashMap<ExprId, Type>,
+    decl_tys: HashMap<DeclId, QualType>,
+}
+
+impl StupidNaiveTypeProviderView {
+    fn stupidly_and_naively_join(&mut self, other: &StupidNaiveTypeProviderView) {
+        for (id, constraints) in &other.expr_constraints {
+            let prev_value = self.expr_constraints.insert(*id, constraints.clone());
+            debug_assert_eq!(prev_value, None);
+        }
+
+        for (id, ty) in &other.expr_tys {
+            let prev_value = self.expr_tys.insert(*id, ty.clone());
+            debug_assert_eq!(prev_value, None);
+        }
+
+        for (id, ty) in &other.decl_tys {
+            let prev_value = self.decl_tys.insert(*id, ty.clone());
+            debug_assert_eq!(prev_value, None);
+        }
+    }
+
+    fn stupidly_and_naively_write_to_type_provider(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+        for (expr, constraints) in &self.expr_constraints {
+            *driver.get_constraints_mut(tp, *expr) = constraints.clone();
+        }
+
+        for (id, ty) in &self.expr_tys {
+            *tp.ty_mut(*id) = ty.clone();
+        }
+
+        for (id, ty) in &self.decl_tys {
+            *tp.decl_type_mut(*id) = ty.clone();
+        }
+    }
+}
+
 impl tir::Expr<tir::IntLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new()
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new()
             .with_trait_impls(BuiltinTraits::INT)
-            .with_preferred_type(Type::i32());
+            .with_preferred_type(Type::i32()));
     }
 
     fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
@@ -71,10 +112,10 @@ impl tir::Expr<tir::IntLit> {
 }
 
 impl tir::Expr<tir::DecLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new()
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new()
             .with_trait_impls(BuiltinTraits::DEC)
-            .with_preferred_type(Type::f64());
+            .with_preferred_type(Type::f64()));
     }
 
     fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
@@ -83,10 +124,10 @@ impl tir::Expr<tir::DecLit> {
 }
 
 impl tir::Expr<tir::StrLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new()
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new()
             .with_trait_impls(BuiltinTraits::STR)
-            .with_preferred_type(Type::u8().ptr());
+            .with_preferred_type(Type::u8().ptr()));
     }
 
     fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
@@ -95,10 +136,10 @@ impl tir::Expr<tir::StrLit> {
 }
 
 impl tir::Expr<tir::CharLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new()
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new()
             .with_trait_impls(BuiltinTraits::CHAR)
-            .with_preferred_type(Type::u8().ptr());
+            .with_preferred_type(Type::u8().ptr()));
     }
 
     fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
@@ -106,9 +147,9 @@ impl tir::Expr<tir::CharLit> {
     }
 }
 impl tir::Expr<tir::BoolLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Bool);
-        *tp.ty_mut(self.id) = Type::Bool;
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new().with_type(Type::Bool));
+        view.expr_tys.insert(self.id, Type::Bool);
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -116,9 +157,9 @@ impl tir::Expr<tir::BoolLit> {
 }
 
 impl tir::Expr<tir::Break> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Never);
-        *tp.ty_mut(self.id) = Type::Never;
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new().with_type(Type::Never));
+        view.expr_tys.insert(self.id, Type::Never);
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -126,9 +167,9 @@ impl tir::Expr<tir::Break> {
 }
 
 impl tir::Expr<tir::Continue> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Never);
-        *tp.ty_mut(self.id) = Type::Never;
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new().with_type(Type::Never));
+        view.expr_tys.insert(self.id, Type::Never);
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -136,10 +177,10 @@ impl tir::Expr<tir::Continue> {
 }
 
 impl tir::Expr<tir::ConstExpr> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
         let ty = self.0.clone();
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(ty.clone());
-        *tp.ty_mut(self.id) = ty;
+        view.expr_constraints.insert(self.id, ConstraintList::new().with_type(ty.clone()));
+        view.expr_tys.insert(self.id, ty);
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -147,9 +188,9 @@ impl tir::Expr<tir::ConstExpr> {
 }
 
 impl tir::Expr<tir::ErrorExpr> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Error);
-        *tp.ty_mut(self.id) = Type::Error;
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.expr_constraints.insert(self.id, ConstraintList::new().with_type(Type::Error));
+        view.expr_tys.insert(self.id, Type::Error);
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -157,8 +198,8 @@ impl tir::Expr<tir::ErrorExpr> {
 }
 
 impl tir::GenericParam {
-    fn run_pass_1_legacy(&self, _driver: &Driver, tp: &mut dyn TypeProvider) {
-        *tp.decl_type_mut(self.id) = Type::Ty.into();
+    fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
+        view.decl_tys.insert(self.id, Type::Ty.into());
     }
 
     fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
@@ -1409,16 +1450,34 @@ impl Driver {
                 )+
             }
         }
+
         macro_rules! run_pass_1_flat {
-            ($($name:ident$(,)*)+) => {
-                $(
-                    for item in &unit.$name {
-                        item.run_pass_1(self, tp);
-                    }
-                )+
+            ($first:ident $(, $rest:ident)* $(,)?) => {
+                unit.$first
+                    .par_iter()
+                    .map(run_pass_1_flat!(@run_pass_closure))
+                    $(
+                        .chain(unit.$rest.par_iter().map(run_pass_1_flat!(@run_pass_closure)))
+                    )*
+            };
+
+            (@run_pass_closure) => {
+                |item| {
+                    let mut view = StupidNaiveTypeProviderView::default();
+                    item.run_pass_1(self, &mut view);
+                    view
+                }
             }
         }
-        run_pass_1_legacy_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, error_exprs, func_decls, breaks, continues);
+        run_pass_1_legacy_flat!(func_decls);
+        let mut views: Vec<StupidNaiveTypeProviderView> = run_pass_1_flat!(int_lits, dec_lits, str_lits, char_lits, bool_lits, consts, generic_params, error_exprs, breaks, continues).collect();
+
+        if let Some((first, rest)) = views.split_first_mut() {
+            for other in rest {
+                first.stupidly_and_naively_join(other);
+            }
+            first.stupidly_and_naively_write_to_type_provider(self, tp);
+        }
 
         for level in start_level..unit.num_levels() {
             macro_rules! run_pass_1_legacy {
