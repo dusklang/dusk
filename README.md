@@ -15,7 +15,7 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 | Platform | x86-64 | arm64 | Dalvik bytecode | WASM | JavaScript |
 |----------|--------|-------|-----------------|------|------------|
 | Windows  | 🚧     | 🚧    |                 |      |            |
-| macOS    | ⋯      | 🚧    |                 |      |            |
+| macOS    |        | 🚧    |                 |      |            |
 | Android  |        | ⋯     | 🚧              |      |            |
 | Linux    | ⋯      | 🚧    |                 |      |            |
 | Web      |        |       |                 | ⋯    | ⋯          |
