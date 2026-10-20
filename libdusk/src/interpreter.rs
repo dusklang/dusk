@@ -1429,7 +1429,7 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::Panic => {
                             assert!(arguments.len() <= 1);
                             let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
-                            self.read().diag.report_error(panic_message, next_instr, "panic occured here");
+                            self.read().diag.report_error(panic_message, func.source_ranges.get(&next_instr).copied().unwrap_or_default(), "panic occured here");
                             return Err(EvalError);
                         },
                         LegacyIntrinsic::Print => {
