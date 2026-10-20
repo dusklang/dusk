@@ -312,8 +312,8 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
             println!();
 
+            let num_failed = test_functions.len() - num_passed;
             if num_passed < test_functions.len() {
-                let num_failed = test_functions.len() - num_passed;
                 let plural = if num_failed != 1 {
                     "s"
                 } else {
@@ -323,6 +323,10 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
             } else {
                 debug_assert_eq!(num_passed, test_functions.len());
                 println!("ALL {} TESTS PASSED", num_passed);
+            }
+
+            if num_failed > 0 {
+                return ExitCode::FAILURE
             }
         },
     }
