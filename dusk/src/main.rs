@@ -280,7 +280,28 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
             flush_diagnostics(&driver.read());
         },
         DuskTask::TestCompiler { .. } => {
+            let mut test_functions = Vec::new();
+            for (id, func) in driver.read().mir.functions.iter_enumerated() {
+                let Some(func) = func.get() else { continue };
+                if func.compiler_test_condition.is_some() {
+                    test_functions.push(id);
+                }
+            }
 
+            for (i, &func_id) in test_functions.iter().enumerate() {
+                let d: std::cell::Ref<'_, Driver> = driver.read();
+                let func = d.mir.functions[func_id].get().unwrap();
+                print!("Running test {}/{}", i + 1, test_functions.len());
+                if let Some(name_symbol) = func.name && let Some(name) = driver.read().interner.read().unwrap().resolve(name_symbol) {
+                    print!(" ({})", name);
+                }
+                println!(":");
+                drop(d);
+
+                restart_interp(InterpMode::RunTime);
+                let _ = driver.call(FunctionRef::Id(func_id), Vec::new(), Vec::new());
+                flush_diagnostics(&driver.read());
+            }
         },
     }
 
