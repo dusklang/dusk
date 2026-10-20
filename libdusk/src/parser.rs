@@ -817,7 +817,7 @@ impl Driver {
         let close_curly_range = loop {
             match p.cur().kind {
                 TokenKind::Eof => {
-                    self.diag.report_error("Unexpected end of file while parsing `switch` body", switch_range, "`switch` started here");
+                    self.diag.report_error("unexpected end of file while parsing `switch` body", switch_range, "`switch` started here");
                     return Err(ParseError::Eof);
                 },
                 TokenKind::CloseCurly => {
@@ -1734,7 +1734,7 @@ impl Driver {
         let _close_curly_range = loop {
             match p.cur().kind {
                 TokenKind::Eof => {
-                    self.diag.report_error("Unexpected end of file while parsing `extend` body", extend_range, "`extend` started here");
+                    self.diag.report_error("unexpected end of file while parsing `extend` body", extend_range, "`extend` started here");
                     return Err(ParseError::Eof);
                 },
                 TokenKind::CloseCurly => {

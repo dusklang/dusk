@@ -5,13 +5,15 @@ use libdusk::interpreter::{InterpMode, restart_interp};
 use libdusk::mir::{FunctionRef, FuncId};
 use libdusk::type_provider::{MockStateCommand, MockTypeProvider, TypeProvider};
 use std::cell::RefCell;
+use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::PathBuf;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::process::ExitCode;
 
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
@@ -81,7 +83,7 @@ enum DuskTask<'args> {
 
 // If `program_args` is `Some`, we will run the `main` function in the interpreter.
 // Otherwise, we will build the program.
-fn dusk_main(task: DuskTask<'_>) {
+fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     let (input, arch, os, stop_phase, no_core, output_mir) = match &task {
         DuskTask::Compile { opt, .. } | DuskTask::Run { opt, .. } => {
             (Some(&opt.input), opt.arch, opt.os, opt.stop_phase, opt.no_core, opt.output_mir)
@@ -102,6 +104,39 @@ fn dusk_main(task: DuskTask<'_>) {
     let mut builder = ast::Builder::default();
     driver.write().initialize_ast(&mut builder);
 
+    if matches!(task, DuskTask::TestCompiler) {
+        let Ok(src_root) = env::var("DUSK_SRC_ROOT") else {
+            driver.read().diag.report_error_no_range("no DUSK_SRC_ROOT environment variable found");
+            flush_diagnostics(&driver.read());
+            return ExitCode::FAILURE;
+        };
+
+        let mut test_dir_path = PathBuf::from(src_root);
+        test_dir_path.extend(["tests", "integration"]);
+
+        let Ok(test_dir) = fs::read_dir(&test_dir_path) else {
+            driver.read().diag.report_error_no_range(
+                format!("unable to read test directory \"{}\"", test_dir_path.as_os_str().to_string_lossy())
+            );
+            flush_diagnostics(&driver.read());
+            return ExitCode::FAILURE;
+        };
+
+        for test_entry in test_dir {
+            let Ok(test_entry) = test_entry else { continue };
+
+            let test_path = test_entry.path();
+            if let Some(extension) = test_path.extension() && extension.eq_ignore_ascii_case("dusk") {
+                let success = driver.read().src_map.add_file_on_disk(&test_path).is_ok();
+                if !success {
+                    driver.read().diag.report_error_no_range(
+                        format!("unable to load test file \"{}\"", test_path.as_os_str().to_string_lossy())
+                    );
+                }
+            }
+        }
+    }
+
     if let Some((input, did_load_file)) = loaded_file && !did_load_file {
         driver.read().diag.report_error_no_range(
             format!("unable to load input file \"{}\"", input.as_os_str().to_string_lossy())
@@ -112,8 +147,10 @@ fn dusk_main(task: DuskTask<'_>) {
         ($phase:ident) => {{
             flush_diagnostics(&driver.read());
             if (stop_phase as u8) < (StopPhase::$phase as u8) {
-                driver.read().diag.check_for_failure();
-                return;
+                return match driver.read().diag.check_for_failure() {
+                    true  => ExitCode::FAILURE,
+                    false => ExitCode::SUCCESS
+                }
             }
         }}
     }
@@ -127,7 +164,7 @@ fn dusk_main(task: DuskTask<'_>) {
         // from being properly initialized (e.g., the two-phase initialization of various AST data structures), leading to
         // failures later in the pipeline.
         driver.read().diag.check_for_failure();
-        return;
+        return ExitCode::FAILURE;
     };
 
     begin_phase!(Typecheck);
@@ -183,7 +220,7 @@ fn dusk_main(task: DuskTask<'_>) {
     let tp = tp.into_inner();
 
     flush_diagnostics(&driver.read());
-    if driver.read().diag.check_for_failure() { return; }
+    if driver.read().diag.check_for_failure() { return ExitCode::FAILURE; }
 
     begin_phase!(Mir);
     driver.build_mir(&tp);
@@ -193,13 +230,13 @@ fn dusk_main(task: DuskTask<'_>) {
     }
 
     flush_diagnostics(&driver.read());
-    if driver.read().diag.check_for_failure() { return; }
+    if driver.read().diag.check_for_failure() { return ExitCode::FAILURE; }
 
     begin_phase!(Interp);
     match task {
         DuskTask::Compile { .. } => {
             let Some(main) = expect_main_func(&driver) else {
-                return
+                return ExitCode::FAILURE;
             };
 
             let path = match driver.read().os {
@@ -223,7 +260,7 @@ fn dusk_main(task: DuskTask<'_>) {
         },
         DuskTask::Run { program_args, .. } => {
             let Some(main) = expect_main_func(&driver) else {
-                return
+                return ExitCode::FAILURE;
             };
 
             #[cfg(debug_assertions)]
@@ -235,8 +272,11 @@ fn dusk_main(task: DuskTask<'_>) {
             flush_diagnostics(&driver.read());
         },
         DuskTask::TestCompiler => {
+
         },
     }
+
+    ExitCode::SUCCESS
 }
 
 fn get_main_func(driver: &DriverRwRef) -> Option<FuncId> {
@@ -256,7 +296,7 @@ fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {
         Some(main)
     } else {
         driver.read().diag.report_error_no_range(
-            "Couldn't find main function with no parameters and a return type of `void`"
+            "couldn't find main function with no parameters and a return type of `void`"
         );
         flush_diagnostics(&driver.read());
         driver.read().diag.check_for_failure();
@@ -264,7 +304,7 @@ fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {
     }
 }
 
-fn main() {
+fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
     match args.get(1).map(|arg| arg.as_os_str()) {
         Some(val) if val == OsStr::new("run") => {
@@ -273,7 +313,7 @@ fn main() {
             let program_args = split.next().unwrap_or(&[]);
             let opt = Opt::parse_from(clap_args);
 
-            dusk_main(DuskTask::Run { opt, program_args });
+            dusk_main(DuskTask::Run { opt, program_args })
         },
         Some(val) if val == OsStr::new("test-compiler") => {
             dusk_main(DuskTask::TestCompiler)

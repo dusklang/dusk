@@ -3105,7 +3105,7 @@ impl DriverRwRef<'_> {
                 self.build_scope(b, destination, ctx, tp);
             },
             SwitchDecisionNode::Failure => {
-                self.read().diag.report_error_no_range_msg("Pattern matching failure", expr);
+                self.read().diag.report_error_no_range_msg("pattern matching failure", expr);
                 self.read().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
                 self.read().end_current_bb(b);
             }
