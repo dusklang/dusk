@@ -18,7 +18,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 use url::Url;
 
 use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
-use libdusk::driver::{Driver, DRIVER, DriverRwRef};
+use libdusk::driver::{CompilerMode, DRIVER, Driver, DriverRwRef};
 use libdusk::dvm;
 use dusk_proc_macros::ef;
 use libdusk::target::{Arch, OperatingSystem};
@@ -445,7 +445,7 @@ impl Server {
             let file = src_map.add_file_in_memory(Url::parse(path_ref.as_str()).unwrap(), src).unwrap();
             **file_id_ref = Some(file);
             let mut driver = DriverRwRef::new(&DRIVER);
-            *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false);
+            *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false, CompilerMode::Dls);
 
             let mut builder = ast::Builder::default();
             driver.write().initialize_ast(&mut builder);

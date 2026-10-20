@@ -25,7 +25,9 @@ pub struct Driver {
     // Constant compiler options
     pub arch: Arch,
     pub os: OperatingSystem,
+    // TODO: bitflags
     pub no_core: bool,
+    pub mode: CompilerMode,
 
     // Concurrently-accessible global state (these don't really need to be Arcs, they just are for the time being).
     pub diag: Arc<DiagnosticReporter>,
@@ -41,8 +43,17 @@ pub struct Driver {
 }
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
+#[derive(Default, Copy, Clone)]
+pub enum CompilerMode {
+    #[default]
+    Compile,
+    Run,
+    Dls,
+    TestCompiler,
+}
+
 impl Driver {
-    pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool) -> Self {
+    pub fn new(src_map: SourceMap, arch: Arch, os: OperatingSystem, no_core: bool, mode: CompilerMode) -> Self {
         let interner: Arc<RwLock<StringInterner>> = Default::default();
         let ast = Ast {
             known_idents: KnownIdents::new(&interner),
@@ -58,6 +69,7 @@ impl Driver {
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
+            mode,
             ast,
             mir: Default::default(),
         };

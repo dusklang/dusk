@@ -527,11 +527,13 @@ impl Default for GenericCtxId {
     fn default() -> Self { BLANK_GENERIC_CTX }
 }
 
+#[derive(Clone, Copy)]
 pub enum CompilerTestConditionKind {
     Success,
     Failure,
 }
 
+#[derive(Clone, Copy)]
 pub enum AttributeKind {
     Requires(ExprId),
     Guarantees(ExprId),
@@ -749,7 +751,7 @@ macro_rules! declare_known_idents {
         $interner.get_or_intern(stringify!($name))
     };
 }
-declare_known_idents!(requires, guarantees, comptime, compiler_test, failure, success, return_value, invalid_declref, salf = "self", capital_self = "Self", underscore = "_");
+declare_known_idents!(main, requires, guarantees, comptime, compiler_test, failure, success, return_value, invalid_declref, salf = "self", capital_self = "Self", underscore = "_");
 
 #[derive(Debug, Clone, Copy)]
 pub struct LoopState {

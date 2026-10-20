@@ -10,7 +10,7 @@ use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, Swit
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
 
-use crate::driver::Driver;
+use crate::driver::{CompilerMode, Driver};
 use crate::ast::{ConditionKind, GenericParamList};
 use crate::token::{Token, TokenKind, TokenVec};
 use crate::builder::{BinOp, UnOp, OpPlacement};
@@ -875,6 +875,16 @@ impl Driver {
         let is_compiler_test = attr.symbol == self.ast.known_idents.compiler_test;
         let is_condition = is_requires || is_guarantees;
 
+        let make_bare_attr_kind = || if is_requires {
+            AttributeKind::Requires(ERROR_EXPR)
+        } else if is_guarantees {
+            AttributeKind::Guarantees(ERROR_EXPR)
+        } else if is_comptime {
+            AttributeKind::Comptime
+        } else {
+            AttributeKind::Error(Some(attr))
+        };
+
         if !is_condition && !is_comptime && !is_compiler_test {
             self.diag.push(
                 Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr.symbol).unwrap()))
@@ -892,7 +902,7 @@ impl Driver {
                             .adding_primary_range(paren_range, "try removing these parentheses")
                     );
                     p.next();
-                    (AttributeKind::Error(Some(attr)), p.cur().range)
+                    (make_bare_attr_kind(), paren_range)
                 } else {
                     if is_compiler_test {
                         let condition = self.eat_ident(p).ok();
@@ -955,19 +965,12 @@ impl Driver {
                     }
                 }
             },
-            _ => {
-                if is_requires {
-                    (AttributeKind::Requires(ERROR_EXPR), attr.range)
-                } else if is_guarantees {
-                    (AttributeKind::Guarantees(ERROR_EXPR), attr.range)
-                } else if is_comptime {
-                    (AttributeKind::Comptime, attr.range)
-                } else {
-                    (AttributeKind::Error(Some(attr)), attr.range)
-                }
-            },
+            _ => (make_bare_attr_kind(), attr.range),
         };
         let range = source_info::concat(at_range, final_tok_range);
+        if matches!(attr_kind, AttributeKind::CompilerTest { .. }) && !matches!(self.mode, CompilerMode::TestCompiler | CompilerMode::Dls) {
+            self.diag.report_error("unexpected 'compiler_test' attribute", attr.range, "not supported outside of 'test-compiler' mode");
+        }
 
         Ok(Attribute { attr: attr_kind, range })
     }

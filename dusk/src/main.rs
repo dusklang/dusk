@@ -16,7 +16,7 @@ use std::os::unix::fs::PermissionsExt;
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
 use libdusk::target::{Arch, OperatingSystem};
-use libdusk::driver::{DRIVER, Driver, DriverRwRef};
+use libdusk::driver::{CompilerMode, DRIVER, Driver, DriverRwRef};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
 use libdusk::ast;
@@ -24,11 +24,12 @@ use libdusk::ast;
 use libdusk::dvm;
 
 #[repr(u8)]
-#[derive(ValueEnum, Copy, Clone, Debug)]
+#[derive(ValueEnum, Copy, Clone, Debug, Default)]
 enum StopPhase {
     Parse,
     Typecheck,
     Mir,
+    #[default]
     Interp,
 }
 
@@ -50,7 +51,7 @@ struct Opt {
     no_core: bool,
 
     /// The phase to stop the compiler at
-    #[arg(value_enum, short='s', long, default_value="interp", ignore_case = true)]
+    #[arg(value_enum, short='s', long, default_value_t, ignore_case = true)]
     stop_phase: StopPhase,
 
     /// Input file
@@ -69,27 +70,48 @@ fn flush_diagnostics(driver: &Driver) {
     }
 }
 
+enum DuskTask<'args> {
+    Compile { opt: Opt },
+    Run {
+        opt: Opt,
+        program_args: &'args [OsString]
+    },
+    TestCompiler,
+}
+
 // If `program_args` is `Some`, we will run the `main` function in the interpreter.
 // Otherwise, we will build the program.
-fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
+fn dusk_main(task: DuskTask<'_>) {
+    let (input, arch, os, stop_phase, no_core, output_mir) = match &task {
+        DuskTask::Compile { opt, .. } | DuskTask::Run { opt, .. } => {
+            (Some(&opt.input), opt.arch, opt.os, opt.stop_phase, opt.no_core, opt.output_mir)
+        },
+        DuskTask::TestCompiler => (None, Default::default(), Default::default(), Default::default(), false, false),
+    };
+
     dvm::launch_coordinator_thread();
     let src_map = SourceMap::new();
-    let loaded_file = src_map.add_file_on_disk(&opt.input).is_ok();
+    let loaded_file = input.map(|input| (input, src_map.add_file_on_disk(input).is_ok()));
     let mut driver = DriverRwRef::new(&DRIVER);
-    *driver.write() = Driver::new(src_map, opt.arch, opt.os, opt.no_core);
+    let mode = match task {
+        DuskTask::Compile { .. } => CompilerMode::Compile,
+        DuskTask::Run { .. } => CompilerMode::Run,
+        DuskTask::TestCompiler => CompilerMode::TestCompiler,
+    };
+    *driver.write() = Driver::new(src_map, arch, os, no_core, mode);
     let mut builder = ast::Builder::default();
     driver.write().initialize_ast(&mut builder);
 
-    if !loaded_file {
+    if let Some((input, did_load_file)) = loaded_file && !did_load_file {
         driver.read().diag.report_error_no_range(
-            format!("unable to load input file \"{}\"", opt.input.as_os_str().to_string_lossy())
+            format!("unable to load input file \"{}\"", input.as_os_str().to_string_lossy())
         );
     }
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
             flush_diagnostics(&driver.read());
-            if (opt.stop_phase as u8) < (StopPhase::$phase as u8) {
+            if (stop_phase as u8) < (StopPhase::$phase as u8) {
                 driver.read().diag.check_for_failure();
                 return;
             }
@@ -166,7 +188,7 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     begin_phase!(Mir);
     driver.build_mir(&tp);
 
-    if opt.output_mir {
+    if output_mir {
         println!("{}", driver.read().display_mir());
     }
 
@@ -174,26 +196,12 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
     if driver.read().diag.check_for_failure() { return; }
 
     begin_phase!(Interp);
-    let main_sym = driver.read().interner.write().unwrap().get_or_intern_static("main");
-    let main = driver.read().mir.functions.iter()
-        .position(|func| {
-            let func = func.get().unwrap();
-            match func.name {
-                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && func.num_parameters() == 0,
-                None => false,
-            }
-        }).map(FuncId::new);
-    if let Some(main) = main {
-        driver.read().diag.print_warnings();
-        if let Some(program_args) = program_args {
-            #[cfg(debug_assertions)]
-            println!("Running main in the interpreter:\n");
-            restart_interp(InterpMode::RunTime);
-            driver.set_command_line_arguments(program_args);
-            let _ = driver.call(FunctionRef::Id(main), Vec::new(), Vec::new());
+    match task {
+        DuskTask::Compile { .. } => {
+            let Some(main) = expect_main_func(&driver) else {
+                return
+            };
 
-            flush_diagnostics(&driver.read());
-        } else {
             let path = match driver.read().os {
                 OperatingSystem::Windows => "a.exe",
                 OperatingSystem::MacOS | OperatingSystem::Linux => "a.out",
@@ -212,13 +220,47 @@ fn dusk_main(opt: Opt, program_args: Option<&[OsString]>) {
             let mut backend = driver.read().create_backend();
             let mut bundler = driver.read().create_bundler();
             bundler.write(&driver.read(), main, &mut *linker, &mut *backend, &mut w).unwrap();
-        }
+        },
+        DuskTask::Run { program_args, .. } => {
+            let Some(main) = expect_main_func(&driver) else {
+                return
+            };
+
+            #[cfg(debug_assertions)]
+            println!("Running main in the interpreter:\n");
+            restart_interp(InterpMode::RunTime);
+            driver.set_command_line_arguments(program_args);
+            let _ = driver.call(FunctionRef::Id(main), Vec::new(), Vec::new());
+
+            flush_diagnostics(&driver.read());
+        },
+        DuskTask::TestCompiler => {
+        },
+    }
+}
+
+fn get_main_func(driver: &DriverRwRef) -> Option<FuncId> {
+    let main_sym = driver.read().ast.known_idents.main;
+    driver.read().mir.functions.iter()
+        .position(|func| {
+            let func = func.get().unwrap();
+            match func.name {
+                Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && func.num_parameters() == 0,
+                None => false,
+            }
+        }).map(FuncId::new)
+}
+
+fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {
+    if let Some(main) = get_main_func(driver) {
+        Some(main)
     } else {
         driver.read().diag.report_error_no_range(
             "Couldn't find main function with no parameters and a return type of `void`"
         );
         flush_diagnostics(&driver.read());
         driver.read().diag.check_for_failure();
+        None
     }
 }
 
@@ -231,8 +273,11 @@ fn main() {
             let program_args = split.next().unwrap_or(&[]);
             let opt = Opt::parse_from(clap_args);
 
-            dusk_main(opt, Some(program_args));
+            dusk_main(DuskTask::Run { opt, program_args });
         },
-        _ => dusk_main(Opt::parse_from(args), None),
+        Some(val) if val == OsStr::new("test-compiler") => {
+            dusk_main(DuskTask::TestCompiler)
+        },
+        _ => dusk_main(DuskTask::Compile { opt: Opt::parse_from(args) }),
     }
 }
