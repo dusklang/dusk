@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, AttributeKind, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -941,11 +941,10 @@ impl DriverRwRef<'_> {
 
                 let func_ty = d.decl_type(id, tp).as_function().unwrap().clone();
                 let name = d.ast.names[id];
-                let comptime_sym = d.ast.known_idents.comptime;
                 let is_comptime = d.ast.decl_attributes.get(&id)
                 .map(|attrs|
                     attrs.iter()
-                    .any(|attr| attr.attr == comptime_sym)
+                    .any(|attr| matches!(attr.attr, AttributeKind::Comptime))
                 ).unwrap_or(false);
                 let signature = FunctionSignature {
                     name,

@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, Attribute, ConditionNsId, DeclId, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, ERROR_EXPR, ERROR_TYPE, VOID_TYPE};
+use crate::ast::{self, Attribute, AttributeKind, CompilerTestConditionKind, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
 use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
@@ -56,12 +56,30 @@ impl PartialEq<ListState> for usize {
 }
 
 #[derive(Debug)]
+pub enum ExpectedToken {
+    Kind(TokenKind),
+    Identifier,
+}
+
+impl From<TokenKind> for ExpectedToken {
+    fn from(value: TokenKind) -> Self {
+        Self::Kind(value)
+    }
+}
+
+#[derive(Debug)]
 pub enum ParseError {
-    UnexpectedToken(TokenKind),
+    UnexpectedToken(ExpectedToken),
     UnableToLex,
     Eof,
 }
 pub type ParseResult<T> = Result<T, ParseError>;
+
+impl ParseError {
+    fn unexpected_token(tok: impl Into<ExpectedToken>) -> Self {
+        Self::UnexpectedToken(tok.into())
+    }
+}
 
 #[derive(Debug)]
 enum SeparatorResult {
@@ -484,7 +502,7 @@ impl Driver {
         if is_mut {
             p.next();
         }
-        let var_name = self.eat_ident(p);
+        let var_name = self.eat_ident(p)?;
         let var_ty = matches!(p.cur().kind, TokenKind::Colon).then(|| {
             p.next();
             self.parse_type(p, b).0
@@ -590,7 +608,7 @@ impl Driver {
             TokenKind::For => self.parse_for(p, b, None),
             TokenKind::Colon => {
                 self.eat_tok(p, TokenKind::Colon)?;
-                let label = self.eat_ident(p);
+                let label = self.eat_ident(p)?;
                 match p.cur().kind {
                     TokenKind::While => self.parse_while(p, b, Some(label)),
                     TokenKind::For => self.parse_for(p, b, Some(label)),
@@ -601,7 +619,7 @@ impl Driver {
                             Error::new("unexpected token")
                                 .adding_primary_range(range, "expected `while` or `for` instead")
                         );
-                        Err(ParseError::UnexpectedToken(unexpected_token))
+                        Err(ParseError::unexpected_token(unexpected_token))
                     },
                 }
             },
@@ -618,8 +636,8 @@ impl Driver {
                 p.next();
                 let label = matches!(p.cur().kind, TokenKind::Colon).then(|| {
                     p.next();
-                    self.eat_ident(p)
-                });
+                    self.eat_ident(p).ok()
+                }).flatten();
                 Ok(self.break_expr(b, range, label))
             },
             TokenKind::Continue => {
@@ -627,8 +645,8 @@ impl Driver {
                 p.next();
                 let label = matches!(p.cur().kind, TokenKind::Colon).then(|| {
                     p.next();
-                    self.eat_ident(p)
-                });
+                    self.eat_ident(p).ok()
+                }).flatten();
                 Ok(self.continue_expr(b, range, label))
             },
             TokenKind::Fn => {
@@ -659,7 +677,7 @@ impl Driver {
                 // TODO: parse C variadic parameter
                 Ok(self.fn_type(b, param_tys, false, ret_ty, fn_range))
             },
-            x => Err(ParseError::UnexpectedToken(x.clone())),
+            x => Err(ParseError::unexpected_token(x.clone())),
         }.and_then(|mut expr| {
             // Parse arbitrary sequence of postfix operators and member refs
             loop {
@@ -809,7 +827,7 @@ impl Driver {
                 },
                 _ => {
                     self.start_next_list_item(p, case_list.id());
-                    let pattern = self.parse_pattern(p, b, pattern_matching_context, ORIGINAL_SCRUTINEE_VALUE, scrutinee);
+                    let pattern = self.parse_pattern(p, b, pattern_matching_context, ORIGINAL_SCRUTINEE_VALUE, scrutinee)?;
                     let bindings = self.get_pattern_bindings(&pattern);
                     self.eat_tok(p, TokenKind::Colon)?;
                     let (scope, scope_range) = match p.cur().kind {
@@ -850,23 +868,20 @@ impl Driver {
     fn parse_attribute(&mut self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<Attribute> {
         let at_range = self.eat_tok(p, TokenKind::AtSign)?;
 
-        let Token { kind, range: ident_range } = p.cur();
-        let attr = match kind {
-            &TokenKind::Ident(sym) => sym,
-            _ => panic!("Unexpected token when parsing attribute"),
-        };
-        let is_requires = attr == self.ast.known_idents.requires;
-        let is_guarantees = attr == self.ast.known_idents.guarantees;
-        let is_comptime = attr == self.ast.known_idents.comptime;
+        let attr = self.eat_ident(p)?;
+        let is_requires = attr.symbol == self.ast.known_idents.requires;
+        let is_guarantees = attr.symbol == self.ast.known_idents.guarantees;
+        let is_comptime = attr.symbol == self.ast.known_idents.comptime;
+        let is_compiler_test = attr.symbol == self.ast.known_idents.compiler_test;
         let is_condition = is_requires || is_guarantees;
 
-        if !is_condition && !is_comptime {
+        if !is_condition && !is_comptime && !is_compiler_test {
             self.diag.push(
-                Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr).unwrap()))
-                    .adding_primary_range(ident_range, "")
+                Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr.symbol).unwrap()))
+                    .adding_primary_range(attr.range, "")
             );
         }
-        let (arg, final_tok_range) = match p.next().kind {
+        let (attr_kind, final_tok_range) = match p.cur().kind {
             TokenKind::LeftParen => {
                 let left_paren_range = p.cur().range;
                 p.next();
@@ -877,55 +892,93 @@ impl Driver {
                             .adding_primary_range(paren_range, "try removing these parentheses")
                     );
                     p.next();
-                    (None, p.cur().range)
+                    (AttributeKind::Error(Some(attr)), p.cur().range)
                 } else {
-                    // Enter condition namespace
-                    let _condition_entry = is_condition.then(|| {
-                        let condition_kind = if is_requires {
-                            ConditionKind::Requirement
-                        } else if is_guarantees {
-                            ConditionKind::Guarantee
+                    if is_compiler_test {
+                        let condition = self.eat_ident(p).ok();
+                        let (condition, condition_range) = if let Some(condition) = condition {
+                            if condition.symbol == self.ast.known_idents.failure {
+                                (CompilerTestConditionKind::Failure, condition.range)
+                            } else {
+                                if condition.symbol != self.ast.known_idents.success {
+                                    self.diag.report_error(
+                                        format!("unrecognized compiler test condition '{}'", self.interner.read().unwrap().resolve(condition.symbol).unwrap()),
+                                        condition.range,
+                                        "should be 'success' or 'failure'"
+                                    );
+                                }
+                                (CompilerTestConditionKind::Success, condition.range)
+                            }
                         } else {
-                            unreachable!();
+                            (CompilerTestConditionKind::Success, p.cur().range)
                         };
-                        // Lazily create condition namespace if necessary
-                        let ns = if let &mut Some(condition_ns) = condition_ns {
-                            condition_ns
-                        } else {
-                            let ns = self.create_condition_namespace(b);
-                            *condition_ns = Some(ns);
-                            ns
-                        };
-                        Some(self.enter_condition_namespace(b, ns, condition_kind))
-                    });
-                    let arg = self.parse_expr(p, b).unwrap_or_else(|err| err);
-                    let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
 
-                    (Some(arg), paren_range)
+                        let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
+
+                        (AttributeKind::CompilerTest { condition, condition_range }, paren_range)
+                    } else {
+                        // Enter condition namespace if necessary
+                        let _condition_entry = is_condition.then(|| {
+                            let condition_kind = if is_requires {
+                                ConditionKind::Requirement
+                            } else if is_guarantees {
+                                ConditionKind::Guarantee
+                            } else {
+                                unreachable!();
+                            };
+                            // Lazily create condition namespace if necessary
+                            let ns = if let &mut Some(condition_ns) = condition_ns {
+                                condition_ns
+                            } else {
+                                let ns = self.create_condition_namespace(b);
+                                *condition_ns = Some(ns);
+                                ns
+                            };
+                            Some(self.enter_condition_namespace(b, ns, condition_kind))
+                        });
+                        let arg = self.parse_expr(p, b).unwrap_or_else(|err| err);
+                        let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
+
+                        if is_requires {
+                            (AttributeKind::Requires(arg), paren_range)
+                        } else if is_guarantees {
+                            (AttributeKind::Guarantees(arg), paren_range)
+                        } else if is_comptime {
+                            self.diag.push(
+                                Error::new("argument passed to @comptime attribute")
+                                    .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
+                            );
+                            (AttributeKind::Comptime, paren_range)
+                        } else {
+                            (AttributeKind::Error(Some(attr)), paren_range)
+                        }
+                    }
                 }
             },
-            _ => (None, ident_range),
+            _ => {
+                if is_requires {
+                    (AttributeKind::Requires(ERROR_EXPR), attr.range)
+                } else if is_guarantees {
+                    (AttributeKind::Guarantees(ERROR_EXPR), attr.range)
+                } else if is_comptime {
+                    (AttributeKind::Comptime, attr.range)
+                } else {
+                    (AttributeKind::Error(Some(attr)), attr.range)
+                }
+            },
         };
         let range = source_info::concat(at_range, final_tok_range);
 
-        if let &Some(arg) = &arg
-            && is_comptime {
-                self.diag.push(
-                    Error::new("argument passed to @comptime attribute")
-                        .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
-                );
-            }
-
-        Ok(Attribute { attr, arg, range })
+        Ok(Attribute { attr: attr_kind, range })
     }
 
-    fn parse_pattern(&mut self, p: &mut Parser, b: &mut ast::Builder, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId) -> Pattern {
+    fn parse_pattern(&mut self, p: &mut Parser, b: &mut ast::Builder, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId) -> ParseResult<Pattern> {
         let initial_tok = p.cur();
         let initial_range = initial_tok.range;
         match initial_tok.kind {
             TokenKind::Dot => {
                 p.next();
-                let name = self.eat_ident(p);
+                let name = self.eat_ident(p)?;
                 let range = source_info::concat(initial_range, name.range);
                 let mut payload = None;
                 if self.try_eat_tok(p, TokenKind::LeftParen).is_some() {
@@ -941,7 +994,7 @@ impl Driver {
                             _ => {
                                 self.start_next_list_item(p, payload_list.id());
                                 let payload_scrutinee = self.ast.pattern_matching_contexts[context].add_scrutinee_value(SwitchScrutineeValue::EnumPayload { enum_value: scrutinee, variant_name: name.symbol });
-                                let payload_pattern = self.parse_pattern(p, b, context, payload_scrutinee, root_scrutinee);
+                                let payload_pattern = self.parse_pattern(p, b, context, payload_scrutinee, root_scrutinee)?;
                                 if !payload_patterns.is_empty() {
                                     todo!("implement tuple destructuring");
                                 }
@@ -959,33 +1012,33 @@ impl Driver {
                     let payload_scrutinee = self.ast.pattern_matching_contexts[context].add_scrutinee_value(SwitchScrutineeValue::EnumPayload { enum_value: scrutinee, variant_name: name.symbol });
                     Box::new(Pattern { kind: PatternKind::AnonymousCatchAll(SourceRange::default()), scrutinee: payload_scrutinee })
                 });
-                Pattern {
+                Ok(Pattern {
                     kind: PatternKind::ContextualMember { name, range, payload: Some(payload) },
                     scrutinee,
-                }
+                })
             },
             &TokenKind::Ident(name) => {
                 p.next();
                 if name == self.ast.known_idents.underscore {
-                    Pattern {
+                    Ok(Pattern {
                         kind: PatternKind::AnonymousCatchAll(initial_range),
                         scrutinee,
-                    }
+                    })
                 } else {
                     let name = Ident { symbol: name, range: initial_range };
                     let binding_decl = self.add_decl(b, ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, is_mut: false }, name.symbol, None, name.range);
-                    Pattern {
+                    Ok(Pattern {
                         kind: PatternKind::NamedCatchAll { name, binding_decl },
                         scrutinee,
-                    }
+                    })
                 }
             },
             &TokenKind::IntLit(value) => {
                 p.next();
-                Pattern {
+                Ok(Pattern {
                     kind: PatternKind::IntLit { value, range: initial_range },
                     scrutinee,
-                }
+                })
             },
             tok => panic!("unexpected token {:?}", tok),
         }
@@ -999,7 +1052,7 @@ impl Driver {
                 Error::new("unexpected token")
                     .adding_primary_range(range, format!("expected {:?} instead", kind)) // TODO: user-facing pretty-printing of token kinds
             );
-            Err(ParseError::UnexpectedToken(cur_kind))
+            Err(ParseError::unexpected_token(cur_kind))
         } else {
             p.next();
             Ok(range)
@@ -1016,13 +1069,17 @@ impl Driver {
         }
     }
 
-    fn eat_ident(&self, p: &mut Parser) -> Ident {
+    fn eat_ident(&self, p: &mut Parser) -> ParseResult<Ident> {
         let Token { kind, range } = p.cur();
         if let &TokenKind::Ident(symbol) = kind {
             p.next();
-            Ident { symbol, range }
+            Ok(Ident { symbol, range })
         } else {
-            panic!("unexpected token {:?}, expected identifier", kind)
+            self.diag.push(
+                Error::new("unexpected token")
+                    .adding_primary_range(range, "expected identifier")
+            );
+            Err(ParseError::unexpected_token(ExpectedToken::Identifier))
         }
     }
 }
@@ -1209,7 +1266,7 @@ impl Driver {
                 if let Some(condition_ns) = condition_ns {
                     self.ast.condition_ns[condition_ns].func = decl;
                 }
-                if let Some(attr) = attributes.iter().find(|attr| attr.attr == self.ast.known_idents.comptime)
+                if let Some(attr) = attributes.iter().find(|attr| matches!(attr.attr, AttributeKind::Comptime))
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
@@ -1500,7 +1557,7 @@ impl Driver {
                     .adding_primary_range(proto_range, "'fn' here")
                     .adding_secondary_range(p.cur().range, "note: found this instead")
             );
-            return Err(ParseError::UnexpectedToken(p.cur().kind.clone()));
+            return Err(ParseError::unexpected_token(p.cur().kind.clone()));
         };
         let name_range = p.cur().range;
         proto_range = source_info::concat(proto_range, name_range);
