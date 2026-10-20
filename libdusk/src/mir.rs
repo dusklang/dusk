@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, AttributeKind, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, AttributeKind, CompilerTestCondition, ConditionKind, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -1422,6 +1422,13 @@ impl Driver {
         let func = function_by_ref(&self.mir, func);
         if func.is_comptime {
             write!(f, "@comptime ")?;
+        }
+        if let Some(condition) = func.compiler_test_condition {
+            let condition_str = match condition {
+                CompilerTestCondition::Failure => "failure",
+                CompilerTestCondition::Success => "success",
+            };
+            write!(f, "@compiler_test({}) ", condition_str)?;
         }
         write!(f, "fn {}", self.fn_name(func.name))?;
         if !func.generic_params.is_empty() {

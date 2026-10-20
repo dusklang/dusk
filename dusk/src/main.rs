@@ -60,6 +60,14 @@ struct Opt {
     input: PathBuf,
 }
 
+#[derive(Parser, Debug)]
+#[clap(name = "dusk")]
+struct TestCompilerOpt {
+    /// Output MIR in textual format
+    #[arg(short='m', long)]
+    output_mir: bool,
+}
+
 fn flush_diagnostics(driver: &Driver) {
     let diagnostics = driver.diag.get_latest_diagnostics();
     for mut diagnostic in diagnostics {
@@ -78,7 +86,7 @@ enum DuskTask<'args> {
         opt: Opt,
         program_args: &'args [OsString]
     },
-    TestCompiler,
+    TestCompiler { opt: TestCompilerOpt },
 }
 
 // If `program_args` is `Some`, we will run the `main` function in the interpreter.
@@ -88,7 +96,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
         DuskTask::Compile { opt, .. } | DuskTask::Run { opt, .. } => {
             (Some(&opt.input), opt.arch, opt.os, opt.stop_phase, opt.no_core, opt.output_mir)
         },
-        DuskTask::TestCompiler => (None, Default::default(), Default::default(), Default::default(), false, false),
+        DuskTask::TestCompiler { opt } => (None, Default::default(), Default::default(), Default::default(), false, opt.output_mir),
     };
 
     dvm::launch_coordinator_thread();
@@ -98,13 +106,13 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     let mode = match task {
         DuskTask::Compile { .. } => CompilerMode::Compile,
         DuskTask::Run { .. } => CompilerMode::Run,
-        DuskTask::TestCompiler => CompilerMode::TestCompiler,
+        DuskTask::TestCompiler { .. } => CompilerMode::TestCompiler,
     };
     *driver.write() = Driver::new(src_map, arch, os, no_core, mode);
     let mut builder = ast::Builder::default();
     driver.write().initialize_ast(&mut builder);
 
-    if matches!(task, DuskTask::TestCompiler) {
+    if matches!(task, DuskTask::TestCompiler { .. }) {
         let Ok(src_root) = env::var("DUSK_SRC_ROOT") else {
             driver.read().diag.report_error_no_range("no DUSK_SRC_ROOT environment variable found");
             flush_diagnostics(&driver.read());
@@ -271,7 +279,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
             flush_diagnostics(&driver.read());
         },
-        DuskTask::TestCompiler => {
+        DuskTask::TestCompiler { .. } => {
 
         },
     }
@@ -304,19 +312,23 @@ fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {
     }
 }
 
+fn parse_cmd_args<P: Parser>(args: &[OsString]) -> (P, &[OsString]) {
+    let mut split = args.split(|arg| arg == OsStr::new("--"));
+    let clap_args = &split.next().unwrap()[1..]; // ignore 0th argument, which we know is "run"
+    let program_args = split.next().unwrap_or(&[]);
+    (P::parse_from(clap_args), program_args)
+}
+
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
     match args.get(1).map(|arg| arg.as_os_str()) {
         Some(val) if val == OsStr::new("run") => {
-            let mut split = args.split(|arg| arg == OsStr::new("--"));
-            let clap_args = &split.next().unwrap()[1..]; // ignore 0th argument, which we know is "run"
-            let program_args = split.next().unwrap_or(&[]);
-            let opt = Opt::parse_from(clap_args);
-
+            let (opt, program_args) = parse_cmd_args(&args);
             dusk_main(DuskTask::Run { opt, program_args })
         },
         Some(val) if val == OsStr::new("test-compiler") => {
-            dusk_main(DuskTask::TestCompiler)
+            let (opt, _) = parse_cmd_args(&args);
+            dusk_main(DuskTask::TestCompiler { opt })
         },
         _ => dusk_main(DuskTask::Compile { opt: Opt::parse_from(args) }),
     }
