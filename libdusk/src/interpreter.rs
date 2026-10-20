@@ -1,4 +1,4 @@
-use std::alloc;
+use std::{alloc, assert_matches};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::{CStr, CString, c_void, OsString};
@@ -20,8 +20,8 @@ use crate::display_adapter;
 use crate::index_vec::range_iter;
 
 use crate::target::Arch;
-use crate::ast::{LegacyIntrinsic, EnumId, GenericParamId, ExternFunctionRef, ExternModId, NewNamespaceId};
-use crate::dvm::{MessageKind, Call, self};
+use crate::ast::{CompilerTestCondition, EnumId, ExternFunctionRef, ExternModId, GenericParamId, LegacyIntrinsic, NewNamespaceId};
+use crate::dvm::{self, Call, CallKind, MessageKind};
 use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
@@ -419,10 +419,11 @@ impl StackFrame {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum InterpMode {
     CompileTime,
     RunTime,
+    TestCompiler,
 }
 
 #[cfg(windows)]
@@ -735,7 +736,11 @@ impl DriverRwRef<'_> {
     pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
         self.unlock();
 
-        dvm::send_message(MessageKind::Call(Call { func_ref, arguments, generic_arguments })).unwrap().0
+        let response = dvm::send_message(MessageKind::Call(Call { func_ref, kind: CallKind::Direct, arguments, generic_arguments })).unwrap();
+        let dvm::Response::Direct(result) = response else {
+            panic!("incorrect response type");
+        };
+        result
     }
     pub fn call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
         let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
@@ -755,6 +760,33 @@ impl DriverRwRef<'_> {
                 }
             }
         })
+    }
+    pub fn compiler_test_call(&self, func_ref: FunctionRef) -> bool {
+        self.unlock();
+
+        let response = dvm::send_message(
+            MessageKind::Call(
+                Call {
+                    func_ref,
+                    kind: CallKind::CompilerTest,
+                    arguments: vec![],
+                    generic_arguments: vec![],
+                }
+            )
+        ).unwrap();
+        let dvm::Response::CompilerTest { passed } = response else {
+            panic!("incorrect response type");
+        };
+        passed
+    }
+    pub fn compiler_test_call_direct(&mut self, func_ref: FunctionRef) -> bool {
+        let compiler_test_condition = function_by_ref(&self.read().mir, &func_ref).compiler_test_condition.unwrap();
+        assert_matches!(INTERP.read().unwrap().mode, InterpMode::TestCompiler, "can't call @compiler_test function when not in test-compiler mode");
+        let test_passed = matches!(
+            (self.call_direct(func_ref, vec![], vec![]), compiler_test_condition),
+            (Ok(_), CompilerTestCondition::Success) | (Err(_), CompilerTestCondition::Failure)
+        );
+        test_passed
     }
 }
 
@@ -1428,8 +1460,10 @@ impl DriverRwRef<'_> {
                         },
                         LegacyIntrinsic::Panic => {
                             assert!(arguments.len() <= 1);
-                            let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
-                            self.read().diag.report_error(panic_message, func.source_ranges.get(&next_instr).copied().unwrap_or_default(), "panic occured here");
+                            if INTERP.read().unwrap().mode != InterpMode::TestCompiler {
+                                let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
+                                self.read().diag.report_error(panic_message, func.source_ranges.get(&next_instr).copied().unwrap_or_default(), "panic occured here");
+                            }
                             return Err(EvalError);
                         },
                         LegacyIntrinsic::Print => {

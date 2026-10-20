@@ -288,6 +288,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 }
             }
 
+            let mut num_passed = 0usize;
             for (i, &func_id) in test_functions.iter().enumerate() {
                 let d: std::cell::Ref<'_, Driver> = driver.read();
                 let func = d.mir.functions[func_id].get().unwrap();
@@ -298,9 +299,30 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 println!(":");
                 drop(d);
 
-                restart_interp(InterpMode::RunTime);
-                let _ = driver.call(FunctionRef::Id(func_id), Vec::new(), Vec::new());
+                restart_interp(InterpMode::TestCompiler);
+                let passed = driver.compiler_test_call(FunctionRef::Id(func_id));
+                if passed {
+                    num_passed += 1;
+                    println!("    PASSED");
+                } else {
+                    println!("    FAILED");
+                }
                 flush_diagnostics(&driver.read());
+            }
+
+            println!();
+
+            if num_passed < test_functions.len() {
+                let num_failed = test_functions.len() - num_passed;
+                let plural = if num_failed != 1 {
+                    "s"
+                } else {
+                    ""
+                };
+                println!("{} TEST{} FAILED, {} PASSED", num_failed, plural, num_passed);
+            } else {
+                debug_assert_eq!(num_passed, test_functions.len());
+                println!("ALL {} TESTS PASSED", num_passed);
             }
         },
     }

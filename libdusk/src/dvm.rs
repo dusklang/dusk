@@ -9,12 +9,21 @@ use crate::interpreter::{Value, Result as EvalResult};
 use crate::mir::FunctionRef;
 use crate::ty::Type;
 
-pub struct Response(pub EvalResult<Value>);
-
 pub struct Call {
     pub func_ref: FunctionRef,
     pub arguments: Vec<Value>,
     pub generic_arguments: Vec<Type>,
+    pub kind: CallKind,
+}
+
+pub enum CallKind {
+    Direct,
+    CompilerTest,
+}
+
+pub enum Response {
+    Direct(EvalResult<Value>),
+    CompilerTest { passed: bool },
 }
 
 pub enum MessageKind {
@@ -70,11 +79,20 @@ impl DvmServerCoordinator {
 
     fn run(mut self) -> ! {
         let (call_tx, call_rx) = mpsc::channel::<Call>();
-        let (call_response_tx, call_response_rx) = mpsc::channel::<EvalResult<Value>>();
+        let (call_response_tx, call_response_rx) = mpsc::channel::<Response>();
         thread::spawn(move || {
             let mut driver = DriverRwRef::new(&DRIVER);
             while let Ok(call) = call_rx.recv() {
-                let res = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
+                let res = match call.kind {
+                    CallKind::Direct => {
+                        let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
+                        Response::Direct(result)
+                    },
+                    CallKind::CompilerTest => {
+                        let passed = driver.compiler_test_call_direct(call.func_ref);
+                        Response::CompilerTest { passed }
+                    },
+                };
                 driver.unlock(); // prevent deadlock
                 _ = call_response_tx.send(res);
             }
@@ -92,10 +110,10 @@ impl DvmServerCoordinator {
         }
     }
 
-    fn wait_for_response(&mut self, call_response_rx: &mpsc::Receiver<EvalResult<Value>>, id: ThreadId) {
+    fn wait_for_response(&mut self, call_response_rx: &mpsc::Receiver<Response>, id: ThreadId) {
         loop {
             if let Ok(response) = call_response_rx.try_recv() {
-                self.senders[&id].send(Response(response)).unwrap();
+                self.senders[&id].send(response).unwrap();
                 return;
             }
 
@@ -144,7 +162,7 @@ impl DvmServer {
     fn send_message(&self, message: MessageKind) -> Result<Response> {
         self.sender.send(Message { kind: message, id: self.id }).map_err(|_| Error::UnableToSendMessage)?;
         let response = self.receiver.recv().map_err(|_| Error::UnableToRecvResponse)?;
-        Ok(Response(response.0))
+        Ok(response)
     }
 }
 
