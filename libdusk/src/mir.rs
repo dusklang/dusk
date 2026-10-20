@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, AttributeKind, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, AttributeKind, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -322,6 +322,7 @@ pub struct Function {
     pub generic_params: Range<GenericParamId>,
     pub instr_namespace: InstrNamespace,
     pub is_comptime: bool,
+    pub compiler_test_condition: Option<CompilerTestCondition>,
 }
 
 impl Default for Function {
@@ -341,6 +342,7 @@ impl Default for Function {
             generic_params: empty_range(),
             instr_namespace: Default::default(),
             is_comptime: Default::default(),
+            compiler_test_condition: None,
         }
     }
 }
@@ -881,7 +883,7 @@ impl DriverRwRef<'_> {
 impl DriverRwRef<'_> {
     pub fn build_standalone_expr(&self, expr: ExprId, tp: &dyn TypeProvider) -> Function {
         let func_ty = FunctionType { param_tys: Vec::new(), return_ty: Box::new(tp.ty(expr).clone()), has_c_variadic_param: false };
-        self.build_function(None, func_ty, FunctionBody::Expr(expr), empty_range(), empty_range(), false, tp)
+        self.build_function(None, func_ty, FunctionBody::Expr(expr), empty_range(), empty_range(), false, None, tp)
     }
 }
 
@@ -941,11 +943,17 @@ impl DriverRwRef<'_> {
 
                 let func_ty = d.decl_type(id, tp).as_function().unwrap().clone();
                 let name = d.ast.names[id];
-                let is_comptime = d.ast.decl_attributes.get(&id)
-                .map(|attrs|
-                    attrs.iter()
-                    .any(|attr| matches!(attr.attr, AttributeKind::Comptime))
-                ).unwrap_or(false);
+                let mut is_comptime = false;
+                let mut compiler_test_condition = None;
+                if let Some(attrs) = d.ast.decl_attributes.get(&id) {
+                    for attr in attrs {
+                        match attr.attr {
+                            AttributeKind::Comptime => is_comptime = true,
+                            AttributeKind::CompilerTest { condition, .. } => compiler_test_condition = Some(condition),
+                            _ => {},
+                        }
+                    }
+                }
                 let signature = FunctionSignature {
                     name,
                     ty: func_ty.clone(),
@@ -961,6 +969,7 @@ impl DriverRwRef<'_> {
                     params,
                     generic_params,
                     is_comptime,
+                    compiler_test_condition,
                     tp,
                 );
                 self.read().mir.functions[get].set(func).expect("function value set multiple times");
@@ -1555,7 +1564,7 @@ impl Driver {
 }
 
 impl DriverRwRef<'_> {
-    fn build_function(&self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &dyn TypeProvider) -> Function {
+    fn build_function(&self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, compiler_test_condition: Option<CompilerTestCondition>, tp: &dyn TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
         let mut entry = Block::default();
@@ -1652,6 +1661,7 @@ impl DriverRwRef<'_> {
             decl,
             generic_params,
             is_comptime,
+            compiler_test_condition,
         };
 
         let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction { .. });
@@ -2013,7 +2023,7 @@ impl DriverRwRef<'_> {
                 if self.instruction_is_nontrivial_const(func, instr) && !func.poisoned_instrs.contains(&instr) {
                     let ty = func.type_of(instr).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
-                    let new_func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction { parent_func: func, instr }, empty_range(), empty_range(), true, tp);
+                    let new_func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction { parent_func: func, instr }, empty_range(), empty_range(), true, None, tp);
                     let Ok(result) = self.call(FunctionRef::Ref(new_func), Vec::new(), Vec::new()) else {
                         // Make sure we won't repeatedly try and fail to const-eval this instruction.
                         poison_list.push(instr);

@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, Attribute, AttributeKind, CompilerTestConditionKind, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
+use crate::ast::{self, Attribute, AttributeKind, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
 use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
@@ -908,7 +908,7 @@ impl Driver {
                         let condition = self.eat_ident(p).ok();
                         let (condition, condition_range) = if let Some(condition) = condition {
                             if condition.symbol == self.ast.known_idents.failure {
-                                (CompilerTestConditionKind::Failure, condition.range)
+                                (CompilerTestCondition::Failure, condition.range)
                             } else {
                                 if condition.symbol != self.ast.known_idents.success {
                                     self.diag.report_error(
@@ -917,10 +917,10 @@ impl Driver {
                                         "should be 'success' or 'failure'"
                                     );
                                 }
-                                (CompilerTestConditionKind::Success, condition.range)
+                                (CompilerTestCondition::Success, condition.range)
                             }
                         } else {
-                            (CompilerTestConditionKind::Success, p.cur().range)
+                            (CompilerTestCondition::Success, p.cur().range)
                         };
 
                         let paren_range = self.eat_tok(p, TokenKind::RightParen)?;

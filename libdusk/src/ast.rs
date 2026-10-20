@@ -527,8 +527,8 @@ impl Default for GenericCtxId {
     fn default() -> Self { BLANK_GENERIC_CTX }
 }
 
-#[derive(Clone, Copy)]
-pub enum CompilerTestConditionKind {
+#[derive(Clone, Copy, Debug)]
+pub enum CompilerTestCondition {
     Success,
     Failure,
 }
@@ -539,7 +539,7 @@ pub enum AttributeKind {
     Guarantees(ExprId),
     Comptime,
     CompilerTest {
-        condition: CompilerTestConditionKind,
+        condition: CompilerTestCondition,
         condition_range: SourceRange,
     },
 
