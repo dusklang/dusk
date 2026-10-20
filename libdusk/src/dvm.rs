@@ -89,7 +89,7 @@ impl DvmServerCoordinator {
                         Response::Direct(result)
                     },
                     CallKind::CompilerTest => {
-                        let passed = driver.compiler_test_call_direct(call.func_ref);
+                        let passed = driver.compiler_test_call_direct(call.func_ref, call.arguments, call.generic_arguments);
                         Response::CompilerTest { passed }
                     },
                 };

@@ -891,81 +891,138 @@ impl Driver {
                     .adding_primary_range(attr.range, "")
             );
         }
-        let (attr_kind, final_tok_range) = match p.cur().kind {
-            TokenKind::LeftParen => {
-                let left_paren_range = p.cur().range;
-                p.next();
-                if matches!(p.cur().kind, TokenKind::RightParen) {
-                    let paren_range = left_paren_range + p.cur().range;
-                    self.diag.push(
-                        Error::new("unexpected empty argument list on attribute")
-                            .adding_primary_range(paren_range, "try removing these parentheses")
-                    );
-                    p.next();
-                    (make_bare_attr_kind(), paren_range)
-                } else {
-                    if is_compiler_test {
-                        let condition = self.eat_ident(p).ok();
-                        let (condition, condition_range) = if let Some(condition) = condition {
-                            if condition.symbol == self.ast.known_idents.failure {
-                                (CompilerTestCondition::Failure, condition.range)
-                            } else {
-                                if condition.symbol != self.ast.known_idents.success {
-                                    self.diag.report_error(
-                                        format!("unrecognized compiler test condition '{}'", self.interner.read().unwrap().resolve(condition.symbol).unwrap()),
-                                        condition.range,
-                                        "should be 'success' or 'failure'"
-                                    );
-                                }
-                                (CompilerTestCondition::Success, condition.range)
-                            }
-                        } else {
-                            (CompilerTestCondition::Success, p.cur().range)
-                        };
+        let (attr_kind, final_tok_range) = if matches!(p.cur().kind, TokenKind::LeftParen) {
+            let left_paren_range = p.cur().range;
+            p.next();
+            let attr_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::RightParen));
+            let mut num_items = 0usize;
+            let mut compiler_test_condition = CompilerTestCondition::Success;
+            let mut compiler_test_condition_range = None;
+            let mut arguments = Vec::new();
+            let mut condition_namespace = None;
+            loop {
+                match p.cur().kind {
+                    TokenKind::RightParen => {
+                        let right_paren_range = p.cur().range;
+                        if num_items == 0 && !is_condition {
+                            let paren_range = left_paren_range + p.cur().range;
+                            self.diag.push(
+                                Error::new("unexpected empty argument list on attribute")
+                                    .adding_primary_range(paren_range, "try removing these parentheses")
+                            );
+                        }
+                        p.next();
 
-                        let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
-
-                        (AttributeKind::CompilerTest { condition, condition_range }, paren_range)
-                    } else {
-                        // Enter condition namespace if necessary
-                        let _condition_entry = is_condition.then(|| {
-                            let condition_kind = if is_requires {
-                                ConditionKind::Requirement
+                        break if is_condition {
+                            let attr_str = if is_requires {
+                                "requires"
                             } else if is_guarantees {
-                                ConditionKind::Guarantee
+                                "guarantees"
+                            } else {
+                                unreachable!()
+                            };
+                            if arguments.is_empty() {
+                                self.diag.report_error_no_range_msg(format!("no condition provided to @{} attribute", attr_str), attr.range);
+                            } else if arguments.len() > 1 {
+                                let mut err = Error::new("{} arguments provided to @{} attribute, expected exactly 1");
+                                err.add_primary_range(attr.range, "");
+                                for &arg in &arguments[1..] {
+                                    err.add_secondary_range(arg, "extra argument here");
+                                }
+                                self.diag.push(err);
+                            }
+                            let arg = arguments.first().copied().unwrap_or(ERROR_EXPR);
+                            let kind = if is_requires {
+                                AttributeKind::Requires(arg)
+                            } else if is_guarantees {
+                                AttributeKind::Guarantees(arg)
                             } else {
                                 unreachable!();
                             };
-                            // Lazily create condition namespace if necessary
-                            let ns = if let &mut Some(condition_ns) = condition_ns {
-                                condition_ns
-                            } else {
-                                let ns = self.create_condition_namespace(b);
-                                *condition_ns = Some(ns);
-                                ns
-                            };
-                            Some(self.enter_condition_namespace(b, ns, condition_kind))
-                        });
-                        let arg = self.parse_expr(p, b).unwrap_or_else(|err| err);
-                        let paren_range = self.eat_tok(p, TokenKind::RightParen)?;
-
-                        if is_requires {
-                            (AttributeKind::Requires(arg), paren_range)
-                        } else if is_guarantees {
-                            (AttributeKind::Guarantees(arg), paren_range)
+                            (kind, right_paren_range)
                         } else if is_comptime {
-                            self.diag.push(
-                                Error::new("argument passed to @comptime attribute")
-                                    .adding_primary_range(arg, "consider removing this expression and surrounding parentheses")
-                            );
-                            (AttributeKind::Comptime, paren_range)
+                            let plural = if arguments.len() > 1 {
+                                "s"
+                            } else {
+                                ""
+                            };
+                            if !arguments.is_empty() {
+                                let mut err = Error::new(format!("argument{} passed to @comptime attribute", plural))
+                                    .adding_primary_range(attr.range, "");
+                                for arg in arguments {
+                                    err.add_secondary_range(arg, "argument here");
+                                }
+                                self.diag.push(
+                                    err
+                                );
+                            }
+                            (AttributeKind::Comptime, right_paren_range)
+                        } else if is_compiler_test {
+                            if !arguments.is_empty() {
+                                self.diag.report_error_no_range_msg("@compiler_test does not yet support arguments", attr.range);
+                            }
+                            (AttributeKind::CompilerTest { condition: compiler_test_condition, condition_range: compiler_test_condition_range, arguments }, right_paren_range)
                         } else {
-                            (AttributeKind::Error(Some(attr)), paren_range)
+                            (AttributeKind::Error(Some(attr)), right_paren_range)
                         }
+                    },
+                    TokenKind::Eof => {
+                        panic!("reached eof in the middle of attribute")
+                    },
+                    _ => {
+                        self.start_next_list_item(p, attr_arg_list.id());
+                        if is_compiler_test && num_items == 0 {
+                            let condition = self.eat_ident(p).ok();
+                            (compiler_test_condition, compiler_test_condition_range) = if let Some(condition) = condition {
+                                self.eat_separators(p);
+                                if condition.symbol == self.ast.known_idents.failure {
+                                    (CompilerTestCondition::Failure, Some(condition.range))
+                                } else {
+                                    if condition.symbol != self.ast.known_idents.success {
+                                        self.diag.report_error(
+                                            format!("unrecognized compiler test condition '{}'", self.interner.read().unwrap().resolve(condition.symbol).unwrap()),
+                                            condition.range,
+                                            "should be 'success' or 'failure'"
+                                        );
+                                    }
+                                    (CompilerTestCondition::Success, Some(condition.range))
+                                }
+                            } else {
+                                p.next();
+                                (CompilerTestCondition::Success, None)
+                            };
+                        } else {
+                            if is_condition && condition_namespace.is_none() {
+                                condition_namespace = {
+                                    let condition_kind = if is_requires {
+                                        ConditionKind::Requirement
+                                    } else if is_guarantees {
+                                        ConditionKind::Guarantee
+                                    } else {
+                                        unreachable!();
+                                    };
+                                    // Lazily create condition namespace if necessary
+                                    let ns = if let &mut Some(condition_ns) = condition_ns {
+                                        condition_ns
+                                    } else {
+                                        let ns = self.create_condition_namespace(b);
+                                        *condition_ns = Some(ns);
+                                        ns
+                                    };
+                                    Some(self.enter_condition_namespace(b, ns, condition_kind))
+                                };
+                            }
+
+                            let arg = self.parse_expr(p, b).unwrap_or_else(|err| err);
+                            arguments.push(arg);
+                            self.eat_separators(p);
+                        }
+                        num_items += 1;
                     }
                 }
-            },
-            _ => (make_bare_attr_kind(), attr.range),
+            }
+        } else {
+            (make_bare_attr_kind(), attr.range)
         };
         let range = source_info::concat(at_range, final_tok_range);
         if matches!(attr_kind, AttributeKind::CompilerTest { .. }) && !matches!(self.mode, CompilerMode::TestCompiler | CompilerMode::Dls) {

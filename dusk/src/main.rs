@@ -300,7 +300,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 drop(d);
 
                 restart_interp(InterpMode::TestCompiler);
-                let passed = driver.compiler_test_call(FunctionRef::Id(func_id));
+                let passed = driver.compiler_test_call(FunctionRef::Id(func_id), vec![], vec![]);
                 if passed {
                     num_passed += 1;
                     println!("    PASSED");

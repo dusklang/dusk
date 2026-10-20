@@ -761,7 +761,7 @@ impl DriverRwRef<'_> {
             }
         })
     }
-    pub fn compiler_test_call(&self, func_ref: FunctionRef) -> bool {
+    pub fn compiler_test_call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> bool {
         self.unlock();
 
         let response = dvm::send_message(
@@ -769,8 +769,8 @@ impl DriverRwRef<'_> {
                 Call {
                     func_ref,
                     kind: CallKind::CompilerTest,
-                    arguments: vec![],
-                    generic_arguments: vec![],
+                    arguments,
+                    generic_arguments,
                 }
             )
         ).unwrap();
@@ -779,11 +779,11 @@ impl DriverRwRef<'_> {
         };
         passed
     }
-    pub fn compiler_test_call_direct(&mut self, func_ref: FunctionRef) -> bool {
+    pub fn compiler_test_call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> bool {
         let compiler_test_condition = function_by_ref(&self.read().mir, &func_ref).compiler_test_condition.unwrap();
         assert_matches!(INTERP.read().unwrap().mode, InterpMode::TestCompiler, "can't call @compiler_test function when not in test-compiler mode");
         let test_passed = matches!(
-            (self.call_direct(func_ref, vec![], vec![]), compiler_test_condition),
+            (self.call_direct(func_ref, arguments, generic_arguments), compiler_test_condition),
             (Ok(_), CompilerTestCondition::Success) | (Err(_), CompilerTestCondition::Failure)
         );
         test_passed

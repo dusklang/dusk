@@ -533,14 +533,15 @@ pub enum CompilerTestCondition {
     Failure,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum AttributeKind {
     Requires(ExprId),
     Guarantees(ExprId),
     Comptime,
     CompilerTest {
         condition: CompilerTestCondition,
-        condition_range: SourceRange,
+        condition_range: Option<SourceRange>,
+        arguments: Vec<ExprId>,
     },
 
     Error(Option<Ident>),
