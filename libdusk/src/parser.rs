@@ -1326,6 +1326,32 @@ impl Driver {
                 if let Some(condition_ns) = condition_ns {
                     self.ast.condition_ns[condition_ns].func = decl;
                 }
+                match df!(decl.ast) {
+                    ast::Decl::Function { ref param_tys, .. } => {
+                        for attr in &attributes {
+                            if let AttributeKind::CompilerTest { arguments, .. } = &attr.attr {
+                                if param_tys.len() != arguments.len() {
+                                    self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), attr.range);
+                                }
+                            }
+                        }
+                    },
+                    _ => {
+                        for attr in &attributes {
+                            if matches!(attr.attr, AttributeKind::Comptime) {
+                                self.diag.push(
+                                    Error::new("unexpected @comptime attribute")
+                                        .adding_primary_range(attr.range, "can only be applied to function declarations")
+                                );
+                            } else if matches!(attr.attr, AttributeKind::CompilerTest { .. }) {
+                                self.diag.push(
+                                    Error::new("unexpected @compiler_test attribute")
+                                        .adding_primary_range(attr.range, "can only be applied to function declarations")
+                                );
+                            }
+                        }
+                    }
+                }
                 if let Some(attr) = attributes.iter().find(|attr| matches!(attr.attr, AttributeKind::Comptime))
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
