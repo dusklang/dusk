@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, AttributeKind, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, Attribute, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -944,9 +944,9 @@ impl DriverRwRef<'_> {
                     drop(d);
                     for attr in attrs {
                         let d = self.read();
-                        match d.ast.attrs[attr].attr {
-                            AttributeKind::Comptime => is_comptime = true,
-                            AttributeKind::CompilerTest { condition, ref arguments, .. } => {
+                        match d.ast.attrs[attr] {
+                            Attribute::Comptime => is_comptime = true,
+                            Attribute::CompilerTest { condition, ref arguments, .. } => {
                                 let arguments = arguments.clone();
                                 drop(d);
                                 compiler_test_cases.push(

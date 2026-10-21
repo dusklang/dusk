@@ -542,7 +542,7 @@ pub enum CompilerTestCondition {
 }
 
 #[derive(Debug, Clone)]
-pub enum AttributeKind {
+pub enum Attribute {
     Requires(ExprId),
     Guarantees(ExprId),
     Comptime,
@@ -553,13 +553,6 @@ pub enum AttributeKind {
     },
 
     Error(Option<Ident>),
-}
-
-#[derive(Debug, Clone)]
-pub struct Attribute {
-    pub attr: AttributeKind,
-    /// The range of the whole attribute, including @ sign and parentheses
-    pub range: SourceRange,
 }
 
 #[derive(Clone, Copy)]
@@ -594,6 +587,7 @@ pub struct Ast {
     pub decl_attributes: HashMap<DeclId, Vec<AttrId>>,
     pub decl_self_parameters: IndexVec<DeclId, Option<SelfParameter>>,
     pub attrs: IndexVec<AttrId, Attribute>,
+    pub attr_targets: HashMap<AttrId, DeclId>,
     pub expr_to_items: IndexVec<ExprId, ItemId>,
     pub decl_to_items: IndexVec<DeclId, ItemId>,
     pub attr_to_items: IndexVec<AttrId, ItemId>,
@@ -847,43 +841,50 @@ impl Driver {
         self.ast.debug_marked_exprs.pin().contains(&expr)
     }
 
-    fn add_expr(&mut self, b: &Builder, expr: Expr, range: SourceRange) -> ExprId {
+    fn add_item(&mut self, b: &Builder, item: Item, range: SourceRange) -> ItemId {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
-        // NOTE: also, see add_decl()
         let generic_ctx = b.generic_ctx_stack.peek().unwrap_or_default();
+        let item_id = self.ast.items.push(item);
+        self.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
+        self.ast.source_ranges.push_at(item_id, range);
+
+        item_id
+    }
+
+    fn add_expr(&mut self, b: &Builder, expr: Expr, range: SourceRange) -> ExprId {
         let expr_id = self.ast.exprs.push(expr);
         let type_var_id = self.ast.type_vars.next_idx();
-        let item_id = self.ast.items.push(Item::Expr(expr_id));
-        self.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
-        self.ast.expr_to_items.push_at(expr_id, item_id);
         self.ast.expr_to_type_vars.push_at(expr_id, type_var_id);
-        self.ast.source_ranges.push_at(item_id, range);
+
+        let item_id = self.add_item(b, Item::Expr(expr_id), range);
+        self.ast.expr_to_items.push_at(expr_id, item_id);
 
         expr_id
     }
 
     pub fn add_decl_with_self_parameter(&mut self, b: &Builder, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, self_parameter: Option<SelfParameter>) -> DeclId {
-        // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
-        // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
-        // NOTE: also, see add_expr()
-        let generic_ctx = b.generic_ctx_stack.peek().unwrap_or_default();
         let decl_id = self.ast.decls.push(decl);
         self.ast.explicit_tys.push_at(decl_id, explicit_ty);
         self.ast.names.push_at(decl_id, name);
         self.ast.decl_self_parameters.push_at(decl_id, self_parameter);
 
-        let item_id = self.ast.items.push(Item::Decl(decl_id));
+        let item_id = self.add_item(b, Item::Decl(decl_id), range);
         self.ast.decl_to_items.push_at(decl_id, item_id);
-
-        self.ast.source_ranges.push_at(item_id, range);
-        self.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
 
         decl_id
     }
 
     pub fn add_decl(&mut self, b: &Builder, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange) -> DeclId {
         self.add_decl_with_self_parameter(b, decl, name, explicit_ty, range, None)
+    }
+
+    pub fn add_attr(&mut self, b: &Builder, attr: Attribute, range: SourceRange) -> AttrId {
+        let attr_id = self.ast.attrs.push(attr);
+        let item_id = self.add_item(b, Item::Attr(attr_id), range);
+        self.ast.attr_to_items.push_at(attr_id, item_id);
+
+        attr_id
     }
 
     pub fn int_lit(&mut self, b: &Builder, lit: u64, range: SourceRange) -> ExprId {

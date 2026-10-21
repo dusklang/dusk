@@ -8,7 +8,7 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, AttrId, AttributeKind, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
+use crate::ast::{self, AttrId, Attribute, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -708,6 +708,27 @@ impl Driver {
     }
 
     fn build_tir_attr(&mut self, unit: &mut UnitItems, level: u32, id: AttrId) {
+        match af!(id.ast) {
+            Attribute::CompilerTest { ref arguments, .. } => {
+                let Some(&target_decl) = self.ast.attr_targets.get(&id) else {
+                    return;
+                };
+
+                match df!(target_decl.ast) {
+                    ast::Decl::Function { ref param_tys, .. } => {
+                        unit.compiler_test_attributes.insert(
+                            level,
+                            CompilerTestAttribute {
+                                arguments: arguments.clone(),
+                                parameter_tys: param_tys.iter().cloned().collect(),
+                            }
+                        )
+                    },
+                    ref other => unimplemented!("attributes on non-function decl {:?}", other),
+                }
+            },
+            _ => {},
+        }
     }
 
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
@@ -820,6 +841,20 @@ impl Driver {
                 ast::Decl::Function { scope, .. } => {
                     let terminal_expr = self.ast.imper_scopes[scope].terminal_expr;
                     self.tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
+
+                    if let Some(attrs) = self.ast.decl_attributes.get(&decl_id) {
+                        for &attr in attrs {
+                            let attr_item = self.ast.attr_to_items[attr];
+                            match af!(attr.ast) {
+                                Attribute::CompilerTest { ref arguments, .. } => {
+                                    for &argument in arguments {
+                                        self.tir_builder.graph.add_type1_dep(attr_item, ef!(argument.item));
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
                 },
             }
         }
@@ -983,23 +1018,13 @@ impl Driver {
                                 add_eval_dep!(id, ty);
                             }
 
-                            // Add eval dependencies from @compiler_test parameters to their corresponding parameter types (or the error type, if there are more args than params)
+                            // Handle @compiler_test attributes
                             if let Some(attrs) = self.ast.decl_attributes.get(&decl_id) {
                                 for &attr in attrs {
-                                    match af!(attr.ast).attr {
-                                        AttributeKind::CompilerTest { ref arguments, .. } => {
-                                            for (i, &arg) in arguments.iter().enumerate() {
-                                                let arg_item = self.ast.expr_to_items[arg];
-                                                let param_ty = if i < param_tys.len() {
-                                                    param_tys[i]
-                                                } else {
-                                                    ast::ERROR_TYPE
-                                                };
-                                                add_eval_dep!(arg_item, param_ty);
-                                                self.tir_builder.graph.add_type3_dep(id, arg_item);
-                                            }
-                                        },
-                                        _ => {},
+                                    let attr_item = self.ast.attr_to_items[attr];
+                                    self.tir_builder.graph.add_type3_dep(id, attr_item);
+                                    for &param_ty in param_tys {
+                                        add_eval_dep!(attr_item, param_ty);
                                     }
                                 }
                             }
@@ -1126,6 +1151,7 @@ impl Driver {
                         self.build_tir_expr(&mut unit.items, level, id);
                     },
                     ast::Item::Attr(id) => {
+                        self.build_tir_attr(&mut unit.items, level, id);
                     },
                 }
             }

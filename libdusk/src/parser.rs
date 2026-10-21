@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, AttrId, Attribute, AttributeKind, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
+use crate::ast::{self, AttrId, Attribute, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
 use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
@@ -868,30 +868,30 @@ impl Driver {
     fn parse_attribute(&mut self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<AttrId> {
         let at_range = self.eat_tok(p, TokenKind::AtSign)?;
 
-        let attr = self.eat_ident(p)?;
-        let is_requires = attr.symbol == self.ast.known_idents.requires;
-        let is_guarantees = attr.symbol == self.ast.known_idents.guarantees;
-        let is_comptime = attr.symbol == self.ast.known_idents.comptime;
-        let is_compiler_test = attr.symbol == self.ast.known_idents.compiler_test;
+        let attr_ident = self.eat_ident(p)?;
+        let is_requires = attr_ident.symbol == self.ast.known_idents.requires;
+        let is_guarantees = attr_ident.symbol == self.ast.known_idents.guarantees;
+        let is_comptime = attr_ident.symbol == self.ast.known_idents.comptime;
+        let is_compiler_test = attr_ident.symbol == self.ast.known_idents.compiler_test;
         let is_condition = is_requires || is_guarantees;
 
-        let make_bare_attr_kind = || if is_requires {
-            AttributeKind::Requires(ERROR_EXPR)
+        let make_bare_attr = || if is_requires {
+            Attribute::Requires(ERROR_EXPR)
         } else if is_guarantees {
-            AttributeKind::Guarantees(ERROR_EXPR)
+            Attribute::Guarantees(ERROR_EXPR)
         } else if is_comptime {
-            AttributeKind::Comptime
+            Attribute::Comptime
         } else {
-            AttributeKind::Error(Some(attr))
+            Attribute::Error(Some(attr_ident))
         };
 
         if !is_condition && !is_comptime && !is_compiler_test {
             self.diag.push(
-                Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr.symbol).unwrap()))
-                    .adding_primary_range(attr.range, "")
+                Error::new(format!("unrecognized attribute '{}'", self.interner.read().unwrap().resolve(attr_ident.symbol).unwrap()))
+                    .adding_primary_range(attr_ident.range, "")
             );
         }
-        let (attr_kind, final_tok_range) = if matches!(p.cur().kind, TokenKind::LeftParen) {
+        let (attr, final_tok_range) = if matches!(p.cur().kind, TokenKind::LeftParen) {
             let left_paren_range = p.cur().range;
             p.next();
             let attr_arg_list = self.begin_list(p, TokenKind::could_begin_expression, [TokenKind::Comma], Some(TokenKind::RightParen));
@@ -922,10 +922,10 @@ impl Driver {
                                 unreachable!()
                             };
                             if arguments.is_empty() {
-                                self.diag.report_error_no_range_msg(format!("no condition provided to @{} attribute", attr_str), attr.range);
+                                self.diag.report_error_no_range_msg(format!("no condition provided to @{} attribute", attr_str), attr_ident.range);
                             } else if arguments.len() > 1 {
                                 let mut err = Error::new("{} arguments provided to @{} attribute, expected exactly 1");
-                                err.add_primary_range(attr.range, "");
+                                err.add_primary_range(attr_ident.range, "");
                                 for &arg in &arguments[1..] {
                                     err.add_secondary_range(arg, "extra argument here");
                                 }
@@ -933,9 +933,9 @@ impl Driver {
                             }
                             let arg = arguments.first().copied().unwrap_or(ERROR_EXPR);
                             let kind = if is_requires {
-                                AttributeKind::Requires(arg)
+                                Attribute::Requires(arg)
                             } else if is_guarantees {
-                                AttributeKind::Guarantees(arg)
+                                Attribute::Guarantees(arg)
                             } else {
                                 unreachable!();
                             };
@@ -948,7 +948,7 @@ impl Driver {
                             };
                             if !arguments.is_empty() {
                                 let mut err = Error::new(format!("argument{} passed to @comptime attribute", plural))
-                                    .adding_primary_range(attr.range, "");
+                                    .adding_primary_range(attr_ident.range, "");
                                 for arg in arguments {
                                     err.add_secondary_range(arg, "argument here");
                                 }
@@ -956,11 +956,11 @@ impl Driver {
                                     err
                                 );
                             }
-                            (AttributeKind::Comptime, right_paren_range)
+                            (Attribute::Comptime, right_paren_range)
                         } else if is_compiler_test {
-                            (AttributeKind::CompilerTest { condition: compiler_test_condition, condition_range: compiler_test_condition_range, arguments }, right_paren_range)
+                            (Attribute::CompilerTest { condition: compiler_test_condition, condition_range: compiler_test_condition_range, arguments }, right_paren_range)
                         } else {
-                            (AttributeKind::Error(Some(attr)), right_paren_range)
+                            (Attribute::Error(Some(attr_ident)), right_paren_range)
                         }
                     },
                     TokenKind::Eof => {
@@ -1019,15 +1019,14 @@ impl Driver {
                 }
             }
         } else {
-            (make_bare_attr_kind(), attr.range)
+            (make_bare_attr(), attr_ident.range)
         };
         let range = source_info::concat(at_range, final_tok_range);
-        if matches!(attr_kind, AttributeKind::CompilerTest { .. }) && !matches!(self.mode, CompilerMode::TestCompiler | CompilerMode::Dls) {
-            self.diag.report_error("unexpected 'compiler_test' attribute", attr.range, "not supported outside of 'test-compiler' mode");
+        if matches!(attr, Attribute::CompilerTest { .. }) && !matches!(self.mode, CompilerMode::TestCompiler | CompilerMode::Dls) {
+            self.diag.report_error("unexpected 'compiler_test' attribute", attr_ident.range, "not supported outside of 'test-compiler' mode");
         }
 
-        let attr = Attribute { attr: attr_kind, range };
-        Ok(self.ast.attrs.push(attr))
+        Ok(self.add_attr(b, attr, range))
     }
 
     fn parse_pattern(&mut self, p: &mut Parser, b: &mut ast::Builder, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId) -> ParseResult<Pattern> {
@@ -1328,38 +1327,39 @@ impl Driver {
                 match df!(decl.ast) {
                     ast::Decl::Function { ref param_tys, .. } => {
                         for &attr in &attributes {
-                            let attr = &af!(attr.ast);
-                            if let AttributeKind::CompilerTest { ref arguments, .. } = attr.attr {
+                            if let Attribute::CompilerTest { ref arguments, .. } = af!(attr.ast) {
                                 if param_tys.len() != arguments.len() {
-                                    self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), attr.range);
+                                    self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), af!(attr.range));
                                 }
                             }
                         }
                     },
                     _ => {
                         for &attr in &attributes {
-                            let attr = &af!(attr.ast);
-                            match attr.attr {
-                                AttributeKind::Comptime => self.diag.push(
+                            match af!(attr.ast) {
+                                Attribute::Comptime => self.diag.push(
                                     Error::new("unexpected @comptime attribute")
-                                        .adding_primary_range(attr.range, "can only be applied to function declarations")
+                                        .adding_primary_range(af!(attr.range), "can only be applied to function declarations")
                                 ),
-                                AttributeKind::CompilerTest { .. } => self.diag.push(
+                                Attribute::CompilerTest { .. } => self.diag.push(
                                     Error::new("unexpected @compiler_test attribute")
-                                        .adding_primary_range(attr.range, "can only be applied to function declarations")
+                                        .adding_primary_range(af!(attr.range), "can only be applied to function declarations")
                                 ),
                                 _ => {},
                             }
                         }
                     }
                 }
-                if let Some(&attr) = attributes.iter().find(|&&attr| matches!(af!(attr.ast).attr, AttributeKind::Comptime))
+                if let Some(&attr) = attributes.iter().find(|&&attr| matches!(af!(attr.ast), Attribute::Comptime))
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
-                                .adding_primary_range(af!(attr.ast).range, "can only be applied to function declarations")
+                                .adding_primary_range(af!(attr.range), "can only be applied to function declarations")
                         );
                     }
+                for &attr in &attributes {
+                    self.ast.attr_targets.insert(attr, decl);
+                }
                 self.ast.decl_attributes.entry(decl).or_default()
                     .extend(attributes);
                 Ok(Item::Decl(decl))

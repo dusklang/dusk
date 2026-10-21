@@ -1,7 +1,49 @@
 @compiler_test(failure, 1, 2, 4)
 @compiler_test(success, 1, 2, 3)
 @compiler_test(success, 7, 10, 17)
+fn test_add_i8(a: i8, b: i8, result: i8) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_i16(a: i16, b: i16, result: i16) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
 fn test_add_i32(a: i32, b: i32, result: i32) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_i64(a: i64, b: i64, result: i64) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_isize(a: isize, b: isize, result: isize) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_u8(a: u8, b: u8, result: u8) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_u16(a: u16, b: u16, result: u16) {
     core.assert(a + b == result)
 }
 
@@ -12,17 +54,30 @@ fn test_add_u32(a: u32, b: u32, result: u32) {
     core.assert(a + b == result)
 }
 
-@compiler_test(failure, 1.0, 2.0, 4.0)
-@compiler_test(success, 1.0, 2.0, 3.0)
-@compiler_test(success, 7.0, 10.0, 17.0)
-fn test_add_f64(a: f64, b: f64, result: f64) {
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_u64(a: u64, b: u64, result: u64) {
     core.assert(a + b == result)
 }
 
-// These casts should not be necessary once typechecking of compiler_test arguments is complete
-@compiler_test(failure, 1.0 as f32, 2.0 as f32, 4.0 as f32)
-@compiler_test(success, 1.0 as f32, 2.0 as f32, 3.0 as f32)
-@compiler_test(success, 7.0 as f32, 10.0 as f32, 17.0 as f32)
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_usize(a: usize, b: usize, result: usize) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
 fn test_add_f32(a: f32, b: f32, result: f32) {
+    core.assert(a + b == result)
+}
+
+@compiler_test(failure, 1, 2, 4)
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 7, 10, 17)
+fn test_add_f64(a: f64, b: f64, result: f64) {
     core.assert(a + b == result)
 }

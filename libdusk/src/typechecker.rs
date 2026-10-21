@@ -206,6 +206,8 @@ impl tir::GenericParam {
     }
 }
 
+
+
 impl tir::AssignedDecl {
     fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
         let ty = if let &Some(explicit_ty) = &self.explicit_ty {
@@ -251,6 +253,41 @@ impl tir::AssignedDecl {
         let root_expr = self.root_expr;
         let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
         driver.set_type(tp, root_expr, ty).unwrap();
+    }
+}
+
+impl tir::CompilerTestAttribute {
+    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+        for (&argument, &param_ty) in self.arguments.iter().zip(&self.parameter_tys) {
+            let param_ty = tp.get_evaluated_type(param_ty).clone();
+            if let Some(err) = driver.can_unify_to(tp, argument, &param_ty.clone().into()).err() {
+                let range = driver.get_range(argument);
+                let mut error = Error::new(format!("Couldn't unify compiler test argument to corresponding parameter type `{:?}`", param_ty))
+                    .adding_primary_range(range, "expression here");
+                match err {
+                    UnificationError::InvalidChoice(choices)
+                        => error.add_secondary_range(range, format!("note: expression could've unified to any of {:?}", choices)),
+                    UnificationError::Trait(not_implemented)
+                        => error.add_secondary_range(
+                            range,
+                            format!(
+                                "note: couldn't unify because expression requires implementations of {:?}",
+                                not_implemented.names(),
+                            ),
+                        ),
+                }
+                driver.diag.push(error);
+            }
+        }
+    }
+
+    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+        for (&argument, &param_ty) in self.arguments.iter().zip(&self.parameter_tys) {
+            let param_ty = tp.get_evaluated_type(param_ty).clone();
+            if driver.set_type(tp, argument, param_ty).is_err() {
+                driver.set_type(tp, argument, Type::Error).unwrap();
+            }
+        }
     }
 }
 
@@ -1492,7 +1529,7 @@ impl Driver {
             run_pass_1_legacy!(
                 assigned_decls, assignments, casts, whiles, fors, explicit_rets, modules,
                 decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
-                ret_groups, switches, enums, pattern_bindings, function_tys,
+                ret_groups, switches, enums, pattern_bindings, function_tys, compiler_test_attributes,
             );
         }
 
@@ -1515,7 +1552,7 @@ impl Driver {
             run_pass_2_legacy!(
                 assigned_decls, assignments, casts, whiles, fors, explicit_rets, modules,
                 decl_refs, calls, addr_ofs, derefs, pointers, structs, struct_lits, ifs, dos,
-                ret_groups, switches, enums, pattern_bindings, function_tys,
+                ret_groups, switches, enums, pattern_bindings, function_tys, compiler_test_attributes,
             );
         }
         macro_rules! run_pass_2_legacy_flat {
