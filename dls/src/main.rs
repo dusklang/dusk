@@ -301,6 +301,9 @@ impl Server {
                     }
                     message
                 },
+                Item::Attr(_attr) => {
+                    "attribute".to_string()
+                },
             };
             Hover {
                 contents: HoverContents::Markup(MarkupContent {
