@@ -8,7 +8,7 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
+use crate::ast::{self, AttributeKind, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -106,6 +106,8 @@ pub struct ConstExpr(pub Type);
 pub struct GenericParam { pub id: DeclId }
 #[derive(Debug)]
 pub struct FunctionDecl { pub id: DeclId }
+#[derive(Debug)]
+pub struct CompilerTestAttribute { pub arguments: Vec<ExprId>, pub parameter_tys: Vec<ExprId> }
 
 #[derive(Debug)]
 pub struct Expr<T> {
@@ -165,6 +167,7 @@ pub struct UnitItems {
     pub generic_params: Vec<GenericParam>,
     pub stmts: Vec<Stmt>,
     pub func_decls: Vec<FunctionDecl>,
+    pub compiler_test_attributes: DepVec<CompilerTestAttribute>,
     pub explicit_rets: DepVec<Expr<ExplicitRet>>,
     pub ret_groups: DepVec<RetGroup>,
     pub casts: DepVec<Expr<Cast>>,
@@ -195,7 +198,7 @@ impl UnitItems {
             &mut self.addr_ofs, &mut self.derefs, &mut self.pointers, &mut self.ifs, &mut self.dos,
             &mut self.ret_groups, &mut self.casts, &mut self.whiles, &mut self.fors, &mut self.explicit_rets,
             &mut self.modules, &mut self.structs, &mut self.struct_lits, &mut self.switches, &mut self.enums,
-            &mut self.pattern_bindings, &mut self.function_tys,
+            &mut self.pattern_bindings, &mut self.function_tys, &mut self.compiler_test_attributes,
         ]);
     }
 }
@@ -976,6 +979,28 @@ impl Driver {
                             for &ty in param_tys {
                                 add_eval_dep!(id, ty);
                             }
+
+                            // Add eval dependencies from @compiler_test parameters to their corresponding parameter types (or the error type, if there are more args than params)
+                            if let Some(attrs) = self.ast.decl_attributes.get(&decl_id) {
+                                for attr in attrs {
+                                    match attr.attr {
+                                        AttributeKind::CompilerTest { ref arguments, .. } => {
+                                            for (i, &arg) in arguments.iter().enumerate() {
+                                                let arg_item = self.ast.expr_to_items[arg];
+                                                let param_ty = if i < param_tys.len() {
+                                                    param_tys[i]
+                                                } else {
+                                                    ast::ERROR_TYPE
+                                                };
+                                                add_eval_dep!(arg_item, param_ty);
+                                                self.tir_builder.graph.add_type3_dep(id, arg_item);
+                                            }
+                                        },
+                                        _ => {},
+                                    }
+                                }
+                            }
+
                             self.add_type3_scope_dep(id, scope);
                             // NOTE: the Some case is handled below this match expression
                             if self.ast.explicit_tys[decl_id].is_none() {

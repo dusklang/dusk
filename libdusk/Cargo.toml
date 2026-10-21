@@ -16,7 +16,7 @@ smallvec = { version = "1.6.1", features = ["const_generics"] }
 arrayvec = "0.7.0"
 paste = "1.0.0"
 num-bigint = "0.5.1"
-index_vec = { version = "0.1.2" }
+index_vec = { version = "0.1.4" }
 indenter = "0.3.2"
 region = "3.0"
 dusk-proc-macros = { version = "0.1", path = "../dusk-proc-macros" }
