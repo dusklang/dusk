@@ -958,9 +958,6 @@ impl Driver {
                             }
                             (AttributeKind::Comptime, right_paren_range)
                         } else if is_compiler_test {
-                            if !arguments.is_empty() {
-                                self.diag.report_error_no_range_msg("@compiler_test does not yet support arguments", attr.range);
-                            }
                             (AttributeKind::CompilerTest { condition: compiler_test_condition, condition_range: compiler_test_condition_range, arguments }, right_paren_range)
                         } else {
                             (AttributeKind::Error(Some(attr)), right_paren_range)

@@ -21,8 +21,8 @@ use crate::index_vec::range_iter;
 
 use crate::target::Arch;
 use crate::ast::{CompilerTestCondition, EnumId, ExternFunctionRef, ExternModId, GenericParamId, LegacyIntrinsic, NewNamespaceId};
-use crate::dvm::{self, Call, CallKind, MessageKind};
-use crate::mir::{BlockId, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId};
+use crate::dvm::{self, Call, DirectCall, MessageKind};
+use crate::mir::{BlockId, CompilerTestCase, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -736,7 +736,7 @@ impl DriverRwRef<'_> {
     pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
         self.unlock();
 
-        let response = dvm::send_message(MessageKind::Call(Call { func_ref, kind: CallKind::Direct, arguments, generic_arguments })).unwrap();
+        let response = dvm::send_message(MessageKind::Call(Call::Direct(DirectCall { func_ref, arguments, generic_arguments }))).unwrap();
         let dvm::Response::Direct(result) = response else {
             panic!("incorrect response type");
         };
@@ -761,17 +761,12 @@ impl DriverRwRef<'_> {
             }
         })
     }
-    pub fn compiler_test_call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> bool {
+    pub fn compiler_test_call(&self, test_case: &CompilerTestCase) -> bool {
         self.unlock();
 
         let response = dvm::send_message(
             MessageKind::Call(
-                Call {
-                    func_ref,
-                    kind: CallKind::CompilerTest,
-                    arguments,
-                    generic_arguments,
-                }
+                Call::CompilerTest(test_case.clone())
             )
         ).unwrap();
         let dvm::Response::CompilerTest { passed } = response else {
@@ -779,11 +774,11 @@ impl DriverRwRef<'_> {
         };
         passed
     }
-    pub fn compiler_test_call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> bool {
-        let compiler_test_condition = function_by_ref(&self.read().mir, &func_ref).compiler_test_condition.unwrap();
+    pub fn compiler_test_call_direct(&mut self, test_case: &CompilerTestCase) -> bool {
         assert_matches!(INTERP.read().unwrap().mode, InterpMode::TestCompiler, "can't call @compiler_test function when not in test-compiler mode");
+        let argument_values = test_case.arguments.iter().map(|arg| Value::from_const(arg, &self.read())).collect();
         let test_passed = matches!(
-            (self.call_direct(func_ref, arguments, generic_arguments), compiler_test_condition),
+            (self.call_direct(FunctionRef::Id(test_case.func), argument_values, vec![]), test_case.condition),
             (Ok(_), CompilerTestCondition::Success) | (Err(_), CompilerTestCondition::Failure)
         );
         test_passed

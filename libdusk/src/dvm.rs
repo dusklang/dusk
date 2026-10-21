@@ -6,19 +6,18 @@ use std::thread_local;
 
 use crate::driver::{DriverRwRef, DRIVER};
 use crate::interpreter::{Value, Result as EvalResult};
-use crate::mir::FunctionRef;
+use crate::mir::{CompilerTestCase, FunctionRef};
 use crate::ty::Type;
 
-pub struct Call {
+pub enum Call {
+    Direct(DirectCall),
+    CompilerTest(CompilerTestCase),
+}
+
+pub struct DirectCall {
     pub func_ref: FunctionRef,
     pub arguments: Vec<Value>,
     pub generic_arguments: Vec<Type>,
-    pub kind: CallKind,
-}
-
-pub enum CallKind {
-    Direct,
-    CompilerTest,
 }
 
 pub enum Response {
@@ -83,13 +82,13 @@ impl DvmServerCoordinator {
         thread::spawn(move || {
             let mut driver = DriverRwRef::new(&DRIVER);
             while let Ok(call) = call_rx.recv() {
-                let res = match call.kind {
-                    CallKind::Direct => {
+                let res = match call {
+                    Call::Direct(call) => {
                         let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
                         Response::Direct(result)
                     },
-                    CallKind::CompilerTest => {
-                        let passed = driver.compiler_test_call_direct(call.func_ref, call.arguments, call.generic_arguments);
+                    Call::CompilerTest(test_case) => {
+                        let passed = driver.compiler_test_call_direct(&test_case);
                         Response::CompilerTest { passed }
                     },
                 };

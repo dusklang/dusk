@@ -280,19 +280,16 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
             flush_diagnostics(&driver.read());
         },
         DuskTask::TestCompiler { .. } => {
-            let mut test_functions = Vec::new();
-            for (id, func) in driver.read().mir.functions.iter_enumerated() {
-                let Some(func) = func.get() else { continue };
-                if func.compiler_test_condition.is_some() {
-                    test_functions.push(id);
-                }
-            }
-
             let mut num_passed = 0usize;
-            for (i, &func_id) in test_functions.iter().enumerate() {
+            let mut num_failed = 0usize;
+            let estimated_total = driver.read().mir.compiler_test_cases.count();
+            let d = driver.read();
+            let test_cases: Vec<_> = d.mir.compiler_test_cases.iter().map(|(_, test_case)| test_case.clone()).collect();
+            drop(d);
+            for (i, test_case) in test_cases.iter().enumerate() {
                 let d: std::cell::Ref<'_, Driver> = driver.read();
-                let func = d.mir.functions[func_id].get().unwrap();
-                print!("Running test {}/{}", i + 1, test_functions.len());
+                let func = d.mir.functions[test_case.func].get().unwrap();
+                print!("Running test {}/{}", i + 1, estimated_total);
                 if let Some(name_symbol) = func.name && let Some(name) = driver.read().interner.read().unwrap().resolve(name_symbol) {
                     print!(" ({})", name);
                 }
@@ -300,11 +297,12 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 drop(d);
 
                 restart_interp(InterpMode::TestCompiler);
-                let passed = driver.compiler_test_call(FunctionRef::Id(func_id), vec![], vec![]);
+                let passed = driver.compiler_test_call(test_case);
                 if passed {
                     num_passed += 1;
                     println!("    PASSED");
                 } else {
+                    num_failed += 1;
                     println!("    FAILED");
                 }
                 flush_diagnostics(&driver.read());
@@ -312,8 +310,8 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
             println!();
 
-            let num_failed = test_functions.len() - num_passed;
-            if num_passed < test_functions.len() {
+            let estimated_total = driver.read().mir.compiler_test_cases.count();
+            if num_passed < estimated_total {
                 let plural = if num_failed != 1 {
                     "s"
                 } else {
@@ -321,7 +319,6 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 };
                 println!("{} TEST{} FAILED, {} PASSED", num_failed, plural, num_passed);
             } else {
-                debug_assert_eq!(num_passed, test_functions.len());
                 println!("ALL {} TESTS PASSED", num_passed);
             }
 

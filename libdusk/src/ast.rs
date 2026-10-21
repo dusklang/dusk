@@ -547,6 +547,7 @@ pub enum AttributeKind {
     Error(Option<Ident>),
 }
 
+#[derive(Clone)]
 pub struct Attribute {
     pub attr: AttributeKind,
     /// The range of the whole attribute, including @ sign and parentheses

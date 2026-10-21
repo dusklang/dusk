@@ -1,9 +1,5 @@
-@compiler_test(failure)
-fn assert_false() {
-    core.assert(false)
-}
-
-@compiler_test(success)
-fn assert_true() {
-    core.assert(true)
+@compiler_test(failure, false)
+@compiler_test(success, true)
+fn test_assert(value: bool) {
+    core.assert(value)
 }
