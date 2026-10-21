@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, Attribute, AttributeKind, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
+use crate::ast::{self, AttrId, Attribute, AttributeKind, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
 use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
@@ -865,7 +865,7 @@ impl Driver {
         Ok(self.switch_expr(b, scrutinee, pattern_matching_context, cases, range))
     }
 
-    fn parse_attribute(&mut self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<Attribute> {
+    fn parse_attribute(&mut self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<AttrId> {
         let at_range = self.eat_tok(p, TokenKind::AtSign)?;
 
         let attr = self.eat_ident(p)?;
@@ -1026,7 +1026,8 @@ impl Driver {
             self.diag.report_error("unexpected 'compiler_test' attribute", attr.range, "not supported outside of 'test-compiler' mode");
         }
 
-        Ok(Attribute { attr: attr_kind, range })
+        let attr = Attribute { attr: attr_kind, range };
+        Ok(self.ast.attrs.push(attr))
     }
 
     fn parse_pattern(&mut self, p: &mut Parser, b: &mut ast::Builder, context: PatternMatchingContextId, scrutinee: SwitchScrutineeValueId, root_scrutinee: ExprId) -> ParseResult<Pattern> {
@@ -1316,7 +1317,8 @@ impl Driver {
                     if p.cur().kind != &TokenKind::AtSign {
                         match self.parse_item(p, b)? {
                             Item::Decl(decl) => break decl,
-                            Item::Expr(_) => panic!("Attributes on expressions are unsupported!"),
+                            Item::Expr(_) => unimplemented!("Attributes on expressions"),
+                            Item::Attr(_) => unimplemented!("Attributes on attributes"),
                         }
                     }
                 };
@@ -1325,8 +1327,9 @@ impl Driver {
                 }
                 match df!(decl.ast) {
                     ast::Decl::Function { ref param_tys, .. } => {
-                        for attr in &attributes {
-                            if let AttributeKind::CompilerTest { arguments, .. } = &attr.attr {
+                        for &attr in &attributes {
+                            let attr = &af!(attr.ast);
+                            if let AttributeKind::CompilerTest { ref arguments, .. } = attr.attr {
                                 if param_tys.len() != arguments.len() {
                                     self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), attr.range);
                                 }
@@ -1334,26 +1337,27 @@ impl Driver {
                         }
                     },
                     _ => {
-                        for attr in &attributes {
-                            if matches!(attr.attr, AttributeKind::Comptime) {
-                                self.diag.push(
+                        for &attr in &attributes {
+                            let attr = &af!(attr.ast);
+                            match attr.attr {
+                                AttributeKind::Comptime => self.diag.push(
                                     Error::new("unexpected @comptime attribute")
                                         .adding_primary_range(attr.range, "can only be applied to function declarations")
-                                );
-                            } else if matches!(attr.attr, AttributeKind::CompilerTest { .. }) {
-                                self.diag.push(
+                                ),
+                                AttributeKind::CompilerTest { .. } => self.diag.push(
                                     Error::new("unexpected @compiler_test attribute")
                                         .adding_primary_range(attr.range, "can only be applied to function declarations")
-                                );
+                                ),
+                                _ => {},
                             }
                         }
                     }
                 }
-                if let Some(attr) = attributes.iter().find(|attr| matches!(attr.attr, AttributeKind::Comptime))
+                if let Some(&attr) = attributes.iter().find(|&&attr| matches!(af!(attr.ast).attr, AttributeKind::Comptime))
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")
-                                .adding_primary_range(attr.range, "can only be applied to function declarations")
+                                .adding_primary_range(af!(attr.ast).range, "can only be applied to function declarations")
                         );
                     }
                 self.ast.decl_attributes.entry(decl).or_default()
@@ -1838,6 +1842,9 @@ impl Driver {
                         Ok(Item::Expr(expr)) => {
                             let range = self.get_range(expr);
                             self.diag.report_error("unexpected expression", range, "expected a method declaration");
+                        },
+                        Ok(Item::Attr(_id)) => {
+                            unimplemented!("bare attributes in an extend block")
                         },
                         Err(_) => {},
                     }

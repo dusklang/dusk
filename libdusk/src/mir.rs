@@ -943,13 +943,16 @@ impl DriverRwRef<'_> {
                 if let Some(attrs) = d.ast.decl_attributes.get(&id).cloned() {
                     drop(d);
                     for attr in attrs {
-                        match &attr.attr {
+                        let d = self.read();
+                        match d.ast.attrs[attr].attr {
                             AttributeKind::Comptime => is_comptime = true,
-                            AttributeKind::CompilerTest { condition, arguments, .. } => {
+                            AttributeKind::CompilerTest { condition, ref arguments, .. } => {
+                                let arguments = arguments.clone();
+                                drop(d);
                                 compiler_test_cases.push(
                                     CompilerTestCase {
                                         func: get,
-                                        condition: *condition,
+                                        condition: condition,
                                         arguments: arguments.iter().map(|&arg| self.eval_expr(arg, tp).unwrap_or(Const::Invalid)).collect(),
                                     }
                                 )
@@ -1171,6 +1174,7 @@ impl Driver {
                 ToSourceRange::Item(item) => match item {
                     Item::Decl(decl) => write!(f, "{:?}", df!(decl.ast)),
                     Item::Expr(expr) => write!(f, "{:?}", ef!(expr.ast)),
+                    Item::Attr(attr) => write!(f, "{:?}", af!(attr.ast)),
                 },
                 _ => write!(f, "{}", self.substring_from_range(range))
             }

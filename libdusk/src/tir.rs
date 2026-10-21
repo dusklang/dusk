@@ -8,7 +8,7 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, AttributeKind, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
+use crate::ast::{self, AttrId, AttributeKind, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -707,6 +707,9 @@ impl Driver {
         }
     }
 
+    fn build_tir_attr(&mut self, unit: &mut UnitItems, level: u32, id: AttrId) {
+    }
+
     fn build_tir_decl(&mut self, unit: &mut UnitItems, level: u32, id: DeclId) {
         match df!(id.ast) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
@@ -982,8 +985,8 @@ impl Driver {
 
                             // Add eval dependencies from @compiler_test parameters to their corresponding parameter types (or the error type, if there are more args than params)
                             if let Some(attrs) = self.ast.decl_attributes.get(&decl_id) {
-                                for attr in attrs {
-                                    match attr.attr {
+                                for &attr in attrs {
+                                    match af!(attr.ast).attr {
                                         AttributeKind::CompilerTest { ref arguments, .. } => {
                                             for (i, &arg) in arguments.iter().enumerate() {
                                                 let arg_item = self.ast.expr_to_items[arg];
@@ -1031,7 +1034,7 @@ impl Driver {
                     if let Some(ty) = self.ast.explicit_tys[decl_id] {
                         add_eval_dep!(id, ty);
                     }
-                }
+                },
                 ast::Item::Expr(expr_id) => {
                     match ef!(expr_id.ast) {
                         ast::Expr::Void | ast::Expr::Error | ast::Expr::IntLit { .. } | ast::Expr::DecLit { .. } | ast::Expr::StrLit { .. }
@@ -1077,7 +1080,9 @@ impl Driver {
                             self.add_type3_scope_dep(id, scope);
                         },
                     }
-                }
+                },
+                ast::Item::Attr(_attr_id) => {
+                },
             }
         }
 
@@ -1119,7 +1124,9 @@ impl Driver {
                         if self.tir_builder.depended_on[id] { unit.eval_dependees.push(id); }
 
                         self.build_tir_expr(&mut unit.items, level, id);
-                    }
+                    },
+                    ast::Item::Attr(id) => {
+                    },
                 }
             }
         }
@@ -1127,6 +1134,7 @@ impl Driver {
             let main_expr = match self.ast.items[mock_unit.item] {
                 ast::Item::Expr(id) => id,
                 ast::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
+                ast::Item::Attr(_) => panic!("Can't have metadependency on an attribute!"),
             };
             let mut items = UnitItems::default();
             self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
@@ -1138,7 +1146,10 @@ impl Driver {
                     }
                     ast::Item::Expr(id) => {
                         self.build_tir_expr(&mut items, level, id);
-                    }
+                    },
+                    ast::Item::Attr(id) => {
+                        self.build_tir_attr(&mut items, level, id);
+                    },
                 }
             }
             items.unify_sizes();

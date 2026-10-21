@@ -57,6 +57,7 @@ define_index_type!(pub struct ExtendBlockId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
 define_index_type!(pub struct IntrinsicId = u32;);
+define_index_type!(pub struct AttrId = u32;);
 
 #[derive(Debug, Clone)]
 pub struct FieldAssignment {
@@ -280,6 +281,7 @@ pub enum Expr {
 pub enum Item {
     Expr(ExprId),
     Decl(DeclId),
+    Attr(AttrId),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -297,6 +299,12 @@ impl From<ExprId> for Item {
 impl From<DeclId> for Item {
     fn from(decl: DeclId) -> Self {
         Item::Decl(decl)
+    }
+}
+
+impl From<AttrId> for Item {
+    fn from(attr: AttrId) -> Self {
+        Item::Attr(attr)
     }
 }
 
@@ -533,7 +541,7 @@ pub enum CompilerTestCondition {
     Failure,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum AttributeKind {
     Requires(ExprId),
     Guarantees(ExprId),
@@ -547,7 +555,7 @@ pub enum AttributeKind {
     Error(Option<Ident>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Attribute {
     pub attr: AttributeKind,
     /// The range of the whole attribute, including @ sign and parentheses
@@ -583,10 +591,12 @@ pub struct Ast {
     pub source_ranges: IndexVec<ItemId, SourceRange>,
     pub decl_refs: IndexVec<DeclRefId, DeclRef>,
     pub decls: IndexVec<DeclId, Decl>,
-    pub decl_attributes: HashMap<DeclId, Vec<Attribute>>,
+    pub decl_attributes: HashMap<DeclId, Vec<AttrId>>,
     pub decl_self_parameters: IndexVec<DeclId, Option<SelfParameter>>,
+    pub attrs: IndexVec<AttrId, Attribute>,
     pub expr_to_items: IndexVec<ExprId, ItemId>,
     pub decl_to_items: IndexVec<DeclId, ItemId>,
+    pub attr_to_items: IndexVec<AttrId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
     pub intrinsics: IndexVec<IntrinsicId, Intrinsic>,
@@ -1388,6 +1398,7 @@ impl Driver {
             ToSourceRange::Item(item) => match item {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
+                Item::Attr(attr) => af!(attr.range),
             }
             ToSourceRange::Instr(_) => SourceRange::default(),
             ToSourceRange::SourceRange(range) => range,
@@ -1398,6 +1409,7 @@ impl Driver {
             ToSourceRange::Item(item) => match item {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
+                Item::Attr(attr) => af!(attr.range),
             }
             ToSourceRange::Instr(instr) => source_ranges[&instr],
             ToSourceRange::SourceRange(range) => range,

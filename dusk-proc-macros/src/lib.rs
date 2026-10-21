@@ -196,10 +196,16 @@ impl Builder {
             .brackets(expr_id.into())
     }
 
-    fn decl_to_item(self, driver: impl Into<TokenStream>, expr_id: impl Into<TokenStream>) -> Self {
+    fn decl_to_item(self, driver: impl Into<TokenStream>, decl_id: impl Into<TokenStream>) -> Self {
         self.ast_code(driver)
             .field("decl_to_items")
-            .brackets(expr_id.into())
+            .brackets(decl_id.into())
+    }
+
+    fn attr_to_item(self, driver: impl Into<TokenStream>, attr_id: impl Into<TokenStream>) -> Self {
+        self.ast_code(driver)
+            .field("attr_to_items")
+            .brackets(attr_id.into())
     }
 
     fn source_range(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
@@ -315,7 +321,35 @@ pub fn df(input: TokenStream) -> TokenStream {
                         .decl_to_item(driver, base)
                         .stream
                 }
-                name => panic!("Unrecognized expression field name {}", name),
+                name => panic!("Unrecognized declaration field name {}", name),
+            }
+        },
+        Expression::Simple(decl_id) => panic!("Unexpected bare identifier '{}'. Must have field", decl_id),
+    }
+}
+
+#[proc_macro]
+pub fn af(input: TokenStream) -> TokenStream {
+    let (driver, field) = parse_input(input);
+    match field {
+        Expression::Dot { base, field, .. } => {
+            match field.to_string().as_str() {
+                "range" => {
+                    Builder::new()
+                        .source_range(
+                            driver.clone(),
+                            Builder::new().attr_to_item(driver, base)
+                        )
+                        .stream
+                },
+                "ast" => {
+                    Builder::new()
+                        .ast_code(driver)
+                        .field("attrs")
+                        .brackets(base)
+                        .stream
+                },
+                name => panic!("Unrecognized attribute field name {}", name),
             }
         },
         Expression::Simple(decl_id) => panic!("Unexpected bare identifier '{}'. Must have field", decl_id),
