@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use xshell::{Shell, cmd};
 
+use crate::test_generator::generate_tests;
+
+mod test_generator;
+
 #[derive(Parser, Debug)]
 struct Args {
     #[clap(subcommand)]
@@ -18,6 +22,7 @@ enum Command {
         debug: bool,
     },
     CheckAll,
+    GenerateTests,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -70,6 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cmd!(shell, "cargo check").run()?;
             }
         },
+        Command::GenerateTests => generate_tests()?,
     }
     Ok(())
 }
