@@ -48,18 +48,51 @@ pub enum InternalValue {
 pub enum Value {
     /// An inline value
     Inline(SmallVec<[u8; 64 / 8]>),
-    /// A *pointer* to a piece of memory
-    Dynamic(Box<[u8]>),
+    /// An owned pointer to a piece of memory on the interpreter stack
+    OwnedAllocation(Box<[u8]>),
+    UnownedAllocation(UnownedAllocation),
     Internal { val: InternalValue, indirection: u8 },
     Nothing,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct UnownedAllocation {
+    pub allocation: *const [u8],
+    pub offset: usize,
+}
+
+unsafe impl Send for UnownedAllocation {
+}
+unsafe impl Sync for UnownedAllocation {
+}
+
+#[derive(Debug)]
+pub enum Allocation {
+    Unowned(UnownedAllocation),
+    Opaque(usize),
+}
+
+impl std::ops::Add<usize> for Allocation {
+    type Output = Allocation;
+    fn add(self, rhs: usize) -> Self::Output {
+        match self {
+            Self::Unowned(allocation) => {
+                let mut allocation = allocation;
+                allocation.offset += rhs;
+                Self::Unowned(allocation)
+            },
+            Self::Opaque(addr) => Self::Opaque(addr + rhs)
+        }
+    }
+}
+
 impl Clone for Value {
     fn clone(&self) -> Value {
-        match self {
-            Value::Inline(storage) => Value::Inline(storage.clone()),
-            Value::Dynamic(_) => Value::from_bytes(&self.as_bytes_without_driver()),
-            &Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
+        match *self {
+            Value::Inline(ref storage) => Value::Inline(storage.clone()),
+            Value::OwnedAllocation(ref value) => Value::UnownedAllocation(UnownedAllocation { allocation: &**value, offset: 0 }),
+            Value::UnownedAllocation(UnownedAllocation { allocation, offset })  => Value::UnownedAllocation(UnownedAllocation { allocation, offset }),
+            Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
     }
@@ -109,14 +142,28 @@ struct Enum {
 }
 
 impl Value {
+    fn as_allocation(&self) -> Allocation {
+        match *self {
+            Value::OwnedAllocation(ref buf) => {
+                Allocation::Unowned(UnownedAllocation { allocation: &**buf, offset: 0 })
+            },
+            Value::UnownedAllocation(allocation) => Allocation::Unowned(allocation),
+            _ => Allocation::Opaque(self.as_usize())
+        }
+    }
+
     fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<'_, [u8]> {
-        match self {
-            Value::Inline(storage) => Cow::Borrowed(storage.as_ref()),
-            Value::Dynamic(ptr) => unsafe {
+        match *self {
+            Value::Inline(ref storage) => Cow::Borrowed(storage.as_ref()),
+            Value::OwnedAllocation(ref ptr) => unsafe {
                 let address_bits = ptr as *const Box<[u8]> as *const u8;
                 Cow::Borrowed(slice::from_raw_parts(address_bits, size_of::<usize>()))
             },
-            &Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {
+            Value::UnownedAllocation(UnownedAllocation { allocation, offset }) => {
+                let address_bits = allocation as *const u8 as usize + offset;
+                Cow::Owned(address_bits.to_le_bytes().to_vec())
+            },
+            Value::Internal { val: InternalValue::FunctionPointer { ref generic_arguments, func }, indirection: 0 } if d.is_some() => {
                 assert!(generic_arguments.is_empty());
                 Cow::Owned(d.unwrap().fetch_inverse_thunk(func).as_bytes_without_driver().to_vec())
             },
@@ -133,18 +180,22 @@ impl Value {
 
     /// Interprets the value as a pointer and loads from it
     fn load(&self, size: usize) -> Value {
-        match self {
+        match *self {
             Value::Inline(_) => {
                 let ptr = self.as_raw_ptr();
                 let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
                 let buf = SmallVec::from_slice(slice);
                 Value::Inline(buf)
             },
-            Value::Dynamic(val) => {
+            Value::OwnedAllocation(ref val) => {
                 let buf = SmallVec::from_slice(val);
                 Value::Inline(buf)
             },
-            Value::Internal { val, indirection } => Value::Internal { val: val.clone(), indirection: indirection - 1 },
+            Value::UnownedAllocation(UnownedAllocation { allocation, offset }) => unsafe {
+                let buf = SmallVec::from_slice(&allocation.as_ref().unwrap()[offset..]);
+                Value::Inline(buf)
+            },
+            Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection: indirection - 1 },
             Value::Nothing => panic!("can't load from nothing"),
         }
     }
@@ -231,6 +282,13 @@ impl Value {
         }
     }
 
+    fn from_allocation(allocation: Allocation) -> Value {
+        match allocation {
+            Allocation::Opaque(addr) => Value::from_usize(addr),
+            Allocation::Unowned(allocation) => Value::UnownedAllocation(allocation),
+        }
+    }
+
     fn from_bytes(bytes: &[u8]) -> Value {
         let storage = SmallVec::from_slice(bytes);
         Value::Inline(storage)
@@ -266,6 +324,11 @@ impl Value {
         Value::from_bytes(&bytes)
     }
 
+    pub fn from_cstr(str: &CStr) -> Value {
+        let bytes = str.to_bytes_with_nul();
+        Value::UnownedAllocation(UnownedAllocation { allocation: bytes, offset: 0 })
+    }
+
     pub fn from_const(konst: &Const, driver: &Driver) -> Value {
         match *konst {
             Const::Int { ref lit, ref ty } => match ty {
@@ -278,10 +341,7 @@ impl Value {
                 _ => panic!("Unrecognized float constant size"),
             },
             Const::Bool(val) => Value::from_bool(val),
-            Const::Str { id, .. } => {
-                let ptr = driver.mir.strings[id].as_ptr();
-                Value::from_usize(ptr as usize)
-            },
+            Const::Str { id, .. } => Value::from_cstr(&driver.mir.strings[id]),
             Const::StrLit(ref lit) => Value::from_internal(InternalValue::StrLit(lit.clone())),
             Const::Ty(ref ty) => Value::from_new_internal(ty.clone(), driver),
             Const::Void => Value::Nothing,
@@ -636,9 +696,17 @@ impl Driver {
             Type::Pointer(ref pointee) => {
                 assert!(!pointee.is_mut);
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
-                #[cfg(debug_assertions)]
-                println!("NOTICE: about to blindly copy null-terminated data from an arbitrary address to the global strings!");
-                let string = unsafe { CString::from(CStr::from_ptr(val.as_raw_ptr() as *const _)) };
+                let string = match val.as_allocation() {
+                    Allocation::Opaque(addr) => unsafe {
+                        #[cfg(debug_assertions)]
+                        println!("NOTICE: about to blindly copy null-terminated data from an arbitrary address to the global strings!");
+                        CString::from(CStr::from_ptr(addr as *const _))
+                    },
+                    Allocation::Unowned(allocation) => unsafe {
+                        let slice = allocation.allocation.as_ref().unwrap();
+                        CString::from(CStr::from_bytes_until_nul(slice).unwrap())
+                    },
+                };
                 let id = self.mir.strings.push(string);
                 Const::Str { id, ty }
             },
@@ -1296,7 +1364,7 @@ impl DriverRwRef<'_> {
                 InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
                 InstrKind::Alloca(ty) => {
                     let storage = vec![0; self.read().size_of(&ty)];
-                    Value::Dynamic(storage.into_boxed_slice())
+                    Value::OwnedAllocation(storage.into_boxed_slice())
                 },
                 InstrKind::LogicalNot(val) => {
                     let val = frame.get_val(val, &self.read()).as_bool();
@@ -1489,7 +1557,10 @@ impl DriverRwRef<'_> {
                             let buf = unsafe { alloc::alloc(layout) };
                             let address = buf as usize;
                             INTERP.write().unwrap().allocations.insert(address, layout);
-                            Value::from_usize(address)
+                            Value::UnownedAllocation(UnownedAllocation {
+                                allocation: std::ptr::slice_from_raw_parts_mut(buf, size),
+                                offset: 0,
+                            })
                         }
                         LegacyIntrinsic::Free => {
                             assert_eq!(arguments.len(), 1);
@@ -1709,11 +1780,11 @@ impl DriverRwRef<'_> {
                         panic!("Can't access static at compile time!");
                     }
                     let static_value = Value::from_const(&self.read().mir.statics[statik].val.clone(), &self.read());
-                    let statik = INTERP.write().unwrap().statics.entry(statik)
+                    let mut interp = INTERP.write().unwrap();
+                    let statik = interp.statics.entry(statik)
                         .or_insert(static_value)
-                        .as_bytes_without_driver()
-                        .as_ptr();
-                    Value::from_usize(statik as usize)
+                        .as_bytes_without_driver();
+                    Value::UnownedAllocation(UnownedAllocation { allocation: &*statik, offset: 0 })
                 },
                 InstrKind::Pointer { instr, is_mut } => {
                     let ty = frame.get_val(instr, &self.read()).as_ty().ptr_with_mut(is_mut);
@@ -1835,14 +1906,14 @@ impl DriverRwRef<'_> {
                     Value::from_bytes(&bytes[offset..][..size])
                 },
                 InstrKind::IndirectFieldAccess { val, index } => {
-                    let addr = frame.get_val(val, &self.read()).as_usize();
+                    let addr = frame.get_val(val, &self.read()).as_allocation();
                     let base_ty = &func.type_of(val).deref().unwrap().ty;
                     let strukt = match base_ty {
                         Type::Struct(strukt) => strukt,
                         _ => panic!("Can't directly get field of non-struct"),
                     };
                     let offset = self.read().layout_struct(strukt).field_offsets[index];
-                    Value::from_usize(addr + offset)
+                    Value::from_allocation(addr + offset)
                 },
                 InstrKind::InternalFieldAccess { val, field } => {
                     let val = frame.get_val(val, &self.read()).as_internal();
@@ -1853,7 +1924,7 @@ impl DriverRwRef<'_> {
                                 length => {
                                     Value::from_usize(lit.as_bytes().len())
                                 },
-                                data => Value::from_usize(lit.as_ptr() as usize),
+                                data => Value::from_cstr(&lit),
                             }
                         },
                         pair => unimplemented!("unimplemented internal field access: {:?}", pair),
