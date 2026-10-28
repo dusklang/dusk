@@ -1,68 +1,68 @@
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 122, 5, 127)
 @compiler_test(success, 7, 10, 17)
 fn test_add_i8(a: i8, b: i8, result: i8) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 32762, 5, 32767)
 @compiler_test(success, 7, 10, 17)
 fn test_add_i16(a: i16, b: i16, result: i16) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 2147483642, 5, 2147483647)
 @compiler_test(success, 7, 10, 17)
 fn test_add_i32(a: i32, b: i32, result: i32) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 9223372036854775802, 5, 9223372036854775807)
 @compiler_test(success, 7, 10, 17)
 fn test_add_i64(a: i64, b: i64, result: i64) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 9223372036854775802, 5, 9223372036854775807)
 @compiler_test(success, 7, 10, 17)
 fn test_add_isize(a: isize, b: isize, result: isize) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 250, 5, 255)
 @compiler_test(success, 7, 10, 17)
 fn test_add_u8(a: u8, b: u8, result: u8) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 65530, 5, 65535)
 @compiler_test(success, 7, 10, 17)
 fn test_add_u16(a: u16, b: u16, result: u16) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 4294967290, 5, 4294967295)
 @compiler_test(success, 7, 10, 17)
 fn test_add_u32(a: u32, b: u32, result: u32) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 18446744073709551610, 5, 18446744073709551615)
 @compiler_test(success, 7, 10, 17)
 fn test_add_u64(a: u64, b: u64, result: u64) {
     core.assert(a + b == result)
 }
 
 @compiler_test(failure, 1, 2, 4)
-@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 18446744073709551610, 5, 18446744073709551615)
 @compiler_test(success, 7, 10, 17)
 fn test_add_usize(a: usize, b: usize, result: usize) {
     core.assert(a + b == result)
