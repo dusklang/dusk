@@ -49,37 +49,37 @@ pub enum Value {
     /// An inline value
     Inline(SmallVec<[u8; 64 / 8]>),
     /// An owned pointer to a piece of memory on the interpreter stack
-    OwnedAllocation(Box<[u8]>),
-    UnownedAllocation(UnownedAllocation),
+    OwnedPointer(Box<[u8]>),
+    UnownedPointer(UnownedPointer),
     Internal { val: InternalValue, indirection: u8 },
     Nothing,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct UnownedAllocation {
+pub struct UnownedPointer {
     pub allocation: *const [u8],
     pub offset: usize,
 }
 
-unsafe impl Send for UnownedAllocation {
+unsafe impl Send for UnownedPointer {
 }
-unsafe impl Sync for UnownedAllocation {
+unsafe impl Sync for UnownedPointer {
 }
 
 #[derive(Debug)]
-pub enum Allocation {
-    Unowned(UnownedAllocation),
+pub enum Pointer {
+    Unowned(UnownedPointer),
     Opaque(usize),
 }
 
-impl std::ops::Add<usize> for Allocation {
-    type Output = Allocation;
+impl std::ops::Add<usize> for Pointer {
+    type Output = Pointer;
     fn add(self, rhs: usize) -> Self::Output {
         match self {
             Self::Unowned(allocation) => {
-                let mut allocation = allocation;
-                allocation.offset += rhs;
-                Self::Unowned(allocation)
+                let mut ptr = allocation;
+                ptr.offset += rhs;
+                Self::Unowned(ptr)
             },
             Self::Opaque(addr) => Self::Opaque(addr + rhs)
         }
@@ -90,8 +90,8 @@ impl Clone for Value {
     fn clone(&self) -> Value {
         match *self {
             Value::Inline(ref storage) => Value::Inline(storage.clone()),
-            Value::OwnedAllocation(ref value) => Value::UnownedAllocation(UnownedAllocation { allocation: &**value, offset: 0 }),
-            Value::UnownedAllocation(UnownedAllocation { allocation, offset })  => Value::UnownedAllocation(UnownedAllocation { allocation, offset }),
+            Value::OwnedPointer(ref value) => Value::UnownedPointer(UnownedPointer { allocation: &**value, offset: 0 }),
+            Value::UnownedPointer(UnownedPointer { allocation, offset })  => Value::UnownedPointer(UnownedPointer { allocation, offset }),
             Value::Internal { ref val, indirection } => Value::Internal { val: val.clone(), indirection },
             Value::Nothing => Value::Nothing,
         }
@@ -142,24 +142,24 @@ struct Enum {
 }
 
 impl Value {
-    fn as_allocation(&self) -> Allocation {
+    fn as_allocation(&self) -> Pointer {
         match *self {
-            Value::OwnedAllocation(ref buf) => {
-                Allocation::Unowned(UnownedAllocation { allocation: &**buf, offset: 0 })
+            Value::OwnedPointer(ref buf) => {
+                Pointer::Unowned(UnownedPointer { allocation: &**buf, offset: 0 })
             },
-            Value::UnownedAllocation(allocation) => Allocation::Unowned(allocation),
-            _ => Allocation::Opaque(self.as_usize())
+            Value::UnownedPointer(allocation) => Pointer::Unowned(allocation),
+            _ => Pointer::Opaque(self.as_usize())
         }
     }
 
     fn as_bytes_with_driver_maybe(&self, d: Option<&Driver>) -> Cow<'_, [u8]> {
         match *self {
             Value::Inline(ref storage) => Cow::Borrowed(storage.as_ref()),
-            Value::OwnedAllocation(ref ptr) => unsafe {
+            Value::OwnedPointer(ref ptr) => unsafe {
                 let address_bits = ptr as *const Box<[u8]> as *const u8;
                 Cow::Borrowed(slice::from_raw_parts(address_bits, size_of::<usize>()))
             },
-            Value::UnownedAllocation(UnownedAllocation { allocation, offset }) => {
+            Value::UnownedPointer(UnownedPointer { allocation, offset }) => {
                 let address_bits = allocation as *const u8 as usize + offset;
                 Cow::Owned(address_bits.to_le_bytes().to_vec())
             },
@@ -187,11 +187,11 @@ impl Value {
                 let buf = SmallVec::from_slice(slice);
                 Value::Inline(buf)
             },
-            Value::OwnedAllocation(ref val) => {
+            Value::OwnedPointer(ref val) => {
                 let buf = SmallVec::from_slice(val);
                 Value::Inline(buf)
             },
-            Value::UnownedAllocation(UnownedAllocation { allocation, offset }) => unsafe {
+            Value::UnownedPointer(UnownedPointer { allocation, offset }) => unsafe {
                 let buf = SmallVec::from_slice(&allocation.as_ref().unwrap()[offset..]);
                 Value::Inline(buf)
             },
@@ -282,10 +282,10 @@ impl Value {
         }
     }
 
-    fn from_allocation(allocation: Allocation) -> Value {
+    fn from_allocation(allocation: Pointer) -> Value {
         match allocation {
-            Allocation::Opaque(addr) => Value::from_usize(addr),
-            Allocation::Unowned(allocation) => Value::UnownedAllocation(allocation),
+            Pointer::Opaque(addr) => Value::from_usize(addr),
+            Pointer::Unowned(allocation) => Value::UnownedPointer(allocation),
         }
     }
 
@@ -326,7 +326,7 @@ impl Value {
 
     pub fn from_cstr(str: &CStr) -> Value {
         let bytes = str.to_bytes_with_nul();
-        Value::UnownedAllocation(UnownedAllocation { allocation: bytes, offset: 0 })
+        Value::UnownedPointer(UnownedPointer { allocation: bytes, offset: 0 })
     }
 
     pub fn from_const(konst: &Const, driver: &Driver) -> Value {
@@ -489,9 +489,9 @@ pub enum InterpMode {
 #[cfg(windows)]
 struct Allocation(region::Allocation);
 #[cfg(windows)]
-unsafe impl Sync for Allocation {}
+unsafe impl Sync for Pointer {}
 #[cfg(windows)]
-unsafe impl Send for Allocation {}
+unsafe impl Send for Pointer {}
 
 #[allow(unused)]
 struct CachedLib {
@@ -507,7 +507,7 @@ pub struct Interpreter {
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<InstrId, HashMap<Box<[u8]>, JumpTarget>>,
     #[cfg(windows)]
-    inverse_thunk_cache: HashMap<FuncId, Allocation>,
+    inverse_thunk_cache: HashMap<FuncId, Pointer>,
     #[allow(unused)]
     lib_cache: HashMap<ExternModId, CachedLib>,
     mode: InterpMode,
@@ -697,12 +697,12 @@ impl Driver {
                 assert!(!pointee.is_mut);
                 assert!(pointee.ty == Type::i8() || pointee.ty == Type::u8());
                 let string = match val.as_allocation() {
-                    Allocation::Opaque(addr) => unsafe {
+                    Pointer::Opaque(addr) => unsafe {
                         #[cfg(debug_assertions)]
                         println!("NOTICE: about to blindly copy null-terminated data from an arbitrary address to the global strings!");
                         CString::from(CStr::from_ptr(addr as *const _))
                     },
-                    Allocation::Unowned(allocation) => unsafe {
+                    Pointer::Unowned(allocation) => unsafe {
                         let slice = allocation.allocation.as_ref().unwrap();
                         CString::from(CStr::from_bytes_until_nul(slice).unwrap())
                     },
@@ -968,7 +968,7 @@ impl Driver {
 
         let thunk = thunk.allocate();
         let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
-        INTERP.write().unwrap().inverse_thunk_cache.insert(func_id, Allocation(thunk));
+        INTERP.write().unwrap().inverse_thunk_cache.insert(func_id, Pointer(thunk));
 
         val
     }
@@ -1364,7 +1364,7 @@ impl DriverRwRef<'_> {
                 InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
                 InstrKind::Alloca(ty) => {
                     let storage = vec![0; self.read().size_of(&ty)];
-                    Value::OwnedAllocation(storage.into_boxed_slice())
+                    Value::OwnedPointer(storage.into_boxed_slice())
                 },
                 InstrKind::LogicalNot(val) => {
                     let val = frame.get_val(val, &self.read()).as_bool();
@@ -1557,7 +1557,7 @@ impl DriverRwRef<'_> {
                             let buf = unsafe { alloc::alloc(layout) };
                             let address = buf as usize;
                             INTERP.write().unwrap().allocations.insert(address, layout);
-                            Value::UnownedAllocation(UnownedAllocation {
+                            Value::UnownedPointer(UnownedPointer {
                                 allocation: std::ptr::slice_from_raw_parts_mut(buf, size),
                                 offset: 0,
                             })
@@ -1784,7 +1784,7 @@ impl DriverRwRef<'_> {
                     let statik = interp.statics.entry(statik)
                         .or_insert(static_value)
                         .as_bytes_without_driver();
-                    Value::UnownedAllocation(UnownedAllocation { allocation: &*statik, offset: 0 })
+                    Value::UnownedPointer(UnownedPointer { allocation: &*statik, offset: 0 })
                 },
                 InstrKind::Pointer { instr, is_mut } => {
                     let ty = frame.get_val(instr, &self.read()).as_ty().ptr_with_mut(is_mut);
