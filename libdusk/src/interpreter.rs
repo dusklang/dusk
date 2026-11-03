@@ -489,9 +489,9 @@ pub enum InterpMode {
 #[cfg(windows)]
 struct Allocation(region::Allocation);
 #[cfg(windows)]
-unsafe impl Sync for Pointer {}
+unsafe impl Sync for Allocation {}
 #[cfg(windows)]
-unsafe impl Send for Pointer {}
+unsafe impl Send for Allocation {}
 
 #[allow(unused)]
 struct CachedLib {
@@ -507,7 +507,7 @@ pub struct Interpreter {
     allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<InstrId, HashMap<Box<[u8]>, JumpTarget>>,
     #[cfg(windows)]
-    inverse_thunk_cache: HashMap<FuncId, Pointer>,
+    inverse_thunk_cache: HashMap<FuncId, Allocation>,
     #[allow(unused)]
     lib_cache: HashMap<ExternModId, CachedLib>,
     mode: InterpMode,
@@ -968,7 +968,7 @@ impl Driver {
 
         let thunk = thunk.allocate();
         let val = Value::from_usize(thunk.as_ptr::<u8>() as usize);
-        INTERP.write().unwrap().inverse_thunk_cache.insert(func_id, Pointer(thunk));
+        INTERP.write().unwrap().inverse_thunk_cache.insert(func_id, Allocation(thunk));
 
         val
     }
