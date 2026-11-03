@@ -1188,7 +1188,7 @@ impl tir::Expr<tir::StructLit> {
                         ExprMacroInfo::Struct(strukt) => {
                             let struct_fields = &driver.ast.structs[strukt.identity].fields;
                             let mut matched_fields = Vec::new();
-                            matched_fields.resize_with(struct_fields.len(), || MatchedField { expr: ExprId::new(u32::MAX as usize), ty: Type::Error });
+                            matched_fields.resize_with(struct_fields.len(), || MatchedField { expr: ExprId::new(u32::MAX), ty: Type::Error });
 
                             let mut successful = true;
 
@@ -1221,7 +1221,7 @@ impl tir::Expr<tir::StructLit> {
                                     matched_field.ty.replace_generic_params(substitutions);
                                 }
 
-                                if matched_field.expr == ExprId::new(u32::MAX as usize) {
+                                if matched_field.expr == ExprId::new(u32::MAX) {
                                     successful = false;
 
                                     driver.diag.push(

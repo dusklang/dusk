@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
-use crate::index_vec::{IndexVec, define_index_type};
+use crate::index_vec::IndexVec;
 use crate::display_adapter;
 
 use crate::mir::cursor::{Cursor, CursorMut};

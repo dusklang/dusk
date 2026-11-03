@@ -610,7 +610,7 @@ macro_rules! bin_op {
 
 #[cfg_attr(not(windows), allow(unused))]
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
-    let func_id = FuncId::new(func as usize);
+    let func_id = FuncId::new(func);
 
     let mut driver = DriverRwRef::new(&DRIVER);
 

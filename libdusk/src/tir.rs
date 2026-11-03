@@ -5,7 +5,6 @@ use std::mem;
 use smallvec::SmallVec;
 use string_interner::DefaultSymbol as Sym;
 
-use crate::index_vec::define_index_type;
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
 use crate::ast::{self, AttrId, Attribute, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};

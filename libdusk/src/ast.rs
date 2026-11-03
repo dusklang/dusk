@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use crate::display_adapter;
 use crate::pattern_matching::{SwitchScrutineeValueId, PatternMatchingContext};
-use crate::index_vec::{IndexVec, define_index_type};
+use crate::index_vec::IndexVec;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
@@ -522,15 +522,15 @@ impl LegacyIntrinsic {
     }
 }
 
-pub const THE_ONE_SEGMENT: SegmentId = SegmentId::from_raw_unchecked(0);
-pub const VOID_EXPR: ExprId = ExprId::from_raw_unchecked(0);
-pub const VOID_EXPR_ITEM: ItemId = ItemId::from_raw_unchecked(0);
-pub const ERROR_EXPR: ExprId = ExprId::from_raw_unchecked(1);
-pub const VOID_TYPE: ExprId = ExprId::from_raw_unchecked(2);
-pub const TYPE_TYPE: ExprId = ExprId::from_raw_unchecked(3);
-pub const ERROR_TYPE: ExprId = ExprId::from_raw_unchecked(4);
-pub const RETURN_VALUE_DECL: DeclId = DeclId::from_raw_unchecked(0);
-pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::from_raw_unchecked(0);
+pub const THE_ONE_SEGMENT: SegmentId = SegmentId::new(0);
+pub const VOID_EXPR: ExprId = ExprId::new(0);
+pub const VOID_EXPR_ITEM: ItemId = ItemId::new(0);
+pub const ERROR_EXPR: ExprId = ExprId::new(1);
+pub const VOID_TYPE: ExprId = ExprId::new(2);
+pub const TYPE_TYPE: ExprId = ExprId::new(3);
+pub const ERROR_TYPE: ExprId = ExprId::new(4);
+pub const RETURN_VALUE_DECL: DeclId = DeclId::new(0);
+pub const BLANK_GENERIC_CTX: GenericCtxId = GenericCtxId::new(0);
 impl Default for GenericCtxId {
     fn default() -> Self { BLANK_GENERIC_CTX }
 }
@@ -996,7 +996,7 @@ impl Driver {
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self, b: &Builder) -> (ExprId, StructId) {
-        let strukt = self.ast.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
+        let strukt = self.ast.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
         let expr = self.add_expr(b, Expr::Struct(strukt), Default::default());
         (expr, strukt)
     }
@@ -1010,7 +1010,7 @@ impl Driver {
         ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self, b: &Builder) -> (ExprId, EnumId) {
-        let enuum = self.ast.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::from_raw(u32::MAX) });
+        let enuum = self.ast.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
         let expr = self.add_expr(b, Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
@@ -1064,7 +1064,7 @@ impl Driver {
     }
     pub fn create_condition_namespace(&mut self, b: &Builder) -> ConditionNsId {
         let parent = b.cur_namespace(self);
-        self.ast.condition_ns.push(ConditionNs { func: DeclId::from_raw(u32::MAX), parent: Some(parent) })
+        self.ast.condition_ns.push(ConditionNs { func: DeclId::new(u32::MAX), parent: Some(parent) })
     }
     pub fn enter_condition_namespace(&self, b: &Builder, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
@@ -1091,7 +1091,7 @@ impl Driver {
     }
     pub fn begin_fn_decl(&mut self, b: &mut Builder, name: Sym, param_names: SmallVec<[Sym; 2]>, param_tys: SmallVec<[ExprId; 2]>, param_ranges: SmallVec<[SourceRange; 2]>, self_parameter: Option<SelfParameter>, generic_params: Range<GenericParamId>, generic_param_decls: Range<DeclId>, return_ty: ExprId, proto_range: SourceRange) -> DeclId {
         // This is a placeholder value that gets replaced once the parameter declarations get allocated.
-        let id = self.add_decl_with_self_parameter(b, Decl::Static(ExprId::new(u32::MAX as usize)), name, Some(return_ty), proto_range, self_parameter);
+        let id = self.add_decl_with_self_parameter(b, Decl::Static(ExprId::new(u32::MAX)), name, Some(return_ty), proto_range, self_parameter);
 
         assert_eq!(param_names.len(), param_tys.len());
         self.ast.decls.reserve(param_tys.len());
@@ -1110,7 +1110,7 @@ impl Driver {
         df!(id.ast) = Decl::Function {
             param_tys,
             params: params.clone(),
-            scope: ImperScopeId::new(u32::MAX as usize),
+            scope: ImperScopeId::new(u32::MAX),
             generic_params: generic_params.clone(),
         };
         match b.scope_stack.peek().unwrap() {

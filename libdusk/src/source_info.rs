@@ -373,7 +373,7 @@ impl Driver {
             }
         };
         // Pick an impossible file ID so it will be unequal to the file in the 0th group.
-        let mut prev_file = SourceFileId::new(u32::MAX as usize);
+        let mut prev_file = SourceFileId::new(u32::MAX);
         for (i, range) in ranges.iter().enumerate() {
             let group = &line_range_groups[i];
             if group.file != prev_file {

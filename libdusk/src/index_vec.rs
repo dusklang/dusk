@@ -2,7 +2,67 @@ use std::ops::{Index, Range};
 use std::marker::PhantomData;
 
 use index_vec::IdxRangeBounds;
-pub use index_vec::{IndexVec, Idx, define_index_type, index_vec};
+pub use index_vec::{IndexVec, Idx, index_vec};
+
+macro_rules! define_index_type {
+    (
+        $(#[$attrs:meta])*
+        $v:vis struct $type:ident = $raw:ident;
+    ) => {
+        $(#[$attrs])*
+        #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, Debug)]
+        $v struct $type($raw);
+
+        #[allow(unused)]
+        impl $type {
+            pub const fn new(val: $raw) -> Self {
+                Self(val)
+            }
+
+            pub fn index(self) -> usize {
+                self.0.try_into().unwrap()
+            }
+
+            pub fn raw(self) -> $raw {
+                self.0.try_into().unwrap()
+            }
+        }
+
+        impl index_vec::Idx for $type {
+            fn from_usize(val: usize) -> Self {
+                $type(val.try_into().unwrap())
+            }
+
+            fn index(self) -> usize {
+                self.0.try_into().unwrap()
+            }
+        }
+
+        impl std::ops::AddAssign<usize> for $type {
+            fn add_assign(&mut self, other: usize) {
+                let other_as_raw: $raw = other.try_into().unwrap();
+                self.0 += other_as_raw;
+            }
+        }
+
+        impl std::ops::Add<usize> for $type {
+            type Output = $type;
+
+            fn add(self, other: usize) -> Self::Output {
+                let other_as_raw: $raw = other.try_into().unwrap();
+                Self(self.0 + other_as_raw)
+            }
+        }
+
+        impl std::ops::Sub for $type {
+            type Output = usize;
+
+            fn sub(self, other: Self) -> usize {
+                (self.0 - other.0).try_into().unwrap()
+            }
+        }
+    };
+}
 
 #[allow(unused)]
 macro_rules! define_segmented_index_type {

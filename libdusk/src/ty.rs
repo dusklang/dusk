@@ -4,8 +4,6 @@ use std::fmt;
 use arrayvec::ArrayVec;
 use bitflags::bitflags;
 
-use crate::index_vec::define_index_type;
-
 use dusk_proc_macros::DuskBridge;
 
 use crate::target::Arch;

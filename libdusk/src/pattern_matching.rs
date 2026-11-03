@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use string_interner::DefaultSymbol as Sym;
-use crate::index_vec::define_index_type;
 use crate::driver::Driver;
 use crate::ast::{DeclId, ExprId, ImperScopeId, Pattern, PatternKind, PatternMatchingContextId, VOID_TYPE};
 use crate::ty::Type;
@@ -15,8 +14,8 @@ use crate::index_vec::*;
 
 define_index_type!(pub struct SwitchScrutineeValueId = u32;);
 
-pub const VOID_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(0);
-pub const ORIGINAL_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::from_raw_unchecked(1);
+pub const VOID_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::new(0);
+pub const ORIGINAL_SCRUTINEE_VALUE: SwitchScrutineeValueId = SwitchScrutineeValueId::new(1);
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 pub enum SwitchDecisionValue {

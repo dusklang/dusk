@@ -1,6 +1,7 @@
 #![warn(clippy::needless_pass_by_ref_mut)]
 
 use clap::{ValueEnum, Parser};
+use libdusk::index_vec::Idx;
 use libdusk::interpreter::{InterpMode, restart_interp};
 use libdusk::mir::{FunctionRef, FuncId};
 use libdusk::type_provider::{MockStateCommand, MockTypeProvider, TypeProvider};
@@ -340,7 +341,7 @@ fn get_main_func(driver: &DriverRwRef) -> Option<FuncId> {
                 Some(name) => name == main_sym && *func.ty.return_ty == Type::Void && func.num_parameters() == 0,
                 None => false,
             }
-        }).map(FuncId::new)
+        }).map(FuncId::from_usize)
 }
 
 fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {

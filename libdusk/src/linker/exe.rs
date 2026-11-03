@@ -1,7 +1,5 @@
 use std::ffi::CStr;
 
-use crate::index_vec::*;
-
 use crate::{backend::CodeBlob, linker::dex::DexExe};
 
 define_index_type!(pub struct DynLibId = u32;);

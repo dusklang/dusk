@@ -180,7 +180,7 @@ impl Driver {
             dep.resize_with(self.ast.items.len(), Vec::new);
         }
 
-        self.tir_builder.graph.item_to_components.resize_with(self.ast.items.len(), || CompId::new(u32::MAX as usize));
+        self.tir_builder.graph.item_to_components.resize_with(self.ast.items.len(), || CompId::new(u32::MAX));
     }
 }
 
@@ -318,7 +318,7 @@ impl Graph {
         let before_components = self.components.next_idx();
         self.visited.resize_with(self.dependees.len(), || false);
         let mut cur_component = Component::default();
-        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX as usize));
+        self.item_to_components.resize_with(self.dependees.len(), || CompId::new(u32::MAX));
         for id in range_iter(new_code.items.clone()) {
             self.find_component(id, &mut cur_component);
         }
