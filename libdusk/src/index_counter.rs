@@ -18,6 +18,11 @@ impl<I: Idx + AddAssign<usize>> IndexCounter<I> {
         next
     }
 
+    pub fn next_idx_at(&mut self, expected: I) -> I {
+        debug_assert_eq!(self.peek_next_idx(), id);
+        self.next_idx()
+    }
+
     pub fn peek_next_idx(&self) -> I {
         self.next_id
     }
