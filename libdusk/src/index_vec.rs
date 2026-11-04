@@ -1,8 +1,9 @@
-use std::ops::{Index, Range};
-use std::marker::PhantomData;
+// This module is based on the index_vec crate and some of the signatures have been lifted directly, but otherwise the implementation is my own.
 
-use index_vec::IdxRangeBounds;
-pub use index_vec::{IndexVec, Idx, index_vec};
+use std::ops::Range;
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::marker::PhantomData;
 
 macro_rules! define_index_type {
     (
@@ -28,7 +29,7 @@ macro_rules! define_index_type {
             }
         }
 
-        impl index_vec::Idx for $type {
+        impl crate::index_vec::Idx for $type {
             fn from_usize(val: usize) -> Self {
                 $type(val.try_into().unwrap())
             }
@@ -63,6 +64,216 @@ macro_rules! define_index_type {
         }
     };
 }
+
+pub trait IdxRangeBounds<I: Idx> {
+    type Range: std::ops::RangeBounds<usize>;
+
+    fn into_range(self) -> Self::Range;
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::Range<I> {
+    type Range = std::ops::Range<usize>;
+
+    fn into_range(self) -> Self::Range {
+        self.start.index()..self.end.index()
+    }
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::RangeFrom<I> {
+    type Range = std::ops::RangeFrom<usize>;
+
+    fn into_range(self) -> Self::Range {
+        self.start.index()..
+    }
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::RangeFull {
+    type Range = std::ops::RangeFull;
+
+    fn into_range(self) -> Self::Range {
+        self
+    }
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::RangeTo<I> {
+    type Range = std::ops::RangeTo<usize>;
+
+    fn into_range(self) -> Self::Range {
+        ..self.end.index()
+    }
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::RangeInclusive<I> {
+    type Range = std::ops::RangeInclusive<usize>;
+
+    fn into_range(self) -> Self::Range {
+        self.start().index()..=self.end().index()
+    }
+}
+
+impl<I: Idx> IdxRangeBounds<I> for std::ops::RangeToInclusive<I> {
+    type Range = std::ops::RangeToInclusive<usize>;
+
+    fn into_range(self) -> Self::Range {
+        ..=self.end.index()
+    }
+}
+
+pub trait Idx: Copy + 'static + Ord + Debug + Hash {
+    fn from_usize(idx: usize) -> Self;
+    fn index(self) -> usize;
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexVec<I: Idx, T> {
+    raw: Vec<T>,
+    _phantom: PhantomData<I>
+}
+
+impl<I: Idx, T> Default for IndexVec<I, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<I: Idx, T> IndexVec<I, T> {
+    pub const fn new() -> Self {
+        Self {
+            raw: Vec::new(),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.raw.len()
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    pub fn next_idx(&self) -> I {
+        let next = self.raw.len();
+        I::from_usize(next)
+    }
+
+    pub fn push(&mut self, value: T) -> I {
+        let next = self.next_idx();
+        self.raw.push(value);
+        next
+    }
+
+    pub fn reserve(&mut self, additional: usize) {
+        self.raw.reserve(additional);
+    }
+
+    pub fn resize_with(&mut self, new_len: usize, f: impl FnMut() -> T) {
+        self.raw.resize_with(new_len, f);
+    }
+
+    pub fn indices(&self) -> impl Iterator<Item=I> {
+        (0..self.raw.len()).map(|index| I::from_usize(index))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=&T> {
+        self.raw.iter()
+    }
+
+    pub fn into_iter_enumerated(self) -> impl Iterator<Item=(I, T)> {
+        self.raw.into_iter().enumerate()
+            .map(|(i, value)| (I::from_usize(i), value))
+    }
+
+    pub fn iter_enumerated(&self) -> impl Iterator<Item=(I, &T)> {
+        self.raw.iter().enumerate()
+            .map(|(i, value)| (I::from_usize(i), value))
+    }
+
+    pub fn iter_mut_enumerated(&mut self) -> impl Iterator<Item=(I, &mut T)> {
+        self.raw.iter_mut().enumerate()
+            .map(|(i, value)| (I::from_usize(i), value))
+    }
+
+    pub fn sort_by_cached_key<K: Ord>(&mut self, f: impl FnMut(&T) -> K) {
+        self.raw.sort_by_cached_key(f);
+    }
+
+    pub fn as_mut_vec(&mut self) -> &mut Vec<T> {
+        &mut self.raw
+    }
+
+    pub fn indices_satisfying(&self, mut condition: impl FnMut(&T) -> bool) -> Vec<I> {
+        let mut indices = Vec::new();
+        for (i, val) in self.iter_enumerated() {
+            if condition(val) {
+                indices.push(i);
+            }
+        }
+        indices
+    }
+    pub fn index_mut(&mut self, a: I, b: I) -> (&mut T, &mut T) {
+        let [a, b] = self.as_mut_vec().get_disjoint_mut([a.index(), b.index()]).unwrap();
+        (a, b)
+    }
+    pub fn push_at(&mut self, id: I, value: T) {
+        debug_assert_eq!(self.next_idx(), id);
+        self.push(value);
+    }
+}
+
+impl<I: Idx, T> IntoIterator for IndexVec<I, T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.raw.into_iter()
+    }
+}
+
+impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
+    type Item = &'a T;
+
+    type IntoIter = <&'a Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.raw).into_iter()
+    }
+}
+
+impl<'a, I: Idx, T> IntoIterator for &'a mut IndexVec<I, T> {
+    type Item = &'a mut T;
+
+    type IntoIter = <&'a mut Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&mut self.raw).into_iter()
+    }
+}
+
+impl<I: Idx, T> FromIterator<T> for IndexVec<I, T> {
+    fn from_iter<Iter: IntoIterator<Item = T>>(iter: Iter) -> Self {
+        Self {
+            raw: Vec::from_iter(iter),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<I: Idx, T> std::ops::Index<I> for IndexVec<I, T> {
+    type Output = T;
+
+    fn index(&self, index: I) -> &Self::Output {
+        &self.raw[index.index()]
+    }
+}
+
+impl<I: Idx, T> std::ops::IndexMut<I> for IndexVec<I, T> {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        &mut self.raw[index.index()]
+    }
+}
+
 
 #[allow(unused)]
 macro_rules! define_segmented_index_type {
@@ -142,43 +353,11 @@ impl<I: Idx, T> Default for ConcurrentIndexVec<I, T> {
     }
 }
 
-impl<I: Idx, T> Index<I> for ConcurrentIndexVec<I, T> {
+impl<I: Idx, T> std::ops::Index<I> for ConcurrentIndexVec<I, T> {
     type Output = T;
 
     fn index(&self, index: I) -> &Self::Output {
         &self.raw[index.index()]
-    }
-}
-
-pub trait IndexVecExt {
-    type I: Idx;
-    type T;
-
-    fn indices_satisfying(&self, condition: impl FnMut(&Self::T) -> bool) -> Vec<Self::I>;
-    fn index_mut(&mut self, a: Self::I, b: Self::I) -> (&mut Self::T, &mut Self::T);
-    fn push_at(&mut self, id: Self::I, value: Self::T);
-}
-
-impl<I: Idx, T> IndexVecExt for IndexVec<I, T> {
-    type I = I;
-    type T = T;
-
-    fn indices_satisfying(&self, mut condition: impl FnMut(&T) -> bool) -> Vec<I> {
-        let mut indices = Vec::new();
-        for (i, val) in self.iter_enumerated() {
-            if condition(val) {
-                indices.push(i);
-            }
-        }
-        indices
-    }
-    fn index_mut(&mut self, a: I, b: I) -> (&mut T, &mut T) {
-        let [a, b] = self.as_mut_vec().get_disjoint_mut([a.index(), b.index()]).unwrap();
-        (a, b)
-    }
-    fn push_at(&mut self, id: I, value: T) {
-        debug_assert_eq!(self.next_idx(), id);
-        self.push(value);
     }
 }
 

@@ -6,7 +6,6 @@ use std::ffi::{CString, CStr};
 use bitflags::bitflags;
 use dusk_proc_macros::{ByteSwap, ByteSwapBitflags};
 use crate::index_vec::IndexVec;
-use crate::index_vec::IndexVecExt;
 
 use crate::driver::Driver;
 use crate::mir::FuncId;
