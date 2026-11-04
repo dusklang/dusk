@@ -11,7 +11,7 @@ use crate::index_vec::IndexVec;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
-use crate::mir::{Const, InstrId};
+use crate::mir::{self, Const, ValueKind};
 use crate::index_counter::{IndexCounter, ConcurrentIndexCounter};
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
@@ -23,7 +23,7 @@ use crate::error::Error;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
-use crate::interpreter::Value;
+use crate::interpreter;
 use crate::driver::DriverRwRef;
 
 use dusk_proc_macros::*;
@@ -639,7 +639,7 @@ pub struct GenericParamList {
     pub ranges: SmallVec<[SourceRange; 1]>,
 }
 
-pub type IntrinsicImpl = fn(&mut DriverRwRef, Vec<&Value>) -> Value;
+pub type IntrinsicImpl = fn(&mut DriverRwRef, Vec<&interpreter::Value>) -> interpreter::Value;
 
 pub struct Intrinsic {
     pub param_tys: SmallVec<[ExprId; 2]>,
@@ -1395,24 +1395,20 @@ impl Driver {
         }
     }
     pub fn get_range(&self, item: impl Into<ToSourceRange>) -> SourceRange {
-        match item.into() {
-            ToSourceRange::Item(item) => match item {
-                Item::Expr(expr) => ef!(expr.range),
-                Item::Decl(decl) => df!(decl.range),
-                Item::Attr(attr) => af!(attr.range),
-            }
-            ToSourceRange::Instr(_) => SourceRange::default(),
-            ToSourceRange::SourceRange(range) => range,
-        }
+        self.get_range_with_mir_ctx(item, None)
     }
-    pub fn get_range_with_mir_ctx(&self, item: impl Into<ToSourceRange>, source_ranges: &HashMap<InstrId, SourceRange>) -> SourceRange {
+    pub fn get_range_with_mir_ctx(&self, item: impl Into<ToSourceRange>, ctx: Option<mir::SourceRangeContext<'_>>) -> SourceRange {
         match item.into() {
             ToSourceRange::Item(item) => match item {
                 Item::Expr(expr) => ef!(expr.range),
                 Item::Decl(decl) => df!(decl.range),
                 Item::Attr(attr) => af!(attr.range),
             }
-            ToSourceRange::Instr(instr) => source_ranges[&instr],
+            ToSourceRange::Instr(instr) => ctx.map(|ctx| ctx.source_ranges[&instr]).unwrap_or_default(),
+            ToSourceRange::Value(value) => ctx.map(|ctx| match ctx.values[value].kind {
+                ValueKind::InstrResult(instr) => ctx.source_ranges[&instr],
+                ValueKind::Void => SourceRange::default(),
+            }).unwrap_or_default(),
             ToSourceRange::SourceRange(range) => range,
         }
     }

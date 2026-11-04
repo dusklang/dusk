@@ -81,3 +81,11 @@ fn test_add_f32(a: f32, b: f32, result: f32) {
 fn test_add_f64(a: f64, b: f64, result: f64) {
     core.assert(a + b == result)
 }
+
+// Test nested add expressions in the body of a function, which should get folded down.
+@compiler_test(success)
+fn test_nested_addition() {
+    core.assert(
+        (1 + 2) + (3 + 4) == (5 + 2) + 3
+    )
+}

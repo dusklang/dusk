@@ -14,7 +14,7 @@ use dashmap::{DashMap, DashSet};
 
 use crate::display_adapter;
 use crate::ast::{ExprId, DeclId, ItemId, Item};
-use crate::mir::InstrId;
+use crate::mir::{InstrId, ValueId};
 
 #[cfg(feature = "dls")]
 use url::Url;
@@ -475,6 +475,7 @@ impl SourceFile {
 pub enum ToSourceRange {
     Item(Item),
     Instr(InstrId),
+    Value(ValueId),
     SourceRange(SourceRange),
 }
 
@@ -499,6 +500,12 @@ impl From<DeclId> for ToSourceRange {
 impl From<InstrId> for ToSourceRange {
     fn from(item: InstrId) -> Self {
         ToSourceRange::Instr(item)
+    }
+}
+
+impl From<ValueId> for ToSourceRange {
+    fn from(value: ValueId) -> Self {
+        ToSourceRange::Value(value)
     }
 }
 

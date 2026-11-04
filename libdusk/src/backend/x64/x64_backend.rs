@@ -1,7 +1,7 @@
 use crate::driver::Driver;
 use crate::ast::LegacyIntrinsic;
 use crate::mir::cursor::Cursor;
-use crate::mir::{FuncId, InstrKind, Const};
+use crate::mir::{Const, FuncId, InstrKind, ValueKind};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
 use crate::backend::Backend;
@@ -72,10 +72,10 @@ impl Backend for X64Backend {
                     }
                 },
                 &InstrKind::Ret(value) => {
-                    let value = &func.instrs[value].kind;
+                    let ret_void = matches!(func.values[value].kind, ValueKind::Void);
                     // If this is the main function, we should call ExitProcess.
                     if is_main {
-                        assert_eq!(value, &InstrKind::Void);
+                        assert!(ret_void);
                         code.mov32_imm(Reg32::Ecx, 0);
                         code.call(exe.use_imported_symbol(exit_process));
                     } else {

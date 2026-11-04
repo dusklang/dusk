@@ -2,6 +2,7 @@ use crate::backend::arm64::*;
 use crate::backend::Backend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
+use crate::mir::ValueKind;
 use crate::mir::cursor::Cursor;
 use crate::mir::{Const, FuncId, InstrKind};
 use crate::linker::exe::*;
@@ -74,10 +75,10 @@ impl Backend for Arm64Backend {
                             }
                         },
                         &InstrKind::Ret(value) => {
-                            let value = &func.instrs[value].kind;
+                            let ret_void = matches!(func.values[value].kind, ValueKind::Void);
                             // If this is the main function, we should return 0 despite the high-level return type being `void`.
                             if is_main {
-                                assert_eq!(value, &InstrKind::Void);
+                                assert!(ret_void);
                                 // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
                                 code.movz64(Reg::R0, 0, 0);
                             } else {
@@ -143,10 +144,10 @@ impl Backend for Arm64Backend {
                             }
                         },
                         &InstrKind::Ret(value) => {
-                            let value = &func.instrs[value].kind;
+                            let ret_void = matches!(func.values[value].kind, ValueKind::Void);
                             // If this is the main function, we should call ExitProcess.
                             if is_main {
-                                assert_eq!(value, &InstrKind::Void);
+                                assert!(ret_void);
                                 // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
                                 code.movz64(Reg::R0, 0, 0);
                                 code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
@@ -198,10 +199,10 @@ impl Backend for Arm64Backend {
                             }
                         }
                         &InstrKind::Ret(value) => {
-                            let value = &func.instrs[value].kind;
+                            let ret_void = matches!(func.values[value].kind, ValueKind::Void);
                             // If this is the main function, we should call exit().
                             if is_main {
-                                assert_eq!(value, &InstrKind::Void);
+                                assert!(ret_void);
                                 // exit code
                                 code.movz64(Reg::R0, 7, 0);
                                 // syscall number
