@@ -22,7 +22,7 @@ use crate::index_vec::range_iter;
 use crate::target::Arch;
 use crate::ast::{CompilerTestCondition, EnumId, ExternFunctionRef, ExternModId, GenericParamId, LegacyIntrinsic, NewNamespaceId};
 use crate::dvm::{self, Call, DirectCall, MessageKind};
-use crate::mir::{BlockId, CompilerTestCase, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, Mir, StaticId, VOID_VALUE, ValueId};
+use crate::mir::{BlockId, CompilerTestCase, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, StaticId, VOID_VALUE, ValueId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -411,7 +411,7 @@ impl Value {
 pub struct StackFrame {
     func_ref: FunctionRef,
     block: BlockId,
-    pc: usize,
+    pc: InstrId,
     results: HashMap<ValueId, Value>,
     generic_ctx: HashMap<GenericParamId, Type>,
 }
@@ -436,7 +436,7 @@ impl StackFrame {
         for (arg, &param) in arguments.into_iter().zip(&block.params) {
             self.results.insert(param, arg);
         }
-        self.pc = 0;
+        self.pc = block.first_instr.unwrap();
     }
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
@@ -481,11 +481,6 @@ impl StackFrame {
 
     fn get_val_mut(&mut self, value: ValueId, _d: &Driver) -> &mut Value {
         self.results.entry(value).or_insert(Value::Nothing)
-    }
-
-    fn cur_instr(&self, mir: &Mir) -> InstrId {
-        let function = function_by_ref(mir, &self.func_ref);
-        function.blocks[self.block].instrs[self.pc]
     }
 }
 
@@ -770,6 +765,7 @@ impl Driver {
             );
         }
         let entry_block = &func.blocks[entry_block_id];
+        let pc = entry_block.first_instr.unwrap();
         for (arg, &param) in arguments.into_iter().zip(&entry_block.params) {
             results.insert(param, arg);
         }
@@ -783,7 +779,7 @@ impl Driver {
         StackFrame {
             func_ref,
             block: entry_block_id,
-            pc: 0,
+            pc,
             generic_ctx,
             results,
         }
@@ -1364,7 +1360,7 @@ impl DriverRwRef<'_> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last().unwrap();
-            let next_instr = frame.cur_instr(&self.read().mir);
+            let next_instr = frame.pc;
             let d = self.read();
             let func = function_by_ref(&d.mir, &frame.func_ref);
             match func.instrs[next_instr].kind.clone() {
@@ -1768,8 +1764,7 @@ impl DriverRwRef<'_> {
                 }
                 InstrKind::Load(location) => {
                     let frame = stack.last().unwrap();
-                    let instr = frame.cur_instr(&d.mir);
-                    let ty = func.type_of_instr(instr);
+                    let ty = func.type_of_instr(frame.pc);
                     let ty = frame.canonicalize_type(ty);
                     let size = self.read().size_of(&ty);
                     let frame = stack.last_mut().unwrap();
@@ -1943,10 +1938,14 @@ impl DriverRwRef<'_> {
 
         let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
-        let instr = frame.cur_instr(&self.read().mir);
-        let instr_result = function_by_ref(&self.read().mir, &frame.func_ref).instrs[instr].value;
+        let instr = frame.pc;
+        let d = self.read();
+        let func = function_by_ref(&d.mir, &frame.func_ref);
+        let next_instr = func.instr_nodes[instr].next.unwrap();
+        let instr_result = func.instrs[instr].value;
         *frame.get_val_mut(instr_result, &self.read()) = val;
-        frame.pc += 1;
+        drop(d);
+        frame.pc = next_instr;
         Ok(None)
     }
 }

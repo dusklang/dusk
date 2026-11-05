@@ -63,9 +63,17 @@ impl Instr {
 #[derive(Default, Debug, Clone)]
 pub struct Block {
     pub params: Vec<ValueId>,
-    pub instrs: Vec<InstrId>,
+    pub first_instr: Option<InstrId>,
+    pub last_instr: Option<InstrId>,
     pub prev: Option<BlockId>,
     pub next: Option<BlockId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstrNode {
+    pub block: Option<BlockId>,
+    pub prev: Option<InstrId>,
+    pub next: Option<InstrId>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -319,6 +327,7 @@ pub struct Function {
     pub last_block: BlockId,
     pub entry_block: BlockId,
     pub instrs: IndexVec<InstrId, Instr>,
+    pub instr_nodes: IndexVec<InstrId, InstrNode>,
     pub values: IndexVec<ValueId, Value>,
     pub source_ranges: HashMap<InstrId, SourceRange>,
     pub value_names: HashMap<ValueId, String>,
@@ -340,6 +349,7 @@ impl Default for Function {
             last_block: BlockId::new(0),
             entry_block: BlockId::new(0),
             instrs: Default::default(),
+            instr_nodes: Default::default(),
             values: Default::default(),
             source_ranges: Default::default(),
             value_names: Default::default(),
@@ -355,9 +365,10 @@ impl Default for Function {
 impl Driver {
     #[display_adapter]
     pub fn display_block(&self, b: &FunctionBuilder, block: BlockId, w: &mut Formatter) {
-        let block = &b.blocks[block];
-        for &id in &block.instrs {
-            writeln!(w, "    %instr{} = mir.{:?}", id.index(), b.instrs[id].kind)?;
+        let mut cursor = b.make_cursor();
+        cursor.goto_top(block);
+        while let Some(instr) = cursor.next_instr() {
+            writeln!(w, "    %instr{} = mir.{:?}", instr.index(), b.instrs[instr].kind)?;
         }
         Ok(())
     }
@@ -1439,7 +1450,9 @@ impl Driver {
         }
         writeln!(f, ":")?;
 
-        for &instr_id in &block.instrs {
+        let mut cursor = func.make_cursor();
+        cursor.goto_top(id);
+        while let Some(instr_id) = cursor.next_instr() {
             writeln!(f, "    {}", self.display_mir_instr(func, instr_id))?;
         }
         Ok(())
@@ -1520,6 +1533,7 @@ struct FunctionBuilder {
     last_block: BlockId,
     entry_block: BlockId,
     instrs: IndexVec<InstrId, Instr>,
+    instr_nodes: IndexVec<InstrId, InstrNode>,
     values: IndexVec<ValueId, Value>,
     source_ranges: HashMap<InstrId, SourceRange>,
     value_names: HashMap<ValueId, String>,
@@ -1567,8 +1581,10 @@ impl Driver {
         if b.end_block(bb).is_err() {
             panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.display_block(b, bb));
         }
-        let block = &b.blocks[bb];
-        let last_instr = &b.instrs[block.instrs.last().copied().unwrap()].kind;
+        let mut cursor = b.make_cursor();
+        cursor.goto_top(bb);
+        let terminator = cursor.terminator().unwrap();
+        let last_instr = &b.instrs[terminator].kind;
         assert!(
             matches!(last_instr, InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } | InstrKind::Ret { .. } | InstrKind::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
@@ -1608,6 +1624,7 @@ impl DriverRwRef<'_> {
             last_block: entry_block,
             entry_block,
             instrs: Default::default(),
+            instr_nodes: Default::default(),
             values,
             source_ranges: Default::default(),
             value_names,
@@ -1653,8 +1670,8 @@ impl DriverRwRef<'_> {
         };
         // Remove inactive blocks
         let mut cursor = b.make_cursor_mut();
-        while let Some(block) = cursor.next_block() {
-            if cursor.blocks[block].instrs.is_empty() {
+        while cursor.next_block().is_some() {
+            if cursor.next_instr().is_none() {
                 cursor.remove_block();
             }
         }
@@ -1667,6 +1684,7 @@ impl DriverRwRef<'_> {
             last_block: b.last_block,
             entry_block: b.entry_block,
             instrs: b.instrs,
+            instr_nodes: b.instr_nodes,
             values: b.values,
             source_ranges: b.source_ranges,
             value_names: b.value_names,
@@ -1722,9 +1740,13 @@ impl MirTransformer {
 
         let mut cursor = func.make_cursor_mut();
         while let Some(block_id) = cursor.next_block() {
-            let block = &mut cursor.blocks[block_id];
-            block.instrs.retain(|instr| !self.delete_list.contains(instr));
-            for &instr in &block.instrs {
+            while let Some(instr) = cursor.next_instr() {
+                if self.delete_list.contains(&instr) {
+                    cursor.remove_instr();
+                }
+            }
+            cursor.goto_top(block_id);
+            while let Some(instr) = cursor.next_instr() {
                 for &(old, new) in &self.ref_replace_list {
                     cursor.instrs[instr].kind.replace_value(old, new);
                 }
@@ -1742,12 +1764,12 @@ impl Driver {
     fn remove_redundant_loads(&self, func: &mut Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
         let mut transformer = MirTransformer::default();
-        for block in func.make_cursor().blocks_iter() {
-            for (i, &instr_id) in block.instrs.iter().enumerate() {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr_id) = cursor.next_instr() {
                 let instr = &func.instrs[instr_id].kind;
                 if let &InstrKind::Store { location, value } = instr
-                    && i + 1 < block.instrs.len() {
-                        let next_instr = block.instrs[i+1];
+                    && let Some(next_instr) = cursor.instr_nodes[instr_id].next {
                         let next_instr_value = func.instrs[next_instr].value;
                         if let InstrKind::Load(load_loc) = func.instrs[next_instr].kind
                             && load_loc == location {
@@ -1761,15 +1783,17 @@ impl Driver {
 
     fn remove_unused_allocas(&self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for block in func.make_cursor().blocks_iter() {
-            for &instr_id in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr_id) = cursor.next_instr() {
                 let instr_value = func.instrs[instr_id].value;
                 let instr = &func.instrs[instr_id].kind;
                 let mut potential_deletions = Vec::new();
                 if let InstrKind::Alloca(_) = instr {
                     let mut is_used = false;
-                    'check_uses: for other_block in func.make_cursor().blocks_iter() {
-                        for &other_instr_id in &other_block.instrs {
+                    let mut other_cursor = cursor.make_cursor();
+                    'check_uses: while other_cursor.next_block().is_some() {
+                        while let Some(other_instr_id) = other_cursor.next_instr() {
                             let other_instr = &func.instrs[other_instr_id].kind;
                             if other_instr.references_value(instr_value) {
                                 if let &InstrKind::Store { value, .. } = other_instr {
@@ -1802,14 +1826,16 @@ impl Driver {
 
     fn remove_unused_values(&self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for block in func.make_cursor().blocks_iter() {
-            for &instr_id in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr_id) = cursor.next_instr() {
                 let instr_value = func.instrs[instr_id].value;
                 let instr = &func.instrs[instr_id].kind;
                 if let InstrKind::Const(_) | InstrKind::Load(_) = instr {
                     let mut is_used = false;
-                    'check_uses: for other_block in func.make_cursor().blocks_iter() {
-                        for &other_instr_id in &other_block.instrs {
+                    let mut other_cursor = cursor.make_cursor();
+                    'check_uses: while other_cursor.next_block().is_some() {
+                        while let Some(other_instr_id) = other_cursor.next_instr() {
                             let other_instr = &func.instrs[other_instr_id].kind;
                             if other_instr.references_value(instr_value) {
                                 is_used = true;
@@ -1827,8 +1853,9 @@ impl Driver {
     }
 
     fn register_edges(&self, func: &Function, mut register_edge: impl FnMut(BlockId, BlockId)) {
-        for (id, block) in func.make_cursor().blocks_iter_enumerated() {
-            let terminator = *block.instrs.last().unwrap();
+        let mut cursor = func.make_cursor();
+        while let Some(id) = cursor.next_block() {
+            let terminator = cursor.terminator().unwrap();
             match &func.instrs[terminator].kind {
                 InstrKind::Jump(target) => register_edge(id, target.bb),
                 InstrKind::CondBr { true_target, false_target, .. } => {
@@ -1883,8 +1910,9 @@ impl Driver {
     }
 
     fn check_no_invalid_instructions(&self, func: &Function) {
-        for block in func.make_cursor().blocks_iter() {
-            for &instr in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr) = cursor.next_instr() {
                 if matches!(&func.instrs[instr].kind, InstrKind::Invalid) {
                     panic!("Found invalid instruction in function");
                 }
@@ -1898,10 +1926,13 @@ impl Driver {
         let mut delete_list = HashSet::new();
         let mut new_entry_block = None;
         let mut did_something = false;
+        let mut cursor = func.make_cursor();
         let mut process_block = |block_id: BlockId, block: &Block| {
-            if block.instrs.len() != 1 { return; }
+            let one_instr_in_block = block.last_instr == block.first_instr && block.last_instr.is_some();
+            if !one_instr_in_block { return; }
 
-            let terminal = *block.instrs.last().unwrap();
+            cursor.goto_top(block_id);
+            let terminal = cursor.terminator().unwrap();
             let terminal = &func.instrs[terminal].kind;
             // TODO: continue the transformation even if there are basic block arguments
             if let InstrKind::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
@@ -1948,9 +1979,8 @@ impl Driver {
             cursor.remove_block();
         }
         let mut cursor = func.make_cursor_mut();
-        while let Some(block_id) = cursor.next_block() {
-            let block = &cursor.blocks[block_id];
-            let terminal = *block.instrs.last().unwrap();
+        while cursor.next_block().is_some() {
+            let terminal = cursor.terminator().unwrap();
             let terminal = &mut cursor.instrs[terminal].kind;
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
@@ -1962,7 +1992,9 @@ impl Driver {
     fn traverse_descendants(&self, func: &Function, visited: &mut HashSet<BlockId>, block: BlockId) {
         if !visited.insert(block) { return; }
 
-        let terminal = *func.blocks[block].instrs.last().unwrap();
+        let mut cursor = func.make_cursor();
+        cursor.goto_top(block);
+        let terminal = cursor.terminator().unwrap();
         let terminal = &func.instrs[terminal].kind;
         match terminal {
             InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.bb),
@@ -1997,8 +2029,9 @@ impl Driver {
 
     fn remove_constant_branches(&self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for block in func.make_cursor().blocks_iter() {
-            if let Some(&terminal) = block.instrs.last() {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            if let Some(terminal) = cursor.terminator() {
                 match func.instrs[terminal].kind {
                     InstrKind::CondBr { condition, ref true_target, ref false_target } => {
                         match func.values[condition].kind {
@@ -2042,8 +2075,9 @@ impl Driver {
 
     fn remove_return_non_shared_void(&self, func: &mut Function) -> bool {
         let mut transformer = MirTransformer::default();
-        for block in func.make_cursor().blocks_iter() {
-            for &instr_id in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr_id) = cursor.next_instr() {
                 let instr = &func.instrs[instr_id].kind;
                 if let &InstrKind::Ret(ret_val) = instr
                     && *func.ty.return_ty == Type::Void && ret_val != VOID_VALUE {
@@ -2141,8 +2175,9 @@ impl DriverRwRef<'_> {
     fn eval_constants(&self, func: &mut Function, tp: &dyn TypeProvider) -> bool {
         let mut transformer = MirTransformer::default();
         let mut poison_list = Vec::new();
-        for block in func.make_cursor().blocks_iter() {
-            for &instr in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr) = cursor.next_instr() {
                 // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
                 // functions built. For example, in the MIR equivalent of 2 + 3 + 4, the current implementation would
                 // evaluate 2 + 3 as its own function, then 5 + 4 as another. We should put both operations in the same
@@ -2211,8 +2246,9 @@ impl DriverRwRef<'_> {
             }
         }
 
-        for block in func.make_cursor().blocks_iter() {
-            for &instr in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr) = cursor.next_instr() {
                 let instr = &func.instrs[instr].kind;
                 match instr {
                     InstrKind::Jump(target) => self.check_jump_target(func, target),
@@ -2234,8 +2270,9 @@ impl DriverRwRef<'_> {
 
     fn check_no_comptime_calls(&self, func: &Function) {
         let mut comptime_calls = Vec::new();
-        for block in func.make_cursor().blocks_iter() {
-            for &instr in &block.instrs {
+        let mut cursor = func.make_cursor();
+        while cursor.next_block().is_some() {
+            while let Some(instr) = cursor.next_instr() {
                 if let &InstrKind::Call { func: called_func, .. } = &func.instrs[instr].kind
                     && self.read().mir.function_sigs.pin().get(&called_func).unwrap().is_comptime {
                         comptime_calls.push((called_func, instr));
@@ -2367,10 +2404,9 @@ impl Driver {
     fn push_instr_and_get_id(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> (InstrId, ValueId) {
         let id = b.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
-        b.instrs.push_at(id, Instr::new(instr, value));
+        self.push_instr_impl(b, id, Instr::new(instr, value));
         let source_range = self.get_range_with_mir_ctx(item, get_mir_source_range_ctx!(b));
         b.source_ranges.insert(id, source_range);
-        b.blocks[b.current_block].instrs.push(id);
 
         (id, value)
     }
@@ -2378,14 +2414,27 @@ impl Driver {
     fn push_instr_with_name(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> ValueId {
         let id = b.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
-        b.instrs.push_at(id, Instr::new(instr, value));
+        self.push_instr_impl(b, id, Instr::new(instr, value));
         let source_range = self.get_range_with_mir_ctx(item, get_mir_source_range_ctx!(b));
         b.source_ranges.insert(id, source_range);
         let name = b.value_namespace.insert(name.into());
         b.value_names.insert(value, name);
-        b.blocks[b.current_block].instrs.push(id);
 
         value
+    }
+
+    fn push_instr_impl(&self, b: &mut FunctionBuilder, id: InstrId, instr: Instr) {
+        b.instrs.push_at(id, instr);
+        let current_block = &mut b.blocks[b.current_block];
+        let prev = current_block.last_instr;
+        b.instr_nodes.push_at(id, InstrNode { block: Some(b.current_block), prev, next: None });
+        current_block.last_instr = Some(id);
+        if current_block.first_instr.is_none() {
+            current_block.first_instr = Some(id);
+        }
+        if let Some(prev) = prev {
+            b.instr_nodes[prev].next = Some(id);
+        }
     }
 }
 

@@ -34,7 +34,9 @@ impl Backend for X64Backend {
         let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
         code.sub64_imm(Reg64::Rsp, 72);
-        for &instr in &func.blocks[func.entry_block].instrs {
+        let mut cursor = func.make_cursor();
+        cursor.goto_top(func.entry_block);
+        while let Some(instr) = cursor.next_instr() {
             match &func.instrs[instr].kind {
                 InstrKind::Const(konst) => {
                     match konst {
