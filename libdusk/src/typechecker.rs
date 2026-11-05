@@ -257,7 +257,7 @@ impl tir::AssignedDecl {
 }
 
 impl tir::CompilerTestAttribute {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, tp: &dyn TypeProvider) {
         for (&argument, &param_ty) in self.arguments.iter().zip(&self.parameter_tys) {
             let param_ty = tp.get_evaluated_type(param_ty).clone();
             if let Some(err) = driver.can_unify_to(tp, argument, &param_ty.clone().into()).err() {

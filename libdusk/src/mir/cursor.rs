@@ -86,9 +86,7 @@ pub trait Cursor<'func> {
 
     fn terminator(&self) -> Option<InstrId> {
         let mut cursor = self.make_cursor();
-        let Some(block) = self.cur_block() else {
-            return None;
-        };
+        let block = self.cur_block()?;
         cursor.goto_bottom(block);
         cursor.cur_instr()
     }

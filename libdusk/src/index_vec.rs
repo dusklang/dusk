@@ -237,7 +237,7 @@ impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
     type IntoIter = <&'a Vec<T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.raw).into_iter()
+        self.raw.iter()
     }
 }
 
@@ -247,7 +247,7 @@ impl<'a, I: Idx, T> IntoIterator for &'a mut IndexVec<I, T> {
     type IntoIter = <&'a mut Vec<T> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&mut self.raw).into_iter()
+        self.raw.iter_mut()
     }
 }
 

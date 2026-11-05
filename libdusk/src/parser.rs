@@ -1327,10 +1327,8 @@ impl Driver {
                 match df!(decl.ast) {
                     ast::Decl::Function { ref param_tys, .. } => {
                         for &attr in &attributes {
-                            if let Attribute::CompilerTest { ref arguments, .. } = af!(attr.ast) {
-                                if param_tys.len() != arguments.len() {
-                                    self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), af!(attr.range));
-                                }
+                            if let Attribute::CompilerTest { ref arguments, .. } = af!(attr.ast) && param_tys.len() != arguments.len() {
+                                self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), af!(attr.range));
                             }
                         }
                     },

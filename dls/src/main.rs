@@ -310,7 +310,7 @@ impl Server {
                     kind: MarkupKind::Markdown,
                     value: message,
                 }),
-                range: range,
+                range,
             }
         })
     }

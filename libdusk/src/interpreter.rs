@@ -28,7 +28,6 @@ use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
 use crate::driver::{DRIVER, Driver, DriverRwRef};
 use crate::mir::{FunctionRef, function_by_ref};
-use crate::type_provider::TypeProvider;
 #[cfg(target_arch="x86_64")]
 use crate::backend::x64::*;
 #[cfg(target_arch="aarch64")]
@@ -684,7 +683,7 @@ fn nearest_multiple_of_16(val: i32) -> i32 { ((val - 1) | 15) + 1 }
 fn nearest_multiple_of_8(val: i32) -> i32 { ((val - 1) | 7) + 1 }
 
 impl Driver {
-    pub fn value_to_const(&self, val: Value, ty: Type, tp: &dyn TypeProvider) -> Const {
+    pub fn value_to_const(&self, val: Value, ty: Type) -> Const {
         match ty {
             Type::Int { is_signed, .. } => {
                 let lit = val.as_big_int(is_signed);
@@ -726,7 +725,7 @@ impl Driver {
                     let ty = strukt.field_tys[i].clone();
                     let size = self.size_of(&ty);
                     let val = Value::from_bytes(&buf[offset..][..size]);
-                    let konst = self.value_to_const(val, ty.clone(), tp);
+                    let konst = self.value_to_const(val, ty.clone());
                     fields.push(konst);
                 }
                 Const::StructLit { fields, id: strukt.identity }
@@ -1926,7 +1925,7 @@ impl DriverRwRef<'_> {
                                 length => {
                                     Value::from_usize(lit.as_bytes().len())
                                 },
-                                data => Value::from_cstr(&lit),
+                                data => Value::from_cstr(lit),
                             }
                         },
                         pair => unimplemented!("unimplemented internal field access: {:?}", pair),

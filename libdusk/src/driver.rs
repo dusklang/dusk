@@ -82,7 +82,7 @@ impl DriverRwRef<'_> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
         let val = self.call(function_ref, Vec::new(), Vec::new())?;
-        Ok(self.read().value_to_const(val, tp.ty(expr).clone(), tp))
+        Ok(self.read().value_to_const(val, tp.ty(expr).clone()))
     }
 }
 

@@ -925,7 +925,7 @@ impl DriverRwRef<'_> {
                                 compiler_test_cases.push(
                                     CompilerTestCase {
                                         func: get,
-                                        condition: condition,
+                                        condition,
                                         arguments: arguments.iter().map(|&arg| self.eval_expr(arg, tp).unwrap_or(Const::Invalid)).collect(),
                                     }
                                 )
@@ -2141,7 +2141,7 @@ impl DriverRwRef<'_> {
                         poison_list.push(instr);
                         continue;
                     };
-                    let konst = self.read().value_to_const(result, ty, tp);
+                    let konst = self.read().value_to_const(result, ty);
                     transformer.replace_list.push((instr, InstrKind::Const(konst)));
                 }
             }
@@ -2514,13 +2514,11 @@ impl DriverRwRef<'_> {
 }
 
 impl FunctionCore {
-    #[allow(unused)]
     pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
         let block = &self.blocks[self.entry_block];
         block.params.iter().map(|&param| &self.values[param].ty)
     }
 
-    #[allow(unused)]
     pub fn num_parameters(&self) -> usize {
         self.parameter_tys().count()
     }
@@ -2529,13 +2527,11 @@ impl FunctionCore {
         &self.values[value].ty
     }
 
-    #[allow(unused)]
     pub fn type_of_instr(&self, instr: InstrId) -> &Type {
         let value = self.instrs[instr].value;
         &self.values[value].ty
     }
 
-    #[allow(unused)]
     fn push_param_on_block(&mut self, block_id: BlockId, ty: Type) -> ValueId {
         let block = &mut self.blocks[block_id];
         let next_index = block.params.len();
@@ -3187,8 +3183,7 @@ impl DriverRwRef<'_> {
                 let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx_id).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx_id).as_ref().expect("should always set pattern matching context on switch expr");
-                let mut scope_blocks = HashMap::<ImperScopeId, BlockId>::new();
-                self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx_id, pattern_matching_ctx, &mut scope_blocks);
+                self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx_id, pattern_matching_ctx);
 
                 self.read().start_bb(b, post_bb);
                 if pass_value_as_argument {
@@ -3339,7 +3334,7 @@ impl DriverRwRef<'_> {
         value
     }
 
-    fn handle_pattern_matching(&self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx_id: PatternMatchingContextId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>, scope_blocks: &mut HashMap<ImperScopeId, BlockId>) {
+    fn handle_pattern_matching(&self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx_id: PatternMatchingContextId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>) {
         match *node {
             SwitchDecisionNode::Branch { scrutinee: scrutinee_id, ref paths, ref default_path } => {
                 let begin_bb = b.current_block;
@@ -3381,12 +3376,12 @@ impl DriverRwRef<'_> {
 
                 for (mir_case, node) in mir_cases.iter().zip(nodes) {
                     self.read().start_bb(b, mir_case.target.bb);
-                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx_id, pattern_matching_ctx, scope_blocks);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx_id, pattern_matching_ctx);
                 }
 
                 self.read().start_bb(b, default_bb);
                 if let Some(default_path) = &default_path {
-                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx_id, pattern_matching_ctx, scope_blocks);
+                    self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx_id, pattern_matching_ctx);
                 } else {
                     // TODO: add unreachable instruction I guess?
                     self.read().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());

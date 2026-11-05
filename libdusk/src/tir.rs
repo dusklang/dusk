@@ -706,7 +706,7 @@ impl Driver {
         }
     }
 
-    fn build_tir_attr(&mut self, unit: &mut UnitItems, level: u32, id: AttrId) {
+    fn build_tir_attr(&self, unit: &mut UnitItems, level: u32, id: AttrId) {
         match af!(id.ast) {
             Attribute::CompilerTest { ref arguments, .. } => {
                 let Some(&target_decl) = self.ast.attr_targets.get(&id) else {
