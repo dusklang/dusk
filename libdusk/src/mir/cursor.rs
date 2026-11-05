@@ -202,30 +202,9 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
 impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
     fn remove_block(&mut self) {
         let block_id = self.cur_block().expect("not currently in a block");
-        assert!(block_id != self.core.first_block || block_id != self.core.last_block, "cannot remove only block in function");
-        assert!(block_id != self.core.entry_block, "cannot remove entry block");
+        let prev = self.core.prev_block(block_id);
 
-        let block = &mut self.core.blocks[block_id];
-        let prev = block.prev;
-        let next = block.next;
-        block.prev = None;
-        block.next = None;
-        if let Some(prev) = prev {
-            if self.core.last_block == block_id {
-                self.core.last_block = prev;
-            }
-            let prev = &mut self.core.blocks[prev];
-            debug_assert_eq!(prev.next, Some(block_id));
-            prev.next = next;
-        }
-        if let Some(next) = next {
-            if self.core.first_block == block_id {
-                self.core.first_block = next;
-            }
-            let next = &mut self.core.blocks[next];
-            debug_assert_eq!(next.prev, Some(block_id));
-            next.prev = prev;
-        }
+        self.core.remove_block(block_id);
 
         if let Some(prev) = prev {
             self.position = CursorPosition::After(prev);
@@ -236,37 +215,9 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
 
     fn remove_instr(&mut self) {
         let instr_id = self.cur_instr().expect("not currently on an instruction");
-        let instr = &mut self.core.instr_nodes[instr_id];
-        let block_id = instr.block.expect("instruction not part of a block");
-        let block = &mut self.core.blocks[block_id];
-
-        let first_instr = block.first_instr.expect("instruction is part of block with no first instruction");
-        let last_instr = block.last_instr.expect("instruction is part of block with no last instruction");
-
-        let prev = instr.prev;
-        let next = instr.next;
-
-        if last_instr == instr_id {
-            block.last_instr = prev;
-        }
-        if first_instr == instr_id {
-            block.first_instr = next;
-        }
-
-        instr.prev = None;
-        instr.next = None;
-        instr.block = None;
-        if let Some(prev) = prev {
-            let prev_node = &mut self.core.instr_nodes[prev];
-            debug_assert_eq!(prev_node.next, Some(instr_id));
-            prev_node.next = next;
-        }
-        if let Some(next) = next {
-            let next_node = &mut self.core.instr_nodes[next];
-            debug_assert_eq!(next_node.prev, Some(instr_id));
-            next_node.prev = prev;
-        }
-
+        let prev = self.core.prev_instr(instr_id);
+        let block_id = self.cur_block().unwrap();
+        self.core.remove_instr(instr_id);
         self.position = if let Some(prev) = prev {
             CursorPosition::At(prev)
         } else {

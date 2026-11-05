@@ -2331,44 +2331,24 @@ impl Driver {
         }
     }
 
-    fn push_instr(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> ValueId {
-        self.push_instr_and_get_id(b, instr, item).1
-    }
-
     fn push_instr_and_get_id(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> (InstrId, ValueId) {
         let id = b.core.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
-        self.push_instr_impl(b, id, Instr::new(instr, value));
         let source_range = self.get_range_with_mir_ctx(item, Some(&b.core));
-        b.core.source_ranges.insert(id, source_range);
+        b.push_instr(id, instr, value, source_range);
 
         (id, value)
     }
 
-    fn push_instr_with_name(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> ValueId {
-        let id = b.core.instrs.next_idx();
-        let value = self.get_result_value(b, id, &instr);
-        self.push_instr_impl(b, id, Instr::new(instr, value));
-        let source_range = self.get_range_with_mir_ctx(item, Some(&b.core));
-        b.core.source_ranges.insert(id, source_range);
-        let name = b.core.value_namespace.insert(name.into());
-        b.core.value_names.insert(value, name);
-
-        value
+    fn push_instr(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> ValueId {
+        self.push_instr_and_get_id(b, instr, item).1
     }
 
-    fn push_instr_impl(&self, b: &mut FunctionBuilder, id: InstrId, instr: Instr) {
-        b.core.instrs.push_at(id, instr);
-        let current_block = &mut b.core.blocks[b.current_block];
-        let prev = current_block.last_instr;
-        b.core.instr_nodes.push_at(id, InstrNode { block: Some(b.current_block), prev, next: None });
-        current_block.last_instr = Some(id);
-        if current_block.first_instr.is_none() {
-            current_block.first_instr = Some(id);
-        }
-        if let Some(prev) = prev {
-            b.core.instr_nodes[prev].next = Some(id);
-        }
+    fn push_instr_with_name(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> ValueId {
+        let value = self.push_instr(b, instr, item);
+        b.core.register_value_name(value, name);
+
+        value
     }
 }
 
@@ -2563,6 +2543,105 @@ impl FunctionCore {
         block.params.push(param);
         param
     }
+
+    fn push_instr(&mut self, block_id: BlockId, id: InstrId, instr: InstrKind, value: ValueId, source_range: SourceRange) {
+        let instr = Instr::new(instr, value);
+        self.instrs.push_at(id, instr);
+        let block = &mut self.blocks[block_id];
+        let prev = block.last_instr;
+        self.instr_nodes.push_at(id, InstrNode { block: Some(block_id), prev, next: None });
+        block.last_instr = Some(id);
+        if block.first_instr.is_none() {
+            block.first_instr = Some(id);
+        }
+        if let Some(prev) = prev {
+            self.instr_nodes[prev].next = Some(id);
+        }
+        self.source_ranges.insert(id, source_range);
+    }
+
+    fn register_value_name(&mut self, value: ValueId, name: impl Into<String>) {
+        let name = self.value_namespace.insert(name.into());
+        self.value_names.insert(value, name);
+    }
+
+    fn prev_block(&self, block_id: BlockId) -> Option<BlockId> {
+        self.blocks[block_id].prev
+    }
+
+    #[allow(unused)]
+    fn next_block(&self, block_id: BlockId) -> Option<BlockId> {
+        self.blocks[block_id].next
+    }
+
+    fn prev_instr(&self, instr_id: InstrId) -> Option<InstrId> {
+        self.instr_nodes[instr_id].prev
+    }
+
+    #[allow(unused)]
+    fn next_instr(&self, instr_id: InstrId) -> Option<InstrId> {
+        self.instr_nodes[instr_id].next
+    }
+
+    fn remove_block(&mut self, block_id: BlockId) {
+        assert!(block_id != self.first_block || block_id != self.last_block, "cannot remove only block in function");
+        assert!(block_id != self.entry_block, "cannot remove entry block");
+
+        let block = &mut self.blocks[block_id];
+        let prev = block.prev;
+        let next = block.next;
+        block.prev = None;
+        block.next = None;
+        if let Some(prev) = prev {
+            if self.last_block == block_id {
+                self.last_block = prev;
+            }
+            let prev = &mut self.blocks[prev];
+            debug_assert_eq!(prev.next, Some(block_id));
+            prev.next = next;
+        }
+        if let Some(next) = next {
+            if self.first_block == block_id {
+                self.first_block = next;
+            }
+            let next = &mut self.blocks[next];
+            debug_assert_eq!(next.prev, Some(block_id));
+            next.prev = prev;
+        }
+    }
+
+    fn remove_instr(&mut self, instr_id: InstrId) {
+        let instr = &mut self.instr_nodes[instr_id];
+        let block_id = instr.block.expect("instruction not part of a block");
+        let block = &mut self.blocks[block_id];
+
+        let first_instr = block.first_instr.expect("instruction is part of block with no first instruction");
+        let last_instr = block.last_instr.expect("instruction is part of block with no last instruction");
+
+        let prev = instr.prev;
+        let next = instr.next;
+
+        if last_instr == instr_id {
+            block.last_instr = prev;
+        }
+        if first_instr == instr_id {
+            block.first_instr = next;
+        }
+
+        instr.prev = None;
+        instr.next = None;
+        instr.block = None;
+        if let Some(prev) = prev {
+            let prev_node = &mut self.instr_nodes[prev];
+            debug_assert_eq!(prev_node.next, Some(instr_id));
+            prev_node.next = next;
+        }
+        if let Some(next) = next {
+            let next_node = &mut self.instr_nodes[next];
+            debug_assert_eq!(next_node.prev, Some(instr_id));
+            next_node.prev = prev;
+        }
+    }
 }
 
 impl FunctionBuilder {
@@ -2608,6 +2687,10 @@ impl FunctionBuilder {
         if let Some(block) = self.first_unended_block() {
             panic!("MIR: Block {} was not ended", block.index());
         }
+    }
+
+    fn push_instr(&mut self, id: InstrId, instr: InstrKind, value: ValueId, source_range: SourceRange) {
+        self.core.push_instr(self.current_block, id, instr, value, source_range)
     }
 
     fn push_param(&mut self, ty: Type) -> ValueId {
