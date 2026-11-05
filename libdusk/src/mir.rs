@@ -34,6 +34,7 @@ use dusk_proc_macros::*;
 
 // TODO: fix potential data race when adding values to hashmaps in MIR
 // TODO: make instructions a linked list just like blocks are, instead of each block individually owning a Vec of InstrIds. Then we can support inserting/deleting instructions by cursor as well.
+// TODO: store source ranges for ValueIds (particularly useful for parameters, in the future maybe constants, etc.)
 
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct StaticId = u32;);
@@ -61,6 +62,7 @@ impl Instr {
 
 #[derive(Default, Debug, Clone)]
 pub struct Block {
+    pub params: Vec<ValueId>,
     pub instrs: Vec<InstrId>,
     pub prev: Option<BlockId>,
     pub next: Option<BlockId>,
@@ -124,9 +126,6 @@ pub enum InstrKind {
     /// This variant currently exists (rather than just stuffing a constant `Type` into `InstrKind::Const()`) so that we
     /// know to lookup the generic param instead of preserving it as-is.
     GenericParam(GenericParamId),
-    /// Only valid at the beginning of a function, right after the void instruction
-    // TODO: Get rid of the type here! It is no longer required because instruction types are now stored on each Instr
-    Parameter(Type),
 }
 
 impl InstrKind {
@@ -158,7 +157,7 @@ impl InstrKind {
     pub fn referenced_values(&self) -> Vec<ValueId> {
         match *self {
             InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
-                | InstrKind::GenericParam(_) | InstrKind::Parameter(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => vec![],
+                | InstrKind::GenericParam(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => vec![],
             InstrKind::LogicalNot(value) | InstrKind::Reinterpret(value, _) | InstrKind::Truncate(value, _) | InstrKind::SignExtend(value, _)
                 | InstrKind::ZeroExtend(value, _) | InstrKind::FloatCast(value, _) | InstrKind::FloatToInt(value, _)
                 | InstrKind::IntToFloat(value, _) | InstrKind::Load(value) | InstrKind::Pointer { value, .. }
@@ -200,7 +199,7 @@ impl InstrKind {
         }
         match self {
             InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
-                | InstrKind::GenericParam(_) | InstrKind::Parameter(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => {},
+                | InstrKind::GenericParam(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => {},
             InstrKind::LogicalNot(value) | InstrKind::Reinterpret(value, _) | InstrKind::Truncate(value, _) | InstrKind::SignExtend(value, _)
                 | InstrKind::ZeroExtend(value, _) | InstrKind::FloatCast(value, _) | InstrKind::FloatToInt(value, _)
                 | InstrKind::IntToFloat(value, _) | InstrKind::Load(value) | InstrKind::Pointer { value, .. }
@@ -350,54 +349,6 @@ impl Default for Function {
             value_namespace: Default::default(),
             is_comptime: Default::default(),
         }
-    }
-}
-
-impl Function {
-    pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
-        self.ty.param_tys.iter()
-    }
-
-    pub fn num_parameters(&self) -> usize {
-        self.parameter_tys().count()
-    }
-
-    pub fn type_of_val(&self, value: ValueId) -> &Type {
-        &self.values[value].ty
-    }
-
-    pub fn type_of_instr(&self, instr: InstrId) -> &Type {
-        let value = self.instrs[instr].value;
-        &self.values[value].ty
-    }
-}
-
-impl FunctionBuilder {
-    #[allow(unused)]
-    pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
-        let block = &self.blocks[self.entry_block];
-        block.instrs.iter()
-            .filter_map(|&instr| {
-                match &self.instrs[instr].kind {
-                    InstrKind::Parameter(ty) => Some(ty),
-                    _ => None,
-                }
-            })
-    }
-
-    #[allow(unused)]
-    pub fn num_parameters(&self) -> usize {
-        self.parameter_tys().count()
-    }
-
-    pub fn type_of_val(&self, value: ValueId) -> &Type {
-        &self.values[value].ty
-    }
-
-    #[allow(unused)]
-    pub fn type_of_instr(&self, instr: InstrId) -> &Type {
-        let value = self.instrs[instr].value;
-        &self.values[value].ty
     }
 }
 
@@ -584,9 +535,13 @@ impl Value {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueKind {
     InstrResult(InstrId),
+    Parameter {
+        block: BlockId,
+        index: usize,
+    },
     Void,
 }
 
@@ -1222,7 +1177,7 @@ impl Driver {
     #[display_adapter]
     pub fn display_value_impl(&self, values: &IndexVec<ValueId, Value>, value_names: &HashMap<ValueId, String>, value: ValueId, f: &mut Formatter) {
         match values[value].kind {
-            ValueKind::InstrResult(_) => write!(f, "%{}", self.display_value_name_impl(value_names, value)),
+            ValueKind::InstrResult(_) | ValueKind::Parameter { .. } => write!(f, "%{}", self.display_value_name_impl(value_names, value)),
             ValueKind::Void => write!(f, "void"),
         }
     }
@@ -1447,9 +1402,23 @@ impl Driver {
             &InstrKind::GenericParam(param) => {
                 write!(f, "generic_param{}", param.index())?
             },
-            InstrKind::Parameter(_) => {},
             InstrKind::Invalid => write!(f, "invalid!")?,
         };
+        Ok(())
+    }
+
+    #[display_adapter]
+    pub fn display_param_list(&self, func: &Function, block: BlockId, f: &mut Formatter) {
+        let mut first = true;
+        for &param in &func.blocks[block].params {
+            if first {
+                first = false;
+            } else {
+                write!(f, ", ")?;
+            }
+            let param_ty = &func.values[param].ty;
+            write!(f, "%{}: {:?}", self.display_value_name(func, param), param_ty)?;
+        }
         Ok(())
     }
 
@@ -1457,35 +1426,12 @@ impl Driver {
     pub fn display_mir_block(&self, func: &Function, id: BlockId, f: &mut Formatter) {
         let block = &func.blocks[id];
         write!(f, "%bb{}", id.index())?;
-        if id != func.entry_block && matches!(block.instrs.first().map(|&instr| &func.instrs[instr].kind), Some(InstrKind::Parameter(_))) {
-            write!(f, "(")?;
-            let mut first = true;
-            for &instr in &block.instrs {
-                if let InstrKind::Parameter(ty) = &func.instrs[instr].kind {
-                    if first {
-                        first = false;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    let value = func.instrs[instr].value;
-                    write!(f, "%{}: {:?}", self.display_value_name(func, value), ty)?;
-                } else {
-                    break;
-                }
-            }
-            write!(f, ")")?;
+        if id != func.entry_block && !block.params.is_empty() {
+            write!(f, "({})", self.display_param_list(func, id))?;
         }
         writeln!(f, ":")?;
-        let mut start = 0;
-        for (i, &instr) in block.instrs.iter().enumerate() {
-            let instr = &func.instrs[instr].kind;
-            if !matches!(instr, InstrKind::Parameter(_)) {
-                start = i;
-                break;
-            }
-        }
 
-        for &instr_id in &block.instrs[start..] {
+        for &instr_id in &block.instrs {
             writeln!(f, "    {}", self.display_mir_instr(func, instr_id))?;
         }
         Ok(())
@@ -1511,23 +1457,7 @@ impl Driver {
             }
             write!(f, "|>")?;
         }
-        write!(f, "(")?;
-        let entry_block = &func.blocks[func.entry_block];
-        let mut first = true;
-        for &instr in &entry_block.instrs {
-            if let InstrKind::Parameter(ty) = &func.instrs[instr].kind {
-                if first {
-                    first = false;
-                } else {
-                    write!(f, ", ")?;
-                }
-                let value = func.instrs[instr].value;
-                write!(f, "%{}: {:?}", self.display_value_name(func, value), ty)?;
-            } else {
-                break;
-            }
-        }
-        writeln!(f, "): {:?} {{", func.ty.return_ty.as_ref())?;
+        writeln!(f, "({}): {:?} {{", self.display_param_list(func, func.entry_block), func.ty.return_ty.as_ref())?;
         write!(f, "{}", self.display_mir_block(func, func.entry_block))?;
         for block_id in func.make_cursor().block_ids_iter() {
             if block_id != func.entry_block {
@@ -1645,27 +1575,23 @@ impl DriverRwRef<'_> {
 
         let mut entry = Block::default();
         let mut value_namespace = ValueNamespace::default();
-        let mut instrs = IndexVec::new();
         let mut values = IndexVec::new();
         values.push_at(VOID_VALUE, Value::new(Type::Void, ValueKind::Void));
-        let mut source_ranges = HashMap::new();
         let mut value_names = HashMap::new();
-        for param in range_iter(params.clone()) {
+        let mut blocks = IndexVec::new();
+        let entry_block = blocks.next_idx();
+        for (param_index, param) in range_iter(params.clone()).enumerate() {
             let d = self.read();
             assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
             let ty = self.read().decl_type(param, tp);
-            let instr = InstrKind::Parameter(ty.clone());
-            let value = values.next_idx();
-            let id = instrs.push(Instr::new(instr, value));
-            values.push_at(value, Value::new(ty.clone(), ValueKind::InstrResult(id)));
+            let param_value = Value::new(ty, ValueKind::Parameter { block: entry_block, index: param_index });
+            let param_value = values.push(param_value);
             let range = df!(d, param.range);
             let name = value_namespace.insert(self.read().display_item(None, range).to_string());
-            source_ranges.insert(id, range);
-            value_names.insert(value, name);
-            entry.instrs.push(id);
+            value_names.insert(param_value, name);
+            entry.params.push(param_value);
         }
-        let mut blocks = IndexVec::new();
-        let entry_block = blocks.push(entry);
+        blocks.push_at(entry_block, entry);
         let mut b = FunctionBuilder {
             name,
             ty: func_ty,
@@ -1673,9 +1599,9 @@ impl DriverRwRef<'_> {
             first_block: entry_block,
             last_block: entry_block,
             entry_block,
-            instrs,
+            instrs: Default::default(),
             values,
-            source_ranges,
+            source_ranges: Default::default(),
             value_names,
             block_states: HashMap::new(),
             current_block: entry_block,
@@ -1899,14 +1825,7 @@ impl Driver {
         let mut new_entry_block = None;
         let mut did_something = false;
         for (block_id, block) in func.make_cursor().blocks_iter_enumerated() {
-            let mut num_parameters = 0;
-            for &instr in &block.instrs {
-                if !matches!(&func.instrs[instr].kind, InstrKind::Parameter(_)) {
-                    break;
-                }
-                num_parameters += 1;
-            }
-            if block.instrs.len() - num_parameters != 1 { continue; }
+            if block.instrs.len() != 1 { continue; }
 
             let terminal = *block.instrs.last().unwrap();
             let terminal = &func.instrs[terminal].kind;
@@ -1916,7 +1835,7 @@ impl Driver {
                 delete_list.insert(block_id);
                 did_something = true;
                 if block_id == func.entry_block {
-                    let parameters = block.instrs[..num_parameters].to_vec();
+                    let parameters = block.params.to_vec();
                     new_entry_block = Some((other.bb, parameters));
                 }
                 if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
@@ -1924,9 +1843,14 @@ impl Driver {
                 }
             }
         }
-        if let Some((new_entry_block, parameters)) = new_entry_block {
-            func.entry_block = new_entry_block;
-            func.blocks[new_entry_block].instrs.splice(0..0, parameters);
+        if let Some((new_entry_block_id, parameters)) = new_entry_block {
+            func.entry_block = new_entry_block_id;
+            for param in parameters {
+                let new_entry_block = &mut func.blocks[new_entry_block_id];
+                let new_param_index = new_entry_block.params.len();
+                new_entry_block.params.push(param);
+                func.values[param].kind = ValueKind::Parameter { block: new_entry_block_id, index: new_param_index };
+            }
         }
         let mut cursor = func.make_cursor_mut();
         for block in delete_list {
@@ -1999,7 +1923,7 @@ impl Driver {
                                     transformer.q_replace_instr(terminal, InstrKind::Jump(destination.clone()));
                                 }
                             },
-                            ValueKind::Void => {},
+                            ValueKind::Parameter { .. } | ValueKind::Void => {},
                         }
                     },
                     InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -2014,7 +1938,7 @@ impl Driver {
                                     transformer.q_replace_instr(terminal, InstrKind::Jump(destination.clone()));
                                 }
                             },
-                            ValueKind::Void => {},
+                            ValueKind::Parameter { .. } | ValueKind::Void => {},
                         }
 
                     },
@@ -2044,10 +1968,6 @@ impl Driver {
 #[derive(Default)]
 struct MirCopier {
     old_to_new_instrs: HashMap<InstrId, InstrId>,
-}
-
-struct BlockMetadata {
-    param_tys: SmallVec<[Type; 2]>,
 }
 
 impl DriverRwRef<'_> {
@@ -2081,6 +2001,7 @@ impl DriverRwRef<'_> {
     fn value_is_const(&self, func: &Function, value: ValueId) -> bool {
         match func.values[value].kind {
             ValueKind::Void => true,
+            ValueKind::Parameter { .. } => false,
             ValueKind::InstrResult(instr) => self.instruction_is_const(func, instr),
         }
     }
@@ -2095,7 +2016,8 @@ impl DriverRwRef<'_> {
                 let instr = self.copy_instruction_if_needed(b, copier, src_function, instr_id);
                 b.instrs[instr].value
             },
-            ValueKind::Void => VOID_VALUE
+            ValueKind::Void => VOID_VALUE,
+            ValueKind::Parameter { .. } => panic!("internal compiler error: attempt to copy non-constant parameter value to new function"),
         }
     }
 
@@ -2116,6 +2038,7 @@ impl DriverRwRef<'_> {
                         debug_assert_eq!(old, VOID_VALUE);
                         debug_assert_eq!(new, VOID_VALUE);
                     },
+                    ValueKind::Parameter { .. } => {},
                 }
             }
 
@@ -2179,50 +2102,39 @@ impl DriverRwRef<'_> {
         }
     }
 
-    fn check_jump_target(&self, func: &Function, target: &JumpTarget, block_metadata: &HashMap<BlockId, BlockMetadata>) {
-        // TODO: check that all jump targets include arguments for all parameters, and that their types match
-        let metadata = &block_metadata[&target.bb];
-        assert_eq!(target.arguments.len(), metadata.param_tys.len(), "number of basic block arguments != params");
+    fn check_jump_target(&self, func: &Function, target: &JumpTarget) {
+        let params = &func.blocks[target.bb].params;
+        assert_eq!(target.arguments.len(), params.len(), "number of basic block arguments != params");
 
-        for (&arg, param_ty) in target.arguments.iter().zip(&metadata.param_tys) {
+        for (&arg, &param) in target.arguments.iter().zip(params) {
             let arg_ty = &func.values[arg].ty;
+            let param_ty = &func.values[param].ty;
             assert!(arg_ty.trivially_convertible_to(param_ty), "basic block argument type doesn't match param type ({:?}, {:?})", arg_ty, param_ty);
         }
     }
 
     fn check_basic_block_params(&self, func: &Function) {
-        let mut block_metadata = HashMap::<BlockId, BlockMetadata>::new();
         for (bb, block) in func.make_cursor().blocks_iter_enumerated() {
-            let mut expecting_parameters = true;
-            let mut param_tys = SmallVec::new();
-            for &instr in &block.instrs {
-                let instr = &func.instrs[instr].kind;
-                if let InstrKind::Parameter(ty) = instr {
-                    assert!(expecting_parameters, "Parameter instruction in the middle of a block");
-                    param_tys.push(ty.clone());
-                } else {
-                    expecting_parameters = false;
-                }
+            for (param_index, &param) in block.params.iter().enumerate() {
+                let param_value = &func.values[param];
+                assert_eq!(param_value.kind, ValueKind::Parameter { block: bb, index: param_index }, "internal compiler error: parameter value is not a parameter");
             }
-
-            block_metadata.insert(bb, BlockMetadata { param_tys });
         }
 
-        for (bb, block) in func.make_cursor().blocks_iter_enumerated() {
-            let metadata = &block_metadata[&bb];
-            for &instr in &block.instrs[metadata.param_tys.len()..] {
+        for block in func.make_cursor().blocks_iter() {
+            for &instr in &block.instrs {
                 let instr = &func.instrs[instr].kind;
                 match instr {
-                    InstrKind::Jump(target) => self.check_jump_target(func, target, &block_metadata),
+                    InstrKind::Jump(target) => self.check_jump_target(func, target),
                     InstrKind::CondBr { true_target, false_target, .. } => {
-                        self.check_jump_target(func, true_target, &block_metadata);
-                        self.check_jump_target(func, false_target, &block_metadata);
+                        self.check_jump_target(func, true_target);
+                        self.check_jump_target(func, false_target);
                     },
                     InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                         for case in cases {
-                            self.check_jump_target(func, &case.target, &block_metadata);
+                            self.check_jump_target(func, &case.target);
                         }
-                        self.check_jump_target(func, catch_all_target, &block_metadata);
+                        self.check_jump_target(func, catch_all_target);
                     },
                     _ => {},
                 }
@@ -2332,7 +2244,6 @@ impl Driver {
             },
             &InstrKind::AddressOfStatic(statik) => self.mir.statics[statik].val.ty().mut_ptr(),
             InstrKind::Ret(_) | InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } => Type::Never,
-            InstrKind::Parameter(ty) => ty.clone(),
             &InstrKind::DirectFieldAccess { val, index } => {
                 let base_ty = b.type_of_val(val);
                 match base_ty {
@@ -2481,9 +2392,9 @@ impl DriverRwRef<'_> {
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
-                let instr_id = b.blocks[b.entry_block].instrs[index];
-                assert_matches!(b.instrs[instr_id].kind, InstrKind::Parameter(_));
-                DeclRef::Value(b.instrs[instr_id].value.direct())
+                let entry_block = &b.blocks[b.entry_block];
+                let param_value = entry_block.params[index];
+                DeclRef::Value(param_value.direct())
             },
             Decl::GenericParam(param) => {
                 DeclRef::Value(self.read().push_instr(b, InstrKind::GenericParam(param), expr).direct())
@@ -2558,8 +2469,54 @@ impl DriverRwRef<'_> {
     }
 }
 
+macro_rules! impl_function_methods {
+    ($($ty:ty$(,)?),*) => {
+        $(
+            impl $ty {
+                #[allow(unused)]
+                pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
+                    let block = &self.blocks[self.entry_block];
+                    block.params.iter().map(|&param| &self.values[param].ty)
+                }
+
+                #[allow(unused)]
+                pub fn num_parameters(&self) -> usize {
+                    self.parameter_tys().count()
+                }
+
+                pub fn type_of_val(&self, value: ValueId) -> &Type {
+                    &self.values[value].ty
+                }
+
+                #[allow(unused)]
+                pub fn type_of_instr(&self, instr: InstrId) -> &Type {
+                    let value = self.instrs[instr].value;
+                    &self.values[value].ty
+                }
+
+                #[allow(unused)]
+                fn push_param_on_block(&mut self, block_id: BlockId, ty: Type) -> ValueId {
+                    let block = &mut self.blocks[block_id];
+                    let next_index = block.params.len();
+                    let param = self.values.push(Value::new(ty, ValueKind::Parameter { block: block_id, index: next_index }));
+                    block.params.push(param);
+                    param
+                }
+            }
+        )*
+    }
+}
+
+impl FunctionBuilder {
+    fn push_param(&mut self, ty: Type) -> ValueId {
+        self.push_param_on_block(self.current_block, ty)
+    }
+}
+
+impl_function_methods!(FunctionBuilder, Function);
+
 impl DriverRwRef<'_> {
-    fn build_if_expr(&self, b: &mut FunctionBuilder, expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
+    fn build_if_expr(&self, b: &mut FunctionBuilder, _expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
         let true_bb = self.read().create_bb(b);
         let mut false_bb: BlockId = self.read().create_bb(b);
         if matches!(ctx.data, DataDest::Read) {
@@ -2612,7 +2569,7 @@ impl DriverRwRef<'_> {
             self.read().start_bb(b, post_bb);
             if pass_value_as_argument {
                 // TODO: this might be the wrong type if indirection != 0
-                self.read().push_instr(b, InstrKind::Parameter(ty.clone()), expr).direct()
+                b.push_param(ty).direct()
             } else if else_scope.is_none() {
                 self.handle_context(b, VOID_VALUE.direct(), ctx)
             } else {
@@ -2756,7 +2713,7 @@ impl DriverRwRef<'_> {
 
                                 self.read().start_bb(b, after_bb);
                                 if pass_value_as_argument {
-                                    self.read().push_instr(b, InstrKind::Parameter(ty), expr).direct()
+                                    b.push_param(ty).direct()
                                 } else {
                                     return VOID_VALUE.direct()
                                 }
@@ -2804,7 +2761,7 @@ impl DriverRwRef<'_> {
 
                                 self.read().start_bb(b, after_bb);
                                 if pass_value_as_argument {
-                                    self.read().push_instr(b, InstrKind::Parameter(ty), expr).direct()
+                                    b.push_param(ty).direct()
                                 } else {
                                     return VOID_VALUE.direct()
                                 }
@@ -3052,8 +3009,7 @@ impl DriverRwRef<'_> {
 
                 self.read().start_bb(b, post_bb);
                 if pass_value_as_argument {
-                    // TODO: this will be the wrong type if indirection != 0
-                    self.read().push_instr(b, InstrKind::Parameter(ty), expr).direct()
+                    b.push_param(ty).direct()
                 } else {
                     self.read().handle_control(b, VOID_VALUE.direct(), ctx.control)
                 }
@@ -3352,9 +3308,9 @@ impl DriverRwRef<'_> {
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let condition = self.read().handle_indirection(b, val);
-                match b.values[condition].kind {
+                let next_instr = match b.values[condition].kind {
                     ValueKind::InstrResult(condition_instr) => {
-                        let next_instr = if let &InstrKind::Const(Const::Bool(val)) = &b.instrs[condition_instr].kind {
+                        if let &InstrKind::Const(Const::Bool(val)) = &b.instrs[condition_instr].kind {
                             let bb = if val {
                                 true_bb
                             } else {
@@ -3363,16 +3319,17 @@ impl DriverRwRef<'_> {
                             InstrKind::Jump(bb.into())
                         } else {
                             InstrKind::CondBr { condition, true_target: true_bb.into(), false_target: false_bb.into() }
-                        };
-                        let val = self.read().push_instr(b, next_instr, condition).direct();
-                        self.read().end_current_bb(b);
-                        return val;
+                        }
                     },
+                    ValueKind::Parameter { .. } => InstrKind::CondBr { condition, true_target: true_bb.into(), false_target: false_bb.into() },
                     ValueKind::Void => {
                         panic!("internal compiler error: branching on void")
                     },
-                }
+                };
 
+                let val = self.read().push_instr(b, next_instr, condition).direct();
+                self.read().end_current_bb(b);
+                return val;
             },
             DataDest::Receive { value } => {
                 let location = self.read().handle_indirection(b, val.get_address());

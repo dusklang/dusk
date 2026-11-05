@@ -420,14 +420,23 @@ impl StackFrame {
     fn jump_to(&mut self, target: &JumpTarget, d: &Driver) {
         self.block = target.bb;
         let func = function_by_ref(&d.mir, &self.func_ref);
-        for (i, &arg) in target.arguments.iter().enumerate() {
-            let param_instr_id = func.blocks[target.bb].instrs[i];
-            let param = &func.instrs[param_instr_id].kind;
-            assert!(matches!(param, InstrKind::Parameter(_)));
-            let param_value = func.instrs[param_instr_id].value;
-            self.results.insert(param_value, self.results[&arg].clone());
+        let block = &func.blocks[target.bb];
+        assert_eq!(
+            target.arguments.len(), block.params.len(),
+            "internal compiler error: {} basic block arguments provided, but {} were expected.",
+            target.arguments.len(),
+            block.params.len(),
+        );
+
+        // Clone all arguments into a Vec before writing into parameters, just in case a block jumps back to itself with swapped parameters.
+        // Otherwise we would overwrite a parameter before we get a chance to read it, like so:
+        //     %bb0(%a: any, %b: any):
+        //         jump %bb0(%b, %a)
+        let arguments: Vec<_> = target.arguments.iter().map(|&arg| self.results[&arg].clone()).collect();
+        for (arg, &param) in arguments.into_iter().zip(&block.params) {
+            self.results.insert(param, arg);
         }
-        self.pc = target.arguments.len();
+        self.pc = 0;
     }
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
@@ -761,12 +770,8 @@ impl Driver {
             );
         }
         let entry_block = &func.blocks[entry_block_id];
-        for (i, arg) in arguments.into_iter().enumerate() {
-            let instr_id = entry_block.instrs[i];
-            let param = &func.instrs[instr_id].kind;
-            assert!(matches!(param, InstrKind::Parameter(_)));
-            let value = func.instrs[instr_id].value;
-            results.insert(value, arg);
+        for (arg, &param) in arguments.into_iter().zip(&entry_block.params) {
+            results.insert(param, arg);
         }
 
         let mut generic_ctx = HashMap::new();
@@ -778,7 +783,7 @@ impl Driver {
         StackFrame {
             func_ref,
             block: entry_block_id,
-            pc: num_parameters,
+            pc: 0,
             generic_ctx,
             results,
         }
@@ -1932,7 +1937,6 @@ impl DriverRwRef<'_> {
                         pair => unimplemented!("unimplemented internal field access: {:?}", pair),
                     }
                 },
-                InstrKind::Parameter(_) => panic!("Invalid parameter instruction in the middle of a function!"),
                 InstrKind::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),
             }
         };
