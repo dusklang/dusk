@@ -1159,18 +1159,26 @@ impl Driver {
     #[display_adapter('a)]
     pub fn display_item(&'a self, ctx: Option<SourceRangeContext<'a>>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range_with_mir_ctx(item, ctx);
-        if range.is_empty() {
-            let item = item.into();
-            match item {
+        let mut fallback = || {
+            match item.into() {
                 ToSourceRange::Item(item) => match item {
                     Item::Decl(decl) => write!(f, "{:?}", df!(decl.ast)),
                     Item::Expr(expr) => write!(f, "{:?}", ef!(expr.ast)),
                     Item::Attr(attr) => write!(f, "{:?}", af!(attr.ast)),
                 },
-                _ => write!(f, "{}", self.substring_from_range(range))
+                ToSourceRange::Instr(instr) => write!(f, "instr{}", instr.index()),
+                ToSourceRange::SourceRange(_) => write!(f, "empty_range"),
+                ToSourceRange::Value(value) => write!(f, "value{}", value.index()),
             }
+        };
+        if range.is_empty() {
+            fallback()
         } else {
-            write!(f, "{}", self.substring_from_range(range))
+            if let Some(substr) = self.substring_from_range(range) {
+                write!(f, "{}", substr)
+            } else {
+                fallback()
+            }
         }
     }
 

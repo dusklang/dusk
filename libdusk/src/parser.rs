@@ -99,7 +99,7 @@ impl Driver {
     }
 
     fn get_tok_begin_loc(&self, range: SourceRange) -> TokenBeginLoc {
-        let (_, line, offset) = self.lookup_file_line_and_offset(range.start);
+        let (_, line, offset) = self.lookup_file_line_and_offset(range.start).unwrap();
         TokenBeginLoc {
             line,
             offset,

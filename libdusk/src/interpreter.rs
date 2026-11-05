@@ -1647,7 +1647,7 @@ impl DriverRwRef<'_> {
 
                             let str = unsafe { CStr::from_ptr(ptr as _) };
                             let path = str.to_str().unwrap();
-                            let (file, _) = d.lookup_file(next_instr);
+                            let (file, _) = d.lookup_file(next_instr).unwrap();
                             let base_path = d.src_map.files[file].location.as_path();
                             let path = base_path
                                 .map(|base| base.parent().unwrap().join(path))

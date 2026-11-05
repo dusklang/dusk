@@ -275,11 +275,13 @@ impl SourceMap {
 }
 
 impl Driver {
-    pub fn lookup_file(&self, range: impl Into<ToSourceRange>) -> (SourceFileId, Range<usize>) {
+    pub fn lookup_file(&self, range: impl Into<ToSourceRange>) -> Option<(SourceFileId, Range<usize>)> {
         let range = self.get_range(range);
         assert!(!self.src_map.files.is_empty());
         if range.end == 0 {
-            return (SourceFileId::new(0), 0..0);
+            return Some((SourceFileId::new(0), 0..0));
+        } else if range == Default::default() {
+            return None;
         }
 
         let entry = self.src_map.files_by_byte_offset
@@ -294,12 +296,12 @@ impl Driver {
             panic!("invalid range");
         }
         let adjusted_range = (range.start - start)..(range.end - start);
-        (file_id, adjusted_range)
+        Some((file_id, adjusted_range))
     }
 
     /// For a source location, returns its file id, zero-based line number, and byte offset from the beginning of that line.
-    pub fn lookup_file_line_and_offset(&self, loc: usize) -> (SourceFileId, usize, usize) {
-        let (file_id, intrafile_range) = self.lookup_file(SourceRange { start: loc, end: loc });
+    pub fn lookup_file_line_and_offset(&self, loc: usize) -> Option<(SourceFileId, usize, usize)> {
+        let (file_id, intrafile_range) = self.lookup_file(SourceRange { start: loc, end: loc })?;
         let intrafile_loc = intrafile_range.start;
         let file = &self.src_map.files[file_id];
         let lines = file.lines.get().unwrap();
@@ -312,7 +314,7 @@ impl Driver {
         }
         let byte_offset = intrafile_loc - lines[line];
 
-        (file_id, line, byte_offset)
+        Some((file_id, line, byte_offset))
     }
 
     #[cfg(feature = "dls")]
@@ -323,15 +325,15 @@ impl Driver {
 }
 
 impl Driver {
-    pub fn substring_from_range(&self, range: SourceRange) -> &str {
-        let (file, range) = self.lookup_file(range);
-        self.src_map.files[file].substring_from_range(range)
+    pub fn substring_from_range(&self, range: SourceRange) -> Option<&str> {
+        let (file, range) = self.lookup_file(range)?;
+        Some(self.src_map.files[file].substring_from_range(range))
     }
 
     pub fn print_commentated_source_ranges(&self, ranges: &mut [CommentatedSourceRange]) {
         ranges.sort_by_key(|range| self.get_range(range.range).start);
         let ranges = &*ranges;
-        let mut line_range_groups: Vec<LineRangeGroup> = Vec::new();
+        let mut line_range_groups: Vec<Option<LineRangeGroup>> = Vec::new();
         fn num_digits(num: usize) -> usize {
             let mut digits = 0;
             let mut num = num;
@@ -350,14 +352,18 @@ impl Driver {
         }
         let mut max_line_number_digits = 0;
         for range in ranges {
-            let (file, range) = self.lookup_file(range.range);
-            let ranges = self.src_map.files[file].lines_in_range(range);
-            for range in &ranges {
-                max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
-            }
-            let group = LineRangeGroup {
-                ranges,
-                file
+            let group = if let Some((file, range)) = self.lookup_file(range.range) {
+                let ranges = self.src_map.files[file].lines_in_range(range);
+                for range in &ranges {
+                    max_line_number_digits = max(max_line_number_digits, num_digits(range.line + 1));
+                }
+                let group = LineRangeGroup {
+                    ranges,
+                    file
+                };
+                Some(group)
+            } else {
+                None
             };
             line_range_groups.push(group);
         }
@@ -375,7 +381,9 @@ impl Driver {
         // Pick an impossible file ID so it will be unequal to the file in the 0th group.
         let mut prev_file = SourceFileId::new(u32::MAX);
         for (i, range) in ranges.iter().enumerate() {
-            let group = &line_range_groups[i];
+            let Some(group) = &line_range_groups[i] else {
+                continue;
+            };
             if group.file != prev_file {
                 println!("  --> {}", self.src_map.files[group.file].location.display());
                 prev_file = group.file;
@@ -403,7 +411,7 @@ impl Driver {
                 print!(" {}", range.message);
             }
             println!();
-            match next_group {
+            match next_group.and_then(|group| group.as_ref()) {
                 Some(next_group) if next_group.file == group.file && next_group.ranges.first().unwrap().line <= group.ranges.last().unwrap().line + 2 => {
                     for i in (group.ranges.last().unwrap().line + 1)..next_group.ranges.first().unwrap().line {
                         print_source_line(next_group.file, i);

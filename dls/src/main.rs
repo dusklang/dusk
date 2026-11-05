@@ -249,7 +249,7 @@ impl Server {
         }
         hovered_item.map(|item| {
             let range = driver.read().ast.source_ranges[item];
-            let range = dusk_range_to_lsp_range(&driver.read(), range).1;
+            let range = dusk_range_to_lsp_range(&driver.read(), range).map(|(_, range)| range);
             let message = match driver.read().ast.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
@@ -310,14 +310,14 @@ impl Server {
                     kind: MarkupKind::Markdown,
                     value: message,
                 }),
-                range: Some(range),
+                range: range,
             }
         })
     }
 }
 
-fn dusk_pos_to_lsp_pos(driver: &Driver, pos: usize) -> (SourceFileId, Position) {
-    let (file, line, offset) = driver.lookup_file_line_and_offset(pos);
+fn dusk_pos_to_lsp_pos(driver: &Driver, pos: usize) -> Option<(SourceFileId, Position)> {
+    let (file, line, offset) = driver.lookup_file_line_and_offset(pos)?;
     let line_str = driver.src_map.files[file].substring_from_line(line);
     debug_assert!(line_str.is_char_boundary(offset));
     // TODO: This is kind of awful.
@@ -328,16 +328,16 @@ fn dusk_pos_to_lsp_pos(driver: &Driver, pos: usize) -> (SourceFileId, Position) 
         line: line as u32,
         character: character as u32
     };
-    (file, position)
+    Some((file, position))
 }
 
-fn dusk_range_to_lsp_range(driver: &Driver, range: SourceRange) -> (SourceFileId, Range) {
-    let (start_file, start) = dusk_pos_to_lsp_pos(driver, range.start);
-    let (end_file, end) = dusk_pos_to_lsp_pos(driver, range.end);
+fn dusk_range_to_lsp_range(driver: &Driver, range: SourceRange) -> Option<(SourceFileId, Range)> {
+    let (start_file, start) = dusk_pos_to_lsp_pos(driver, range.start)?;
+    let (end_file, end) = dusk_pos_to_lsp_pos(driver, range.end)?;
     debug_assert_eq!(start_file, end_file);
 
     let range = Range { start, end };
-    (start_file, range)
+    Some((start_file, range))
 }
 
 fn lsp_pos_to_dusk_pos(driver: &Driver, url: &Uri, pos: Position) -> usize {
@@ -388,22 +388,30 @@ impl Server {
             for diagnostic in diagnostics {
                 let (main, others) = diagnostic.ranges.split_first().unwrap();
                 let dusk_main_range = driver.get_range(main.range);
-                let (_, main_range) = dusk_range_to_lsp_range(driver, dusk_main_range);
+                let main_range = if let Some((_, main_range)) = dusk_range_to_lsp_range(driver, dusk_main_range) {
+                    main_range
+                } else {
+                    Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 0),
+                    }
+                };
                 let mut related_info = Vec::new();
                 for other_range in others {
                     let dusk_other_range = driver.get_range(other_range.range);
-                    let (file, range) = dusk_range_to_lsp_range(driver, dusk_other_range);
-                    let file = &driver.src_map.files[file];
-                    let uri = file.location.as_url().unwrap();
-                    let location = Location {
-                        uri: Uri::from_str(uri.as_str()).unwrap(),
-                        range,
-                    };
-                    let info = DiagnosticRelatedInformation {
-                        location,
-                        message: other_range.message.to_string(),
-                    };
-                    related_info.push(info);
+                    if let Some((file, range)) = dusk_range_to_lsp_range(driver, dusk_other_range) {
+                        let file = &driver.src_map.files[file];
+                        let uri = file.location.as_url().unwrap();
+                        let location = Location {
+                            uri: Uri::from_str(uri.as_str()).unwrap(),
+                            range,
+                        };
+                        let info = DiagnosticRelatedInformation {
+                            location,
+                            message: other_range.message.to_string(),
+                        };
+                        related_info.push(info);
+                    }
                 }
 
                 let severity = match diagnostic.kind {
