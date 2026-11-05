@@ -319,7 +319,7 @@ pub struct CompilerTestCase {
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
+pub struct FunctionCore {
     pub name: Option<Sym>,
     pub ty: FunctionType,
     pub blocks: IndexVec<BlockId, Block>,
@@ -331,15 +331,39 @@ pub struct Function {
     pub values: IndexVec<ValueId, Value>,
     pub source_ranges: HashMap<InstrId, SourceRange>,
     pub value_names: HashMap<ValueId, String>,
-    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
-    pub poisoned_instrs: HashSet<InstrId>,
+    pub value_namespace: ValueNamespace,
     pub decl: Option<DeclId>,
     pub generic_params: Range<GenericParamId>,
-    pub value_namespace: ValueNamespace,
     pub is_comptime: bool,
 }
 
-impl Default for Function {
+struct FunctionBuilder {
+    core: FunctionCore,
+
+    block_states: HashMap<BlockId, BlockState>,
+    current_block: BlockId,
+    stored_decl_locs: IndexVec<StoredDeclId, ValueId>,
+    loops: IndexVec<LoopId, LoopState>,
+    pattern_matching_scrutinees: HashMap<PatternMatchingContextId, HashMap<SwitchScrutineeValueId, IndirectValue>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Function {
+    pub core: FunctionCore,
+
+    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
+    pub poisoned_instrs: HashSet<InstrId>,
+}
+
+impl std::ops::Deref for Function {
+    type Target = FunctionCore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl Default for FunctionCore {
     fn default() -> Self {
         Self {
             name: Default::default(),
@@ -353,7 +377,6 @@ impl Default for Function {
             values: Default::default(),
             source_ranges: Default::default(),
             value_names: Default::default(),
-            poisoned_instrs: Default::default(),
             decl: Default::default(),
             generic_params: empty_range(),
             value_namespace: Default::default(),
@@ -368,7 +391,7 @@ impl Driver {
         let mut cursor = b.make_cursor();
         cursor.goto_top(block);
         while let Some(instr) = cursor.next_instr() {
-            writeln!(w, "    %instr{} = mir.{:?}", instr.index(), b.instrs[instr].kind)?;
+            writeln!(w, "    %instr{} = mir.{:?}", instr.index(), b.core.instrs[instr].kind)?;
         }
         Ok(())
     }
@@ -442,52 +465,6 @@ pub enum StartBlockError {
 pub enum EndBlockError {
     BlockEnded,
     BlockNotStarted,
-}
-
-impl FunctionBuilder {
-    fn get_block_state(&mut self, block: BlockId) -> &mut BlockState {
-        self.block_states.entry(block).or_insert(BlockState::Created)
-    }
-
-    pub fn start_block(&mut self, block: BlockId) -> Result<(), StartBlockError> {
-        let state = self.get_block_state(block);
-        match state {
-            BlockState::Created => {
-                *state = BlockState::Started;
-                Ok(())
-            }
-            BlockState::Started => Ok(()),
-            BlockState::Ended => Err(StartBlockError::BlockEnded),
-        }
-    }
-
-    pub fn end_block(&mut self, block: BlockId) -> Result<(), EndBlockError> {
-        let state = self.get_block_state(block);
-        match state {
-            BlockState::Created => Err(EndBlockError::BlockNotStarted),
-            BlockState::Started => {
-                *state = BlockState::Ended;
-                Ok(())
-            },
-            BlockState::Ended => Err(EndBlockError::BlockEnded),
-        }
-    }
-
-    pub fn first_unended_block(&self) -> Option<BlockId> {
-        for block_id in self.make_cursor().block_ids_iter() {
-            let state = &self.block_states[&block_id];
-            if !matches!(state, BlockState::Ended) {
-                return Some(block_id)
-            }
-        }
-        None
-    }
-
-    pub fn check_all_blocks_ended(&self) {
-        if let Some(block) = self.first_unended_block() {
-            panic!("MIR: Block {} was not ended", block.index());
-        }
-    }
 }
 
 impl Mir {
@@ -1087,12 +1064,6 @@ impl DriverRwRef<'_> {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct SourceRangeContext<'func> {
-    pub source_ranges: &'func HashMap<InstrId, SourceRange>,
-    pub values: &'func IndexVec<ValueId, Value>,
-}
-
 impl Driver {
     #[allow(dead_code)]
     #[display_adapter]
@@ -1168,7 +1139,7 @@ impl Driver {
 
     // TODO: Move this out of MIR
     #[display_adapter('a)]
-    pub fn display_item(&'a self, ctx: Option<SourceRangeContext<'a>>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
+    pub fn display_item(&'a self, ctx: Option<&'a FunctionCore>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range_with_mir_ctx(item, ctx);
         let mut fallback = || {
             match item.into() {
@@ -1214,7 +1185,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_value_from_builder(&self, b: &FunctionBuilder, value: ValueId, f: &mut Formatter) {
-        write!(f, "{}", self.display_value_impl(&b.values, &b.value_names, value))
+        write!(f, "{}", self.display_value_impl(&b.core.values, &b.core.value_names, value))
     }
 
     #[display_adapter]
@@ -1224,7 +1195,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_value_name_from_builder(&self, b: &FunctionBuilder, value: ValueId, f: &mut Formatter) {
-        write!(f, "{}", self.display_value_name_impl(&b.value_names, value))
+        write!(f, "{}", self.display_value_name_impl(&b.core.value_names, value))
     }
 
     #[display_adapter]
@@ -1525,26 +1496,6 @@ struct LoopState {
     continue_location_of_variable_to_increment: Option<ValueId>,
 }
 
-struct FunctionBuilder {
-    name: Option<Sym>,
-    ty: FunctionType,
-    blocks: IndexVec<BlockId, Block>,
-    first_block: BlockId,
-    last_block: BlockId,
-    entry_block: BlockId,
-    instrs: IndexVec<InstrId, Instr>,
-    instr_nodes: IndexVec<InstrId, InstrNode>,
-    values: IndexVec<ValueId, Value>,
-    source_ranges: HashMap<InstrId, SourceRange>,
-    value_names: HashMap<ValueId, String>,
-    block_states: HashMap<BlockId, BlockState>,
-    current_block: BlockId,
-    stored_decl_locs: IndexVec<StoredDeclId, ValueId>,
-    value_namespace: ValueNamespace,
-    loops: IndexVec<LoopId, LoopState>,
-    pattern_matching_scrutinees: HashMap<PatternMatchingContextId, HashMap<SwitchScrutineeValueId, IndirectValue>>,
-}
-
 #[derive(Debug)]
 enum DeclRef {
     LegacyIntrinsic { intrinsic: LegacyIntrinsic, ty: Type },
@@ -1560,16 +1511,16 @@ enum DeclRef {
 
 impl Driver {
     fn create_bb(&self, b: &mut FunctionBuilder) -> BlockId {
-        let prev = b.last_block;
+        let prev = b.core.last_block;
 
         let block = Block {
             prev: Some(prev),
             ..Default::default()
         };
-        let bb = b.blocks.push(block);
-        assert_eq!(b.blocks[prev].next, None);
-        b.blocks[prev].next = Some(bb);
-        b.last_block = bb;
+        let bb = b.core.blocks.push(block);
+        assert_eq!(b.core.blocks[prev].next, None);
+        b.core.blocks[prev].next = Some(bb);
+        b.core.last_block = bb;
         bb
     }
     fn start_bb(&self, b: &mut FunctionBuilder, block: BlockId) {
@@ -1579,12 +1530,12 @@ impl Driver {
     fn end_current_bb(&self, b: &mut FunctionBuilder) {
         let bb = b.current_block;
         if b.end_block(bb).is_err() {
-            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.name), self.display_block(b, bb));
+            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.core.name), self.display_block(b, bb));
         }
         let mut cursor = b.make_cursor();
         cursor.goto_top(bb);
         let terminator = cursor.terminator().unwrap();
-        let last_instr = &b.instrs[terminator].kind;
+        let last_instr = &b.core.instrs[terminator].kind;
         assert!(
             matches!(last_instr, InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } | InstrKind::Ret { .. } | InstrKind::LegacyIntrinsic { intr: LegacyIntrinsic::Panic, .. }),
             "expected terminal instruction before moving on to next block, found {:?}",
@@ -1616,7 +1567,7 @@ impl DriverRwRef<'_> {
             entry.params.push(param_value);
         }
         blocks.push_at(entry_block, entry);
-        let mut b = FunctionBuilder {
+        let core = FunctionCore {
             name,
             ty: func_ty,
             blocks,
@@ -1628,23 +1579,31 @@ impl DriverRwRef<'_> {
             values,
             source_ranges: Default::default(),
             value_names,
+            value_namespace,
+            generic_params,
+            decl: if let FunctionBody::Scope { decl, .. } = body {
+                Some(decl)
+            } else {
+                None
+            },
+            is_comptime,
+        };
+        let mut b = FunctionBuilder {
+            core,
             block_states: HashMap::new(),
             current_block: entry_block,
             stored_decl_locs: IndexVec::new(),
-            value_namespace,
             loops: Default::default(),
             pattern_matching_scrutinees: Default::default(),
         };
         self.read().start_bb(&mut b, entry_block);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
-        let decl = match body {
+        match body {
             FunctionBody::Expr(expr) => {
                 self.build_expr(&mut b, expr, ctx, tp);
-                None
             },
-            FunctionBody::Scope { scope, decl } => {
+            FunctionBody::Scope { scope, .. } => {
                 self.build_scope(&mut b, scope, ctx, tp);
-                Some(decl)
             },
             FunctionBody::ConstantInstruction { parent_func, instr } => {
                 let instruction = parent_func.instrs[instr].kind.clone();
@@ -1652,20 +1611,19 @@ impl DriverRwRef<'_> {
                     InstrKind::LegacyIntrinsic { .. } | InstrKind::Call { .. } => {
                         let mut copier = MirCopier::default();
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
-                        let value = b.instrs[result].value;
+                        let value = b.core.instrs[result].value;
                         self.read().push_instr(&mut b, InstrKind::Ret(value), result);
                         self.read().end_current_bb(&mut b);
                     },
                     InstrKind::DiscriminantAccess { .. } | InstrKind::SignExtend(_, _) | InstrKind::ZeroExtend(_, _) => {
                         let mut copier = MirCopier::default();
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
-                        let value = b.instrs[result].value;
+                        let value = b.core.instrs[result].value;
                         self.read().push_instr(&mut b, InstrKind::Ret(value), result);
                         self.read().end_current_bb(&mut b);
                     },
                     _ => unimplemented!("{:?}", instruction),
                 }
-                None
             },
         };
         // Remove inactive blocks
@@ -1677,22 +1635,8 @@ impl DriverRwRef<'_> {
         }
         b.check_all_blocks_ended();
         let mut function = Function {
-            name: b.name,
-            ty: b.ty,
-            blocks: b.blocks,
-            first_block: b.first_block,
-            last_block: b.last_block,
-            entry_block: b.entry_block,
-            instrs: b.instrs,
-            instr_nodes: b.instr_nodes,
-            values: b.values,
-            source_ranges: b.source_ranges,
-            value_names: b.value_names,
+            core: b.core,
             poisoned_instrs: Default::default(),
-            value_namespace: b.value_namespace,
-            decl,
-            generic_params,
-            is_comptime,
         };
 
         let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction { .. });
@@ -1748,12 +1692,12 @@ impl MirTransformer {
             cursor.goto_top(block_id);
             while let Some(instr) = cursor.next_instr() {
                 for &(old, new) in &self.ref_replace_list {
-                    cursor.instrs[instr].kind.replace_value(old, new);
+                    cursor.core.instrs[instr].kind.replace_value(old, new);
                 }
             }
         }
         for (id, new_instr) in self.replace_list {
-            cursor.instrs[id].kind = new_instr;
+            cursor.core.instrs[id].kind = new_instr;
         }
 
         true
@@ -1769,7 +1713,7 @@ impl Driver {
             while let Some(instr_id) = cursor.next_instr() {
                 let instr = &func.instrs[instr_id].kind;
                 if let &InstrKind::Store { location, value } = instr
-                    && let Some(next_instr) = cursor.instr_nodes[instr_id].next {
+                    && let Some(next_instr) = cursor.core.instr_nodes[instr_id].next {
                         let next_instr_value = func.instrs[next_instr].value;
                         if let InstrKind::Load(load_loc) = func.instrs[next_instr].kind
                             && load_loc == location {
@@ -1965,12 +1909,12 @@ impl Driver {
             }
         }
         if let Some((new_entry_block_id, parameters)) = new_entry_block {
-            func.entry_block = new_entry_block_id;
+            func.core.entry_block = new_entry_block_id;
             for param in parameters {
-                let new_entry_block = &mut func.blocks[new_entry_block_id];
+                let new_entry_block = &mut func.core.blocks[new_entry_block_id];
                 let new_param_index = new_entry_block.params.len();
                 new_entry_block.params.push(param);
-                func.values[param].kind = ValueKind::Parameter { block: new_entry_block_id, index: new_param_index };
+                func.core.values[param].kind = ValueKind::Parameter { block: new_entry_block_id, index: new_param_index };
             }
         }
         let mut cursor = func.make_cursor_mut();
@@ -1981,7 +1925,7 @@ impl Driver {
         let mut cursor = func.make_cursor_mut();
         while cursor.next_block().is_some() {
             let terminal = cursor.terminator().unwrap();
-            let terminal = &mut cursor.instrs[terminal].kind;
+            let terminal = &mut cursor.core.instrs[terminal].kind;
             for &(from, to) in &replace_list {
                 terminal.replace_bb(from, to);
             }
@@ -2138,7 +2082,7 @@ impl DriverRwRef<'_> {
         match src_function.values[value_id].kind {
             ValueKind::InstrResult(instr_id) => {
                 let instr = self.copy_instruction_if_needed(b, copier, src_function, instr_id);
-                b.instrs[instr].value
+                b.core.instrs[instr].value
             },
             ValueKind::Void => VOID_VALUE,
             ValueKind::Parameter { .. } => panic!("internal compiler error: attempt to copy non-constant parameter value to new function"),
@@ -2296,23 +2240,13 @@ impl DriverRwRef<'_> {
     }
 }
 
-macro_rules! get_mir_source_range_ctx {
-    ($src:expr) => {{
-        let src = &$src;
-        Some(SourceRangeContext {
-            source_ranges: &src.source_ranges,
-            values: &src.values,
-        })
-    }};
-}
-
 impl Driver {
     fn get_result_value(&self, b: &mut FunctionBuilder, id: InstrId, instr: &InstrKind) -> ValueId {
         let ty = self.generate_type_of(b, instr);
         if matches!(ty, Type::Void) {
             VOID_VALUE
         } else {
-            b.values.push(Value::new(ty, ValueKind::InstrResult(id)))
+            b.core.values.push(Value::new(ty, ValueKind::InstrResult(id)))
         }
     }
 
@@ -2325,7 +2259,7 @@ impl Driver {
             &InstrKind::StructLit { ref fields, id } => {
                 let field_tys = fields.iter()
                     .map(|&val| {
-                        b.values[val].ty.clone()
+                        b.core.values[val].ty.clone()
                     })
                     .collect();
                 Type::Struct(
@@ -2356,21 +2290,21 @@ impl Driver {
             | InstrKind::ZeroExtend(_, ty) | InstrKind::FloatCast(_, ty) | InstrKind::FloatToInt(_, ty)
             | InstrKind::IntToFloat(_, ty)
             => ty.clone(),
-            &InstrKind::Load(value) => match b.type_of_val(value) {
+            &InstrKind::Load(value) => match b.core.type_of_val(value) {
                 Type::Pointer(pointee) => pointee.ty.clone(),
                 _ => Type::Error,
             },
             &InstrKind::AddressOfStatic(statik) => self.mir.statics[statik].val.ty().mut_ptr(),
             InstrKind::Ret(_) | InstrKind::Jump(_) | InstrKind::CondBr { .. } | InstrKind::SwitchBr { .. } => Type::Never,
             &InstrKind::DirectFieldAccess { val, index } => {
-                let base_ty = b.type_of_val(val);
+                let base_ty = b.core.type_of_val(val);
                 match base_ty {
                     Type::Struct(strukt) => strukt.field_tys[index].clone(),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
             &InstrKind::IndirectFieldAccess { val, index } => {
-                let base_ty = b.type_of_val(val).deref().unwrap();
+                let base_ty = b.core.type_of_val(val).deref().unwrap();
                 match base_ty.ty {
                     Type::Struct(ref strukt) => strukt.field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
@@ -2387,7 +2321,7 @@ impl Driver {
                 )
             },
             &InstrKind::PayloadAccess { val, variant_index } => {
-                let base_ty = b.type_of_val(val);
+                let base_ty = b.core.type_of_val(val);
                 match base_ty {
                     &Type::Enum(EnumType { identity, .. }) => self.mir.enums.pin().get(&identity).unwrap().payload_tys[variant_index].clone(),
                     _ => panic!("Cannot directly access payload of non-enum type {:?}!", base_ty),
@@ -2402,38 +2336,38 @@ impl Driver {
     }
 
     fn push_instr_and_get_id(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> (InstrId, ValueId) {
-        let id = b.instrs.next_idx();
+        let id = b.core.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
         self.push_instr_impl(b, id, Instr::new(instr, value));
-        let source_range = self.get_range_with_mir_ctx(item, get_mir_source_range_ctx!(b));
-        b.source_ranges.insert(id, source_range);
+        let source_range = self.get_range_with_mir_ctx(item, Some(&b.core));
+        b.core.source_ranges.insert(id, source_range);
 
         (id, value)
     }
 
     fn push_instr_with_name(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> ValueId {
-        let id = b.instrs.next_idx();
+        let id = b.core.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
         self.push_instr_impl(b, id, Instr::new(instr, value));
-        let source_range = self.get_range_with_mir_ctx(item, get_mir_source_range_ctx!(b));
-        b.source_ranges.insert(id, source_range);
-        let name = b.value_namespace.insert(name.into());
-        b.value_names.insert(value, name);
+        let source_range = self.get_range_with_mir_ctx(item, Some(&b.core));
+        b.core.source_ranges.insert(id, source_range);
+        let name = b.core.value_namespace.insert(name.into());
+        b.core.value_names.insert(value, name);
 
         value
     }
 
     fn push_instr_impl(&self, b: &mut FunctionBuilder, id: InstrId, instr: Instr) {
-        b.instrs.push_at(id, instr);
-        let current_block = &mut b.blocks[b.current_block];
+        b.core.instrs.push_at(id, instr);
+        let current_block = &mut b.core.blocks[b.current_block];
         let prev = current_block.last_instr;
-        b.instr_nodes.push_at(id, InstrNode { block: Some(b.current_block), prev, next: None });
+        b.core.instr_nodes.push_at(id, InstrNode { block: Some(b.current_block), prev, next: None });
         current_block.last_instr = Some(id);
         if current_block.first_instr.is_none() {
             current_block.first_instr = Some(id);
         }
         if let Some(prev) = prev {
-            b.instr_nodes[prev].next = Some(id);
+            b.core.instr_nodes[prev].next = Some(id);
         }
     }
 }
@@ -2455,7 +2389,7 @@ impl DriverRwRef<'_> {
                         b.stored_decl_locs.push_at(id, location);
                         let val = self.build_expr(b, root_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let instr = self.read().handle_indirection(b, val);
-                        let range = self.read().get_range_with_mir_ctx(location, get_mir_source_range_ctx!(b)) + self.read().get_range_with_mir_ctx(instr, get_mir_source_range_ctx!(b));
+                        let range = self.read().get_range_with_mir_ctx(location, Some(&b.core)) + self.read().get_range_with_mir_ctx(instr, Some(&b.core));
                         self.read().push_instr(b, InstrKind::Store { location, value: instr }, range);
                     },
                     ast::Decl::Function { .. } => {},
@@ -2522,7 +2456,7 @@ impl DriverRwRef<'_> {
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
-                let entry_block = &b.blocks[b.entry_block];
+                let entry_block = &b.core.blocks[b.core.entry_block];
                 let param_value = entry_block.params[index];
                 DeclRef::Value(param_value.direct())
             },
@@ -2599,51 +2533,87 @@ impl DriverRwRef<'_> {
     }
 }
 
-macro_rules! impl_function_methods {
-    ($($ty:ty$(,)?),*) => {
-        $(
-            impl $ty {
-                #[allow(unused)]
-                pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
-                    let block = &self.blocks[self.entry_block];
-                    block.params.iter().map(|&param| &self.values[param].ty)
-                }
+impl FunctionCore {
+    #[allow(unused)]
+    pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
+        let block = &self.blocks[self.entry_block];
+        block.params.iter().map(|&param| &self.values[param].ty)
+    }
 
-                #[allow(unused)]
-                pub fn num_parameters(&self) -> usize {
-                    self.parameter_tys().count()
-                }
+    #[allow(unused)]
+    pub fn num_parameters(&self) -> usize {
+        self.parameter_tys().count()
+    }
 
-                pub fn type_of_val(&self, value: ValueId) -> &Type {
-                    &self.values[value].ty
-                }
+    pub fn type_of_val(&self, value: ValueId) -> &Type {
+        &self.values[value].ty
+    }
 
-                #[allow(unused)]
-                pub fn type_of_instr(&self, instr: InstrId) -> &Type {
-                    let value = self.instrs[instr].value;
-                    &self.values[value].ty
-                }
+    #[allow(unused)]
+    pub fn type_of_instr(&self, instr: InstrId) -> &Type {
+        let value = self.instrs[instr].value;
+        &self.values[value].ty
+    }
 
-                #[allow(unused)]
-                fn push_param_on_block(&mut self, block_id: BlockId, ty: Type) -> ValueId {
-                    let block = &mut self.blocks[block_id];
-                    let next_index = block.params.len();
-                    let param = self.values.push(Value::new(ty, ValueKind::Parameter { block: block_id, index: next_index }));
-                    block.params.push(param);
-                    param
-                }
-            }
-        )*
+    #[allow(unused)]
+    fn push_param_on_block(&mut self, block_id: BlockId, ty: Type) -> ValueId {
+        let block = &mut self.blocks[block_id];
+        let next_index = block.params.len();
+        let param = self.values.push(Value::new(ty, ValueKind::Parameter { block: block_id, index: next_index }));
+        block.params.push(param);
+        param
     }
 }
 
 impl FunctionBuilder {
+    fn get_block_state(&mut self, block: BlockId) -> &mut BlockState {
+        self.block_states.entry(block).or_insert(BlockState::Created)
+    }
+
+    pub fn start_block(&mut self, block: BlockId) -> Result<(), StartBlockError> {
+        let state = self.get_block_state(block);
+        match state {
+            BlockState::Created => {
+                *state = BlockState::Started;
+                Ok(())
+            }
+            BlockState::Started => Ok(()),
+            BlockState::Ended => Err(StartBlockError::BlockEnded),
+        }
+    }
+
+    pub fn end_block(&mut self, block: BlockId) -> Result<(), EndBlockError> {
+        let state = self.get_block_state(block);
+        match state {
+            BlockState::Created => Err(EndBlockError::BlockNotStarted),
+            BlockState::Started => {
+                *state = BlockState::Ended;
+                Ok(())
+            },
+            BlockState::Ended => Err(EndBlockError::BlockEnded),
+        }
+    }
+
+    pub fn first_unended_block(&self) -> Option<BlockId> {
+        for block_id in self.make_cursor().block_ids_iter() {
+            let state = &self.block_states[&block_id];
+            if !matches!(state, BlockState::Ended) {
+                return Some(block_id)
+            }
+        }
+        None
+    }
+
+    pub fn check_all_blocks_ended(&self) {
+        if let Some(block) = self.first_unended_block() {
+            panic!("MIR: Block {} was not ended", block.index());
+        }
+    }
+
     fn push_param(&mut self, ty: Type) -> ValueId {
-        self.push_param_on_block(self.current_block, ty)
+        self.core.push_param_on_block(self.current_block, ty)
     }
 }
-
-impl_function_methods!(FunctionBuilder, Function);
 
 impl DriverRwRef<'_> {
     fn build_if_expr(&self, b: &mut FunctionBuilder, _expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
@@ -3187,7 +3157,7 @@ impl DriverRwRef<'_> {
                 b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
                 let val = self.build_expr(b, lower_bound, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 let instr = self.read().handle_indirection(b, val);
-                let range = self.read().get_range_with_mir_ctx(binding_location, get_mir_source_range_ctx!(b)) + self.read().get_range_with_mir_ctx(instr, get_mir_source_range_ctx!(b));
+                let range = self.read().get_range_with_mir_ctx(binding_location, Some(&b.core)) + self.read().get_range_with_mir_ctx(instr, Some(&b.core));
                 self.read().push_instr(b, InstrKind::Store { location: binding_location, value: instr }, range);
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.read().handle_indirection(b, upper_bound);
@@ -3295,7 +3265,7 @@ impl DriverRwRef<'_> {
                 let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, pattern_matching_ctx_id);
                 // TODO: support pattern matching of pointers
                 let scrutinee = self.read().handle_indirection(b, scrutinee_val);
-                let scrutinee_ty = b.type_of_val(scrutinee).clone();
+                let scrutinee_ty = b.core.type_of_val(scrutinee).clone();
 
                 let mut discriminant_enum_ty = None;
                 let discriminant: ValueId = match scrutinee_ty {
@@ -3371,7 +3341,7 @@ impl Driver {
                 val.indirection -= 1;
             }
         } else if val.indirection < 0 {
-            let mut ty = b.type_of_val(val.value).clone();
+            let mut ty = b.core.type_of_val(val.value).clone();
             while val.indirection < 0 {
                 let location = self.push_instr(b, InstrKind::Alloca(ty.clone()), val.value);
                 self.push_instr(b, InstrKind::Store { location, value: val.value }, val.value);
@@ -3385,7 +3355,7 @@ impl Driver {
     }
 
     fn increment_variable(&self, b: &mut FunctionBuilder, location: ValueId) {
-        let ty = b.type_of_val(location).deref().unwrap().clone().ty;
+        let ty = b.core.type_of_val(location).deref().unwrap().clone().ty;
         let loaded = self.push_instr(b, InstrKind::Load(location), location);
         let one = self.push_instr(b, InstrKind::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
         let value = self.push_instr(b, InstrKind::LegacyIntrinsic { arguments: smallvec![loaded, one], ty, intr: LegacyIntrinsic::Add }, location);
@@ -3438,9 +3408,9 @@ impl DriverRwRef<'_> {
             },
             DataDest::Branch(true_bb, false_bb) => {
                 let condition = self.read().handle_indirection(b, val);
-                let next_instr = match b.values[condition].kind {
+                let next_instr = match b.core.values[condition].kind {
                     ValueKind::InstrResult(condition_instr) => {
-                        if let &InstrKind::Const(Const::Bool(val)) = &b.instrs[condition_instr].kind {
+                        if let &InstrKind::Const(Const::Bool(val)) = &b.core.instrs[condition_instr].kind {
                             let bb = if val {
                                 true_bb
                             } else {
@@ -3463,7 +3433,7 @@ impl DriverRwRef<'_> {
             },
             DataDest::Receive { value } => {
                 let location = self.read().handle_indirection(b, val.get_address());
-                let range = self.read().get_range_with_mir_ctx(location, get_mir_source_range_ctx!(b)) + self.read().get_range_with_mir_ctx(value, get_mir_source_range_ctx!(b));
+                let range = self.read().get_range_with_mir_ctx(location, Some(&b.core)) + self.read().get_range_with_mir_ctx(value, Some(&b.core));
                 self.read().push_instr(b, InstrKind::Store { location, value }, range);
             },
             DataDest::Void => {},

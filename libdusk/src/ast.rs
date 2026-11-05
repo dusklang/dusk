@@ -1397,7 +1397,7 @@ impl Driver {
     pub fn get_range(&self, item: impl Into<ToSourceRange>) -> SourceRange {
         self.get_range_with_mir_ctx(item, None)
     }
-    pub fn get_range_with_mir_ctx(&self, item: impl Into<ToSourceRange>, ctx: Option<mir::SourceRangeContext<'_>>) -> SourceRange {
+    pub fn get_range_with_mir_ctx(&self, item: impl Into<ToSourceRange>, ctx: Option<&mir::FunctionCore>) -> SourceRange {
         match item.into() {
             ToSourceRange::Item(item) => match item {
                 Item::Expr(expr) => ef!(expr.range),

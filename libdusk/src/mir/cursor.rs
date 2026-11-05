@@ -1,26 +1,16 @@
 use crate::index_vec::*;
 
-use crate::mir::{Block, BlockId, Function, FunctionBuilder, Instr, InstrId, InstrNode};
+use crate::mir::{Block, BlockId, Function, FunctionBuilder, FunctionCore, InstrId, InstrNode};
 
 // This pattern is heavily inspired by Cranelift
 #[derive(Copy, Clone)]
 pub struct FuncCursor<'func> {
-    pub blocks: &'func IndexVec<BlockId, Block>,
-    pub first_block: &'func BlockId,
-    pub last_block: &'func BlockId,
-    pub entry_block: &'func BlockId,
-    pub instrs: &'func IndexVec<InstrId, Instr>,
-    pub instr_nodes: &'func IndexVec<InstrId, InstrNode>,
+    pub core: &'func FunctionCore,
     pub position: CursorPosition,
 }
 
 pub struct FuncCursorMut<'func> {
-    pub blocks: &'func mut IndexVec<BlockId, Block>,
-    pub first_block: &'func mut BlockId,
-    pub last_block: &'func mut BlockId,
-    pub entry_block: &'func mut BlockId,
-    pub instrs: &'func mut IndexVec<InstrId, Instr>,
-    pub instr_nodes: &'func mut IndexVec<InstrId, InstrNode>,
+    pub core: &'func mut FunctionCore,
     pub position: CursorPosition,
 }
 
@@ -163,31 +153,26 @@ impl<'func> Cursor<'func> for FuncCursor<'func> {
         self.position = position;
     }
     fn entry_block(&self) -> BlockId {
-        *self.entry_block
+        self.core.entry_block
     }
     fn first_block(&self) -> BlockId {
-        *self.first_block
+        self.core.first_block
     }
     fn last_block(&self) -> BlockId {
-        *self.last_block
+        self.core.last_block
     }
     fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
-        self.blocks
+        &self.core.blocks
     }
     fn instr_nodes<'a>(&'a self) -> &'a IndexVec<InstrId, InstrNode> where 'func: 'a {
-        self.instr_nodes
+        &self.core.instr_nodes
     }
 }
 
 impl<'func> Cursor<'func> for FuncCursorMut<'func> {
     fn make_cursor<'a>(&'a self) -> FuncCursor<'a> where 'func: 'a {
         FuncCursor {
-            blocks: self.blocks,
-            first_block: self.first_block,
-            last_block: self.last_block,
-            entry_block: self.entry_block,
-            instrs: self.instrs,
-            instr_nodes: self.instr_nodes,
+            core: self.core,
             position: CursorPosition::None,
         }
     }
@@ -198,46 +183,46 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
         self.position = position;
     }
     fn entry_block(&self) -> BlockId {
-        *self.entry_block
+        self.core.entry_block
     }
     fn first_block(&self) -> BlockId {
-        *self.first_block
+        self.core.first_block
     }
     fn last_block(&self) -> BlockId {
-        *self.last_block
+        self.core.last_block
     }
     fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
-        self.blocks
+        &self.core.blocks
     }
     fn instr_nodes<'a>(&'a self) -> &'a IndexVec<InstrId, InstrNode> where 'func: 'a {
-        self.instr_nodes
+        &self.core.instr_nodes
     }
 }
 
 impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
     fn remove_block(&mut self) {
         let block_id = self.cur_block().expect("not currently in a block");
-        assert!(block_id != *self.first_block || block_id != *self.last_block, "cannot remove only block in function");
-        assert!(block_id != *self.entry_block, "cannot remove entry block");
+        assert!(block_id != self.core.first_block || block_id != self.core.last_block, "cannot remove only block in function");
+        assert!(block_id != self.core.entry_block, "cannot remove entry block");
 
-        let block = &mut self.blocks[block_id];
+        let block = &mut self.core.blocks[block_id];
         let prev = block.prev;
         let next = block.next;
         block.prev = None;
         block.next = None;
         if let Some(prev) = prev {
-            if *self.last_block == block_id {
-                *self.last_block = prev;
+            if self.core.last_block == block_id {
+                self.core.last_block = prev;
             }
-            let prev = &mut self.blocks[prev];
+            let prev = &mut self.core.blocks[prev];
             debug_assert_eq!(prev.next, Some(block_id));
             prev.next = next;
         }
         if let Some(next) = next {
-            if *self.first_block == block_id {
-                *self.first_block = next;
+            if self.core.first_block == block_id {
+                self.core.first_block = next;
             }
-            let next = &mut self.blocks[next];
+            let next = &mut self.core.blocks[next];
             debug_assert_eq!(next.prev, Some(block_id));
             next.prev = prev;
         }
@@ -251,9 +236,9 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
 
     fn remove_instr(&mut self) {
         let instr_id = self.cur_instr().expect("not currently on an instruction");
-        let instr = &mut self.instr_nodes[instr_id];
+        let instr = &mut self.core.instr_nodes[instr_id];
         let block_id = instr.block.expect("instruction not part of a block");
-        let block = &mut self.blocks[block_id];
+        let block = &mut self.core.blocks[block_id];
 
         let first_instr = block.first_instr.expect("instruction is part of block with no first instruction");
         let last_instr = block.last_instr.expect("instruction is part of block with no last instruction");
@@ -272,12 +257,12 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
         instr.next = None;
         instr.block = None;
         if let Some(prev) = prev {
-            let prev_node = &mut self.instr_nodes[prev];
+            let prev_node = &mut self.core.instr_nodes[prev];
             debug_assert_eq!(prev_node.next, Some(instr_id));
             prev_node.next = next;
         }
         if let Some(next) = next {
-            let next_node = &mut self.instr_nodes[next];
+            let next_node = &mut self.core.instr_nodes[next];
             debug_assert_eq!(next_node.prev, Some(instr_id));
             next_node.prev = prev;
         }
@@ -291,12 +276,7 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
 
     fn make_cursor_mut<'a>(&'a mut self) -> FuncCursorMut<'a> where 'func: 'a {
         FuncCursorMut {
-            blocks: self.blocks,
-            first_block: self.first_block,
-            last_block: self.last_block,
-            entry_block: self.entry_block,
-            instrs: self.instrs,
-            instr_nodes: self.instr_nodes,
+            core: self.core,
             position: CursorPosition::None,
         }
     }
@@ -305,24 +285,14 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
 impl Function {
     pub fn make_cursor(&self) -> FuncCursor<'_> {
         FuncCursor {
-            blocks: &self.blocks,
-            first_block: &self.first_block,
-            last_block: &self.last_block,
-            entry_block: &self.entry_block,
-            instrs: &self.instrs,
-            instr_nodes: &self.instr_nodes,
+            core: &self.core,
             position: CursorPosition::None,
         }
     }
 
     pub fn make_cursor_mut(&mut self) -> FuncCursorMut<'_> {
         FuncCursorMut {
-            blocks: &mut self.blocks,
-            first_block: &mut self.first_block,
-            last_block: &mut self.last_block,
-            entry_block: &mut self.entry_block,
-            instrs: &mut self.instrs,
-            instr_nodes: &mut self.instr_nodes,
+            core: &mut self.core,
             position: CursorPosition::None,
         }
     }
@@ -331,24 +301,14 @@ impl Function {
 impl FunctionBuilder {
     pub fn make_cursor(&self) -> FuncCursor<'_> {
         FuncCursor {
-            blocks: &self.blocks,
-            first_block: &self.first_block,
-            last_block: &self.last_block,
-            entry_block: &self.entry_block,
-            instrs: &self.instrs,
-            instr_nodes: &self.instr_nodes,
+            core: &self.core,
             position: CursorPosition::None,
         }
     }
 
     pub fn make_cursor_mut(&mut self) -> FuncCursorMut<'_> {
         FuncCursorMut {
-            blocks: &mut self.blocks,
-            first_block: &mut self.first_block,
-            last_block: &mut self.last_block,
-            entry_block: &mut self.entry_block,
-            instrs: &mut self.instrs,
-            instr_nodes: &mut self.instr_nodes,
+            core: &mut self.core,
             position: CursorPosition::None,
         }
     }
@@ -363,7 +323,7 @@ impl<'c> Iterator for BlockIter<'c> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_block = self.cursor.next_block()?;
-        Some(&self.cursor.blocks[next_block])
+        Some(&self.cursor.core.blocks[next_block])
     }
 }
 
@@ -376,7 +336,7 @@ impl<'c> Iterator for EnumeratedBlockIter<'c> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_block = self.cursor.next_block()?;
-        Some((next_block, &self.cursor.blocks[next_block]))
+        Some((next_block, &self.cursor.core.blocks[next_block]))
     }
 }
 
