@@ -1826,6 +1826,72 @@ impl Driver {
         transformer.transform(func)
     }
 
+    fn register_edges(&self, func: &Function, mut register_edge: impl FnMut(BlockId, BlockId)) {
+        for (id, block) in func.make_cursor().blocks_iter_enumerated() {
+            let terminator = *block.instrs.last().unwrap();
+            match &func.instrs[terminator].kind {
+                InstrKind::Jump(target) => register_edge(id, target.bb),
+                InstrKind::CondBr { true_target, false_target, .. } => {
+                    register_edge(id, true_target.bb);
+                    register_edge(id, false_target.bb);
+                },
+                InstrKind::SwitchBr { cases, catch_all_target, .. } => {
+                    for case in cases {
+                        register_edge(id, case.target.bb);
+                    }
+                    register_edge(id, catch_all_target.bb);
+                },
+                _ => {},
+            }
+        }
+    }
+
+    fn count_block_edges(&self, func: &Function, block: BlockId) -> usize {
+        let mut block_edge_count = 0usize;
+        self.register_edges(func, |_, other_block| if other_block == block {
+            block_edge_count += 1;
+        });
+        block_edge_count
+    }
+
+    fn count_block_predecessors(&self, func: &Function, block: BlockId) -> usize {
+        let mut predecessors = HashSet::new();
+        self.register_edges(func, |predecessor, other_block| if other_block == block {
+            predecessors.insert(predecessor);
+        });
+        predecessors.len()
+    }
+
+    #[allow(unused)]
+    fn count_all_predecessors(&self, func: &Function) -> HashMap<BlockId, usize> {
+        let mut predecessors: HashMap<BlockId, HashSet<BlockId>> = HashMap::new();
+        self.register_edges(
+            func,
+            |predecessor, other_block| {
+                predecessors.entry(other_block).or_default().insert(predecessor);
+            }
+        );
+        let mut num_predecessors = HashMap::new();
+        for (block, predecessors) in predecessors {
+            num_predecessors.insert(block, predecessors.len());
+        }
+        num_predecessors
+    }
+
+    fn check_entry_block_has_no_predecessors(&self, func: &Function) {
+        assert_eq!(self.count_block_edges(func, func.entry_block), 0, "internal compiler error: entry block should not have predecessors");
+    }
+
+    fn check_no_invalid_instructions(&self, func: &Function) {
+        for block in func.make_cursor().blocks_iter() {
+            for &instr in &block.instrs {
+                if matches!(&func.instrs[instr].kind, InstrKind::Invalid) {
+                    panic!("Found invalid instruction in function");
+                }
+            }
+        }
+    }
+
     fn remove_redundant_blocks(&self, func: &mut Function) -> bool {
         // Replace blocks that do nothing but branch to another block
         let mut replace_list = Vec::new();
@@ -1839,15 +1905,23 @@ impl Driver {
             let terminal = &func.instrs[terminal].kind;
             // TODO: continue the transformation even if there are basic block arguments
             if let InstrKind::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
+                // Don't replace entry block with `other` if `other` has more than one predecessor.
+                // Otherwise, the entry block would end up with predecessors, which is invalid.
+                if block_id == func.entry_block && self.count_block_predecessors(func, other.bb) > 1 {
+                    continue;
+                }
+
+                // If we plan to replace the entry block in this pass, never *also* replace the block it's being replaced with in the same pass.
+                if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
+                    continue;
+                }
+
                 replace_list.push((block_id, other.bb));
                 delete_list.insert(block_id);
                 did_something = true;
                 if block_id == func.entry_block {
                     let parameters = block.params.to_vec();
                     new_entry_block = Some((other.bb, parameters));
-                }
-                if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
-                    new_entry_block.as_mut().unwrap().0 = other.bb;
                 }
             }
         }
@@ -2150,16 +2224,6 @@ impl DriverRwRef<'_> {
         }
     }
 
-    fn check_no_invalid_instructions(&self, func: &Function) {
-        for block in func.make_cursor().blocks_iter() {
-            for &instr in &block.instrs {
-                if matches!(&func.instrs[instr].kind, InstrKind::Invalid) {
-                    panic!("Found invalid instruction in function");
-                }
-            }
-        }
-    }
-
     fn check_no_comptime_calls(&self, func: &Function) {
         let mut comptime_calls = Vec::new();
         for block in func.make_cursor().blocks_iter() {
@@ -2181,8 +2245,9 @@ impl DriverRwRef<'_> {
     }
 
     fn validate_function(&self, func: &Function) {
-        self.check_no_invalid_instructions(func);
+        self.read().check_no_invalid_instructions(func);
         self.check_basic_block_params(func);
+        self.read().check_entry_block_has_no_predecessors(func);
     }
 }
 

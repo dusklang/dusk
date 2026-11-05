@@ -21,3 +21,17 @@ fn test_while_loop(limit: i32) {
 
     core.assert(counter == 1 << limit)
 }
+
+// These tests previously crashed the compiler during MIR generation
+@compiler_test(success, 0)
+fn crasher1(n: u32): u32 {
+    while n > 0 { print("x\n") }
+    n
+}
+
+@compiler_test(success, 0)
+fn crasher2(n: u32): u32 {
+    if true {}
+    while n > 0 { print("x\n") }
+    n
+}
