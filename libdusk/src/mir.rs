@@ -1898,8 +1898,8 @@ impl Driver {
         let mut delete_list = HashSet::new();
         let mut new_entry_block = None;
         let mut did_something = false;
-        for (block_id, block) in func.make_cursor().blocks_iter_enumerated() {
-            if block.instrs.len() != 1 { continue; }
+        let mut process_block = |block_id: BlockId, block: &Block| {
+            if block.instrs.len() != 1 { return; }
 
             let terminal = *block.instrs.last().unwrap();
             let terminal = &func.instrs[terminal].kind;
@@ -1908,12 +1908,12 @@ impl Driver {
                 // Don't replace entry block with `other` if `other` has more than one predecessor.
                 // Otherwise, the entry block would end up with predecessors, which is invalid.
                 if block_id == func.entry_block && self.count_block_predecessors(func, other.bb) > 1 {
-                    continue;
+                    return;
                 }
 
                 // If we plan to replace the entry block in this pass, never *also* replace the block it's being replaced with in the same pass.
                 if new_entry_block.as_ref().map(|(b, _)| b) == Some(&block_id) {
-                    continue;
+                    return;
                 }
 
                 replace_list.push((block_id, other.bb));
@@ -1923,6 +1923,14 @@ impl Driver {
                     let parameters = block.params.to_vec();
                     new_entry_block = Some((other.bb, parameters));
                 }
+            }
+        };
+
+        // Process entry block first, because process_block depends on that in order to avoid replacing a chain of blocks starting with the entry block.
+        process_block(func.entry_block, &func.blocks[func.entry_block]);
+        for (block_id, block) in func.make_cursor().blocks_iter_enumerated() {
+            if block_id != func.entry_block {
+                process_block(block_id, block);
             }
         }
         if let Some((new_entry_block_id, parameters)) = new_entry_block {
