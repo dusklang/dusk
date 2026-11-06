@@ -36,4 +36,4 @@ Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a 
 
 ## AI Policy
 
-This project strictly forbids all AI-generated code, docs, etc., while still allowing agents to be used to assist in reading, reviewing and debugging.
+See AGENTS.md.
