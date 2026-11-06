@@ -1,0 +1,9 @@
+@compiler_test(success, 1, 2, 3)
+@compiler_test(success, 2, 5, 7)
+fn test_heap(a: i32, b: i32, c: i32) {
+    buf :: malloc(4) as i32 *mut
+    *buf = a
+    *buf += b
+    core.assert(*buf == c)
+    free(buf as void *mut)
+}

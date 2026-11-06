@@ -1181,11 +1181,11 @@ impl Driver {
                 write!(f, "{}", self.display_const(konst))?;
             },
             InstrKind::LegacyIntrinsic { arguments, intr, .. } => {
-                write!(f, "intrinsic `{}`", intr.name())?;
+                write!(f, "legacy_intrinsic `{}`", intr.name())?;
                 write_args!(arguments);
             },
             InstrKind::Intrinsic { arguments, intr, .. } => {
-                write!(f, "new_style_intrinsic `{}`", &self.ast.intrinsics[*intr].kind.name())?;
+                write!(f, "intrinsic `{}`", &self.ast.intrinsics[*intr].kind.name())?;
                 write_args!(arguments);
             },
             &InstrKind::Pointer { value, is_mut } => {
@@ -1668,20 +1668,7 @@ impl Driver {
         let mut cursor = func.make_cursor();
         while let Some(id) = cursor.next_block() {
             let terminator = cursor.terminator().unwrap();
-            match &func.instrs[terminator].kind {
-                InstrKind::Jump(target) => register_edge(id, target.block),
-                InstrKind::CondBr { true_target, false_target, .. } => {
-                    register_edge(id, true_target.block);
-                    register_edge(id, false_target.block);
-                },
-                InstrKind::SwitchBr { cases, catch_all_target, .. } => {
-                    for case in cases {
-                        register_edge(id, case.target.block);
-                    }
-                    register_edge(id, catch_all_target.block);
-                },
-                _ => {},
-            }
+            func.instrs[terminator].kind.register_edges(id, &mut register_edge);
         }
     }
 
@@ -1807,21 +1794,7 @@ impl Driver {
         let mut cursor = func.make_cursor();
         cursor.goto_top(block);
         let terminal = cursor.terminator().unwrap();
-        let terminal = &func.instrs[terminal].kind;
-        match terminal {
-            InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.block),
-            InstrKind::CondBr { true_target, false_target, .. } => {
-                self.traverse_descendants(func, visited, true_target.block);
-                self.traverse_descendants(func, visited, false_target.block);
-            },
-            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
-                for case in cases {
-                    self.traverse_descendants(func, visited, case.target.block);
-                }
-                self.traverse_descendants(func, visited, catch_all_target.block);
-            },
-            _ => {},
-        }
+        func.instrs[terminal].kind.visit_blocks(&mut |block| self.traverse_descendants(func, visited, block));
     }
 
     fn remove_unreachable_blocks(&self, func: &mut Function) -> bool {
@@ -1875,7 +1848,6 @@ impl Driver {
                             },
                             ValueKind::Parameter { .. } | ValueKind::Void => {},
                         }
-
                     },
                     _ => {},
                 }

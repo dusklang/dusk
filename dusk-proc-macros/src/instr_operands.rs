@@ -8,6 +8,9 @@
 //! - Everything else is ignored.
 //!
 //! Operands are visited in field declaration order.
+//!
+//! For `InstrKind` only, also generates instruction-level convenience methods built on the visitors
+//! (`referenced_values`, `replace_value`, `register_edges`, etc.).
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -16,7 +19,10 @@ use syn::{Data, DeriveInput, Fields, GenericArgument, Member, PathArguments, Typ
 /// Every type that derives `InstrOperands`. Fields of these types delegate to the type's generated methods. Deriving
 /// `InstrOperands` on a type not in this list is a compile error, so that a new type can't be silently skipped when it
 /// appears as a field of another.
-const DERIVING_TYPES: &[&str] = &["InstrKind", "JumpTarget", "SwitchCase"];
+const DERIVING_TYPES: &[&str] = &[INSTR_KIND, "JumpTarget", "SwitchCase"];
+
+/// The type that additionally gets the instruction-level helper methods (see `instr_kind_helpers`).
+const INSTR_KIND: &str = "InstrKind";
 
 #[derive(Clone, Copy)]
 enum Visit {
@@ -176,30 +182,43 @@ pub fn derive(input: DeriveInput) -> TokenStream {
     }
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let methods = [Visit::Values, Visit::ValuesMut, Visit::Blocks, Visit::BlocksMut].map(|visit| visit_method(&input, visit));
+    let helpers = if name == INSTR_KIND { instr_kind_helpers() } else { TokenStream::new() };
     quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             #(#methods)*
+            #helpers
+        }
+    }
+}
 
-            /// All values referenced by `self`, in field order.
-            pub fn referenced_values(&self) -> Vec<ValueId> {
-                let mut values = Vec::new();
-                self.visit_values(&mut |value| values.push(value));
-                values
-            }
+/// Instruction-level convenience methods built on the visitors. Only generated for `InstrKind`.
+fn instr_kind_helpers() -> TokenStream {
+    quote! {
+        /// All values referenced by `self`, in field order.
+        pub fn referenced_values(&self) -> Vec<ValueId> {
+            let mut values = Vec::new();
+            self.visit_values(&mut |value| values.push(value));
+            values
+        }
 
-            pub fn references_value(&self, val: ValueId) -> bool {
-                let mut found = false;
-                self.visit_values(&mut |value| found |= value == val);
-                found
-            }
+        pub fn references_value(&self, val: ValueId) -> bool {
+            let mut found = false;
+            self.visit_values(&mut |value| found |= value == val);
+            found
+        }
 
-            pub fn replace_value(&mut self, old: ValueId, new: ValueId) {
-                self.visit_values_mut(&mut |value| if *value == old { *value = new; });
-            }
+        pub fn replace_value(&mut self, old: ValueId, new: ValueId) {
+            self.visit_values_mut(&mut |value| if *value == old { *value = new; });
+        }
 
-            pub fn replace_block(&mut self, old: BlockId, new: BlockId) {
-                self.visit_blocks_mut(&mut |block| if *block == old { *block = new; });
-            }
+        pub fn replace_block(&mut self, old: BlockId, new: BlockId) {
+            self.visit_blocks_mut(&mut |block| if *block == old { *block = new; });
+        }
+
+        /// Calls `register_edge(from, to)` for every block `to` referenced by `self`, in field order. When `self`
+        /// is the terminator of block `from`, these are the outgoing control-flow edges of `from`.
+        pub fn register_edges(&self, from: BlockId, mut register_edge: impl FnMut(BlockId, BlockId)) {
+            self.visit_blocks(&mut |to| register_edge(from, to));
         }
     }
 }
