@@ -33,7 +33,6 @@ pub mod cursor;
 use dusk_proc_macros::*;
 
 // TODO: fix potential data race when adding values to hashmaps in MIR
-// TODO: make instructions a linked list just like blocks are, instead of each block individually owning a Vec of InstrIds. Then we can support inserting/deleting instructions by cursor as well.
 // TODO: store source ranges for ValueIds (particularly useful for parameters, in the future maybe constants, etc.)
 
 define_index_type!(pub struct FuncId = u32;);
@@ -78,13 +77,13 @@ pub struct InstrNode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct JumpTarget {
-    pub bb: BlockId,
+    pub block: BlockId,
     pub arguments: SmallVec<[ValueId; 2]>,
 }
 
 impl From<BlockId> for JumpTarget {
     fn from(value: BlockId) -> Self {
-        JumpTarget { bb: value, arguments: Default::default() }
+        JumpTarget { block: value, arguments: Default::default() }
     }
 }
 
@@ -136,33 +135,20 @@ pub enum InstrKind {
     GenericParam(GenericParamId),
 }
 
-impl InstrKind {
-    pub fn replace_bb(&mut self, old: BlockId, new: BlockId) {
-        fn replace(target: &mut JumpTarget, old: BlockId, new: BlockId) {
-            // TODO: handle basic block arguments (currently not needed by any callers of this method)
-            assert_eq!(target.arguments.len(), 0);
-            if target.bb == old {
-                target.bb = new;
-            }
-        }
-        match self {
-            InstrKind::Jump(target) => replace(target, old, new),
-            InstrKind::CondBr { true_target, false_target, .. } => {
-                replace(true_target, old, new);
-                replace(false_target, old, new);
-            },
-            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
-                for case in cases {
-                    replace(&mut case.target, old, new);
-                }
-                replace(catch_all_target, old, new);
-            },
-            _ => {}
-        }
-    }
-
+pub trait InstrTrait {
     // TODO: allocating a Vec here sucks!
-    pub fn referenced_values(&self) -> Vec<ValueId> {
+    fn referenced_values(&self) -> Vec<ValueId>;
+
+    fn replace_value(&mut self, old: ValueId, new: ValueId);
+    fn replace_block(&mut self, old: BlockId, new: BlockId);
+
+    fn references_value(&self, val: ValueId) -> bool {
+        self.referenced_values().contains(&val)
+    }
+}
+
+impl InstrTrait for InstrKind {
+    fn referenced_values(&self) -> Vec<ValueId> {
         match *self {
             InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
                 | InstrKind::GenericParam(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => vec![],
@@ -190,11 +176,7 @@ impl InstrKind {
         }
     }
 
-    pub fn references_value(&self, val: ValueId) -> bool {
-        self.referenced_values().contains(&val)
-    }
-
-    pub fn replace_value(&mut self, old: ValueId, new: ValueId) {
+    fn replace_value(&mut self, old: ValueId, new: ValueId) {
         fn replace(target: &mut ValueId, old: ValueId, new: ValueId) {
             if *target == old {
                 *target = new;
@@ -245,6 +227,30 @@ impl InstrKind {
                 }
                 replace_args(catch_all_target, old, new);
             },
+        }
+    }
+
+    fn replace_block(&mut self, old: BlockId, new: BlockId) {
+        fn replace(target: &mut JumpTarget, old: BlockId, new: BlockId) {
+            // TODO: handle basic block arguments (currently not needed by any callers of this method)
+            assert_eq!(target.arguments.len(), 0);
+            if target.block == old {
+                target.block = new;
+            }
+        }
+        match self {
+            InstrKind::Jump(target) => replace(target, old, new),
+            InstrKind::CondBr { true_target, false_target, .. } => {
+                replace(true_target, old, new);
+                replace(false_target, old, new);
+            },
+            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
+                for case in cases {
+                    replace(&mut case.target, old, new);
+                }
+                replace(catch_all_target, old, new);
+            },
+            _ => {}
         }
     }
 }
@@ -1065,7 +1071,6 @@ impl DriverRwRef<'_> {
 }
 
 impl Driver {
-    #[allow(dead_code)]
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
         let variant = &self.ast.enums[enuum].variants[index];
@@ -1200,7 +1205,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_branch_target(&self, func: &Function, target: &JumpTarget, f: &mut Formatter) {
-        write!(f, "%bb{}", target.bb.index())?;
+        write!(f, "%block{}", target.block.index())?;
         if !target.arguments.is_empty() {
             write!(f, "(")?;
             let mut first = true;
@@ -1415,7 +1420,7 @@ impl Driver {
     #[display_adapter]
     pub fn display_mir_block(&self, func: &Function, id: BlockId, f: &mut Formatter) {
         let block = &func.blocks[id];
-        write!(f, "%bb{}", id.index())?;
+        write!(f, "%block{}", id.index())?;
         if id != func.entry_block && !block.params.is_empty() {
             write!(f, "({})", self.display_param_list(func, id))?;
         }
@@ -1510,30 +1515,13 @@ enum DeclRef {
 }
 
 impl Driver {
-    fn create_bb(&self, b: &mut FunctionBuilder) -> BlockId {
-        let prev = b.core.last_block;
-
-        let block = Block {
-            prev: Some(prev),
-            ..Default::default()
-        };
-        let bb = b.core.blocks.push(block);
-        assert_eq!(b.core.blocks[prev].next, None);
-        b.core.blocks[prev].next = Some(bb);
-        b.core.last_block = bb;
-        bb
-    }
-    fn start_bb(&self, b: &mut FunctionBuilder, block: BlockId) {
-        b.start_block(block).unwrap();
-        b.current_block = block;
-    }
-    fn end_current_bb(&self, b: &mut FunctionBuilder) {
-        let bb = b.current_block;
-        if b.end_block(bb).is_err() {
-            panic!("Failed to end block {} in function {}:\n{}", bb.index(), self.fn_name(b.core.name), self.display_block(b, bb));
+    fn end_current_block(&self, b: &mut FunctionBuilder) {
+        let block = b.current_block;
+        if b.end_block(block).is_err() {
+            panic!("Failed to end block {} in function {}:\n{}", block.index(), self.fn_name(b.core.name), self.display_block(b, block));
         }
         let mut cursor = b.make_cursor();
-        cursor.goto_top(bb);
+        cursor.goto_top(block);
         let terminator = cursor.terminator().unwrap();
         let last_instr = &b.core.instrs[terminator].kind;
         assert!(
@@ -1596,7 +1584,7 @@ impl DriverRwRef<'_> {
             loops: Default::default(),
             pattern_matching_scrutinees: Default::default(),
         };
-        self.read().start_bb(&mut b, entry_block);
+        b.start_block(entry_block);
         let ctx = Context::new(0, DataDest::Ret, ControlDest::Unreachable);
         match body {
             FunctionBody::Expr(expr) => {
@@ -1613,14 +1601,14 @@ impl DriverRwRef<'_> {
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
                         let value = b.core.instrs[result].value;
                         self.read().push_instr(&mut b, InstrKind::Ret(value), result);
-                        self.read().end_current_bb(&mut b);
+                        self.read().end_current_block(&mut b);
                     },
                     InstrKind::DiscriminantAccess { .. } | InstrKind::SignExtend(_, _) | InstrKind::ZeroExtend(_, _) => {
                         let mut copier = MirCopier::default();
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
                         let value = b.core.instrs[result].value;
                         self.read().push_instr(&mut b, InstrKind::Ret(value), result);
-                        self.read().end_current_bb(&mut b);
+                        self.read().end_current_block(&mut b);
                     },
                     _ => unimplemented!("{:?}", instruction),
                 }
@@ -1801,16 +1789,16 @@ impl Driver {
         while let Some(id) = cursor.next_block() {
             let terminator = cursor.terminator().unwrap();
             match &func.instrs[terminator].kind {
-                InstrKind::Jump(target) => register_edge(id, target.bb),
+                InstrKind::Jump(target) => register_edge(id, target.block),
                 InstrKind::CondBr { true_target, false_target, .. } => {
-                    register_edge(id, true_target.bb);
-                    register_edge(id, false_target.bb);
+                    register_edge(id, true_target.block);
+                    register_edge(id, false_target.block);
                 },
                 InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                     for case in cases {
-                        register_edge(id, case.target.bb);
+                        register_edge(id, case.target.block);
                     }
-                    register_edge(id, catch_all_target.bb);
+                    register_edge(id, catch_all_target.block);
                 },
                 _ => {},
             }
@@ -1879,10 +1867,10 @@ impl Driver {
             let terminal = cursor.terminator().unwrap();
             let terminal = &func.instrs[terminal].kind;
             // TODO: continue the transformation even if there are basic block arguments
-            if let InstrKind::Jump(other) = terminal && other.arguments.is_empty() && other.bb != block_id {
+            if let InstrKind::Jump(other) = terminal && other.arguments.is_empty() && other.block != block_id {
                 // Don't replace entry block with `other` if `other` has more than one predecessor.
                 // Otherwise, the entry block would end up with predecessors, which is invalid.
-                if block_id == func.entry_block && self.count_block_predecessors(func, other.bb) > 1 {
+                if block_id == func.entry_block && self.count_block_predecessors(func, other.block) > 1 {
                     return;
                 }
 
@@ -1891,12 +1879,12 @@ impl Driver {
                     return;
                 }
 
-                replace_list.push((block_id, other.bb));
+                replace_list.push((block_id, other.block));
                 delete_list.insert(block_id);
                 did_something = true;
                 if block_id == func.entry_block {
                     let parameters = block.params.to_vec();
-                    new_entry_block = Some((other.bb, parameters));
+                    new_entry_block = Some((other.block, parameters));
                 }
             }
         };
@@ -1927,7 +1915,7 @@ impl Driver {
             let terminal = cursor.terminator().unwrap();
             let terminal = &mut cursor.core.instrs[terminal].kind;
             for &(from, to) in &replace_list {
-                terminal.replace_bb(from, to);
+                terminal.replace_block(from, to);
             }
         }
         did_something
@@ -1941,16 +1929,16 @@ impl Driver {
         let terminal = cursor.terminator().unwrap();
         let terminal = &func.instrs[terminal].kind;
         match terminal {
-            InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.bb),
+            InstrKind::Jump(target) => self.traverse_descendants(func, visited, target.block),
             InstrKind::CondBr { true_target, false_target, .. } => {
-                self.traverse_descendants(func, visited, true_target.bb);
-                self.traverse_descendants(func, visited, false_target.bb);
+                self.traverse_descendants(func, visited, true_target.block);
+                self.traverse_descendants(func, visited, false_target.block);
             },
             InstrKind::SwitchBr { cases, catch_all_target, .. } => {
                 for case in cases {
-                    self.traverse_descendants(func, visited, case.target.bb);
+                    self.traverse_descendants(func, visited, case.target.block);
                 }
-                self.traverse_descendants(func, visited, catch_all_target.bb);
+                self.traverse_descendants(func, visited, catch_all_target.block);
             },
             _ => {},
         }
@@ -2172,7 +2160,7 @@ impl DriverRwRef<'_> {
     }
 
     fn check_jump_target(&self, func: &Function, target: &JumpTarget) {
-        let params = &func.blocks[target.bb].params;
+        let params = &func.blocks[target.block].params;
         assert_eq!(target.arguments.len(), params.len(), "number of basic block arguments != params");
 
         for (&arg, &param) in target.arguments.iter().zip(params) {
@@ -2183,10 +2171,10 @@ impl DriverRwRef<'_> {
     }
 
     fn check_basic_block_params(&self, func: &Function) {
-        for (bb, block) in func.make_cursor().blocks_iter_enumerated() {
+        for (block_id, block) in func.make_cursor().blocks_iter_enumerated() {
             for (param_index, &param) in block.params.iter().enumerate() {
                 let param_value = &func.values[param];
-                assert_eq!(param_value.kind, ValueKind::Parameter { block: bb, index: param_index }, "internal compiler error: parameter value is not a parameter");
+                assert_eq!(param_value.kind, ValueKind::Parameter { block: block_id, index: param_index }, "internal compiler error: parameter value is not a parameter");
             }
         }
 
@@ -2500,20 +2488,34 @@ impl DriverRwRef<'_> {
         }
     }
 
-    fn build_if_expr_recurse(&self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, true_bb: BlockId, false_bb: BlockId, post_bb: BlockId, pass_value_as_argument: bool, ctx: Context, tp: &dyn TypeProvider) {
+    fn build_if_expr_recurse(&self, b: &mut FunctionBuilder, condition: ExprId, then_scope: ImperScopeId, true_block: BlockId, false_block: BlockId, post_block: BlockId, pass_value_as_argument: bool, ctx: Context, tp: &dyn TypeProvider) {
         self.build_expr(
             b,
             condition,
-            Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+            Context::new(0, DataDest::Branch(true_block, false_block), ControlDest::Continue),
             tp,
         );
-        self.read().start_bb(b, true_bb);
-        let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
+        b.start_block(true_block);
+        let scope_ctx = ctx.redirect(post_block, pass_value_as_argument);
         self.build_scope(b, then_scope, scope_ctx, tp);
     }
 }
 
 impl FunctionCore {
+    fn create_block(&mut self) -> BlockId {
+        let prev = self.last_block;
+
+        let block = Block {
+            prev: Some(prev),
+            ..Default::default()
+        };
+        let block_id = self.blocks.push(block);
+        assert_eq!(self.blocks[prev].next, None);
+        self.blocks[prev].next = Some(block_id);
+        self.last_block = block_id;
+        block_id
+    }
+
     pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
         let block = &self.blocks[self.entry_block];
         block.params.iter().map(|&param| &self.values[param].ty)
@@ -2645,16 +2647,16 @@ impl FunctionBuilder {
         self.block_states.entry(block).or_insert(BlockState::Created)
     }
 
-    pub fn start_block(&mut self, block: BlockId) -> Result<(), StartBlockError> {
+    fn start_block(&mut self, block: BlockId) {
         let state = self.get_block_state(block);
         match state {
             BlockState::Created => {
                 *state = BlockState::Started;
-                Ok(())
             }
-            BlockState::Started => Ok(()),
-            BlockState::Ended => Err(StartBlockError::BlockEnded),
+            BlockState::Started => {},
+            BlockState::Ended => panic!("internal compiler error: tried to start basic block after it was already ended"),
         }
+        self.current_block = block;
     }
 
     pub fn end_block(&mut self, block: BlockId) -> Result<(), EndBlockError> {
@@ -2696,46 +2698,46 @@ impl FunctionBuilder {
 
 impl DriverRwRef<'_> {
     fn build_if_expr(&self, b: &mut FunctionBuilder, _expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
-        let true_bb = self.read().create_bb(b);
-        let mut false_bb: BlockId = self.read().create_bb(b);
+        let true_block = b.core.create_block();
+        let mut false_block: BlockId = b.core.create_block();
         if matches!(ctx.data, DataDest::Read) {
             assert_matches!(ctx.control, ControlDest::Continue);
         }
         let pass_value_as_argument = matches!((&ctx.data, else_scope), (DataDest::Read, Some(_)));
-        let (post_bb, we_own_post_bb) = match ctx.control {
+        let (post_block, we_own_post_block) = match ctx.control {
             ControlDest::Jump(target) => (target, false),
-            _ => (self.read().create_bb(b), true),
+            _ => (b.core.create_block(), true),
         };
         if else_scope.is_none() && !pass_value_as_argument {
-            false_bb = post_bb;
+            false_block = post_block;
         }
 
-        self.build_if_expr_recurse(b, condition, then_scope, true_bb, false_bb, post_bb, pass_value_as_argument, ctx, tp);
+        self.build_if_expr_recurse(b, condition, then_scope, true_block, false_block, post_block, pass_value_as_argument, ctx, tp);
         let mut next_scope = else_scope;
-        let mut next_bb = false_bb;
+        let mut next_block = false_block;
 
         // Iterate through a linked list of if-else-if branches. Terminate when you find an if with no else branch or
         // an else branch with something other than an if.
         // This is done to reduce the size of the stack when generating code for long chains of if statements.
         while let Some(cur) = next_scope {
-            self.read().start_bb(b, next_bb);
+            b.start_block(next_block);
 
-            let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
+            let scope_ctx = ctx.redirect(post_block, pass_value_as_argument);
             let terminal_expr = self.read().ast.imper_scopes[cur].terminal_expr;
             // If the current scope consists of a lone if expression
             if self.read().ast.imper_scopes[cur].items.is_empty() {
                 let d = self.read();
                 if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.ast) {
                     drop(d);
-                    let true_bb = self.read().create_bb(b);
-                    let false_bb = if else_scope.is_some() {
-                        self.read().create_bb(b)
+                    let true_block = b.core.create_block();
+                    let false_block = if else_scope.is_some() {
+                        b.core.create_block()
                     } else {
-                        post_bb
+                        post_block
                     };
-                    self.build_if_expr_recurse(b, condition, then_scope, true_bb, false_bb, post_bb, pass_value_as_argument, scope_ctx, tp);
+                    self.build_if_expr_recurse(b, condition, then_scope, true_block, false_block, post_block, pass_value_as_argument, scope_ctx, tp);
                     next_scope = else_scope;
-                    next_bb = false_bb;
+                    next_block = false_block;
                     continue;
                 }
             }
@@ -2744,8 +2746,8 @@ impl DriverRwRef<'_> {
             next_scope = None;
         }
 
-        if we_own_post_bb {
-            self.read().start_bb(b, post_bb);
+        if we_own_post_block {
+            b.start_block(post_block);
             if pass_value_as_argument {
                 // TODO: this might be the wrong type if indirection != 0
                 b.push_param(ty).direct()
@@ -2852,45 +2854,45 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::LogicalAnd => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
-                            let left_true_bb = self.read().create_bb(b);
+                            let left_true_block = b.core.create_block();
                             let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
-                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                            if let DataDest::Branch(true_block, false_block) = ctx.data {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_block, false_block), ControlDest::Continue),
                                     tp,
                                 );
 
-                                self.read().start_bb(b, left_true_bb);
+                                b.start_block(left_true_block);
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_block, false_block), ControlDest::Continue),
                                     tp,
                                 );
                             } else {
-                                let left_false_bb = self.read().create_bb(b);
-                                let after_bb = self.read().create_bb(b);
+                                let left_false_block = b.core.create_block();
+                                let after_block = b.core.create_block();
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_block, left_false_block), ControlDest::Continue),
                                     tp,
                                 );
 
-                                self.read().start_bb(b, left_true_bb);
+                                b.start_block(left_true_block);
                                 // No further branching required, because (true && foo) <=> foo
-                                let branch_ctx = ctx.redirect(after_bb, pass_value_as_argument);
+                                let branch_ctx = ctx.redirect(after_block, pass_value_as_argument);
                                 self.build_expr(b, rhs, branch_ctx, tp);
 
-                                self.read().start_bb(b, left_false_bb);
+                                b.start_block(left_false_block);
                                 let false_const = Const::Bool(false);
                                 let name = self.read().fmt_const_for_instr_name(&false_const).to_string();
                                 let false_val = self.read().push_instr_with_name(b, InstrKind::Const(false_const), expr, name).direct();
                                 self.handle_context(b, false_val, branch_ctx);
 
-                                self.read().start_bb(b, after_bb);
+                                b.start_block(after_block);
                                 if pass_value_as_argument {
                                     b.push_param(ty).direct()
                                 } else {
@@ -2901,44 +2903,44 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::LogicalOr => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
-                            let left_false_bb = self.read().create_bb(b);
-                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
+                            let left_false_block = b.core.create_block();
+                            if let DataDest::Branch(true_block, false_block) = ctx.data {
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_block, left_false_block), ControlDest::Continue),
                                     tp,
                                 );
 
-                                self.read().start_bb(b, left_false_bb);
+                                b.start_block(left_false_block);
                                 return self.build_expr(
                                     b,
                                     rhs,
-                                    Context::new(0, DataDest::Branch(true_bb, false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(true_block, false_block), ControlDest::Continue),
                                     tp
                                 );
                             } else {
-                                let left_true_bb = self.read().create_bb(b);
-                                let after_bb = self.read().create_bb(b);
+                                let left_true_block = b.core.create_block();
+                                let after_block = b.core.create_block();
                                 let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                                 self.build_expr(
                                     b,
                                     lhs,
-                                    Context::new(0, DataDest::Branch(left_true_bb, left_false_bb), ControlDest::Continue),
+                                    Context::new(0, DataDest::Branch(left_true_block, left_false_block), ControlDest::Continue),
                                     tp,
                                 );
 
-                                self.read().start_bb(b, left_true_bb);
+                                b.start_block(left_true_block);
                                 let true_const = Const::Bool(true);
                                 let name = self.read().fmt_const_for_instr_name(&true_const).to_string();
                                 let true_val = self.read().push_instr_with_name(b, InstrKind::Const(true_const), expr, name).direct();
-                                let branch_ctx = ctx.redirect(after_bb, pass_value_as_argument);
+                                let branch_ctx = ctx.redirect(after_block, pass_value_as_argument);
                                 self.handle_context(b, true_val, branch_ctx);
 
-                                self.read().start_bb(b, left_false_bb);
+                                b.start_block(left_false_block);
                                 self.build_expr(b, rhs, branch_ctx, tp);
 
-                                self.read().start_bb(b, after_bb);
+                                b.start_block(after_block);
                                 if pass_value_as_argument {
                                     b.push_param(ty).direct()
                                 } else {
@@ -2949,8 +2951,8 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::LogicalNot => {
                             assert_eq!(arguments.len(), 1);
                             let operand = arguments[0];
-                            if let DataDest::Branch(true_bb, false_bb) = ctx.data {
-                                return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_bb, true_bb), ctx.control), tp)
+                            if let DataDest::Branch(true_block, false_block) = ctx.data {
+                                return self.build_expr(b, operand, Context::new(0, DataDest::Branch(false_block, true_block), ctx.control), tp)
                             } else {
                                 let operand = self.build_expr(b, operand, Context::default(), tp);
                                 self.read().push_instr(b, InstrKind::LogicalNot(operand.value), expr).direct()
@@ -3179,13 +3181,13 @@ impl DriverRwRef<'_> {
             Expr::Switch { scrutinee, context: pattern_matching_ctx_id, ref cases } => {
                 let _cases = cases.clone();
                 let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
-                let post_bb = self.read().create_bb(b);
-                let scope_ctx = ctx.redirect(post_bb, pass_value_as_argument);
+                let post_block = b.core.create_block();
+                let scope_ctx = ctx.redirect(post_block, pass_value_as_argument);
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx_id).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx_id).as_ref().expect("should always set pattern matching context on switch expr");
                 self.handle_pattern_matching(b, expr, scope_ctx, tp, scrutinee, decision_tree, pattern_matching_ctx_id, pattern_matching_ctx);
 
-                self.read().start_bb(b, post_bb);
+                b.start_block(post_block);
                 if pass_value_as_argument {
                     b.push_param(ty).direct()
                 } else {
@@ -3193,30 +3195,30 @@ impl DriverRwRef<'_> {
                 }
             },
             Expr::While { loop_id, condition, scope } => {
-                let test_bb = self.read().create_bb(b);
-                let loop_bb = self.read().create_bb(b);
-                let post_bb = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => self.read().create_bb(b),
+                let test_block = b.core.create_block();
+                let loop_block = b.core.create_block();
+                let post_block = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.core.create_block(),
                     ControlDest::Jump(block) => block,
                 };
 
-                self.read().push_instr(b, InstrKind::Jump(test_bb.into()), expr);
-                self.read().end_current_bb(b);
-                self.read().start_bb(b, test_bb);
-                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_bb, post_bb), ControlDest::Continue), tp);
+                self.read().push_instr(b, InstrKind::Jump(test_block.into()), expr);
+                self.read().end_current_block(b);
+                b.start_block(test_block);
+                self.build_expr(b, condition, Context::new(0, DataDest::Branch(loop_block, post_block), ControlDest::Continue), tp);
 
-                self.read().start_bb(b, loop_bb);
+                b.start_block(loop_block);
                 let loop_state = LoopState {
-                    break_block: post_bb,
-                    continue_block: test_bb,
+                    break_block: post_block,
+                    continue_block: test_block,
                     continue_location_of_variable_to_increment: None,
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Jump(test_bb)), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::Jump(test_block)), tp);
 
                 match ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
-                        self.read().start_bb(b, post_bb);
+                        b.start_block(post_block);
                         VOID_VALUE.direct()
                     },
                     // Already handled this above
@@ -3240,33 +3242,33 @@ impl DriverRwRef<'_> {
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.read().handle_indirection(b, upper_bound);
 
-                let test_bb = self.read().create_bb(b);
-                let loop_bb = self.read().create_bb(b);
-                let post_bb = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => self.read().create_bb(b),
+                let test_block = b.core.create_block();
+                let loop_block = b.core.create_block();
+                let post_block = match ctx.control {
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.core.create_block(),
                     ControlDest::Jump(target) => target,
                 };
 
-                self.read().push_instr(b, InstrKind::Jump(test_bb.into()), expr);
-                self.read().end_current_bb(b);
-                self.read().start_bb(b, test_bb);
+                self.read().push_instr(b, InstrKind::Jump(test_block.into()), expr);
+                self.read().end_current_block(b);
+                b.start_block(test_block);
                 let cur_binding_value = self.read().push_instr_with_name(b, InstrKind::Load(binding_location), binding, &binding_name);
                 let less_than = self.read().push_instr_with_name(b, InstrKind::LegacyIntrinsic { arguments: smallvec![cur_binding_value, upper_bound], ty: Type::Bool, intr: LegacyIntrinsic::Less }, binding, &binding_name);
-                self.read().push_instr_with_name(b, InstrKind::CondBr { condition: less_than, true_target: loop_bb.into(), false_target: post_bb.into() }, binding, &binding_name);
-                self.read().end_current_bb(b);
+                self.read().push_instr_with_name(b, InstrKind::CondBr { condition: less_than, true_target: loop_block.into(), false_target: post_block.into() }, binding, &binding_name);
+                self.read().end_current_block(b);
 
-                self.read().start_bb(b, loop_bb);
+                b.start_block(loop_block);
                 let loop_state = LoopState {
-                    break_block: post_bb,
-                    continue_block: test_bb,
+                    break_block: post_block,
+                    continue_block: test_block,
                     continue_location_of_variable_to_increment: Some(binding_location),
                 };
                 b.loops.push_at(loop_id, loop_state);
-                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenJump { location: binding_location, target: test_bb }), tp);
+                self.build_scope(b, scope, Context::new(0, DataDest::Void, ControlDest::IncrementVariableAndThenJump { location: binding_location, target: test_block }), tp);
 
                 match &ctx.control {
                     ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => {
-                        self.read().start_bb(b, post_bb);
+                        b.start_block(post_block);
                         VOID_VALUE.direct()
                     },
                     // Already handled this above
@@ -3277,10 +3279,10 @@ impl DriverRwRef<'_> {
                 let loop_id = loop_id.expect("loop id should be filled in by MIR generation time");
                 let loop_state = b.loops[loop_id].clone();
                 let branch = self.read().push_instr(b, InstrKind::Jump(loop_state.break_block.into()), expr);
-                self.read().end_current_bb(b);
+                self.read().end_current_block(b);
                 // Must create unreachable basic block in case there are more statements in this loop
-                let unreachable_bb = self.read().create_bb(b);
-                self.read().start_bb(b, unreachable_bb);
+                let unreachable_block = b.core.create_block();
+                b.start_block(unreachable_block);
 
                 return branch.direct();
             },
@@ -3291,10 +3293,10 @@ impl DriverRwRef<'_> {
                     self.read().increment_variable(b, variable_to_increment);
                 }
                 let branch = self.read().push_instr(b, InstrKind::Jump(loop_state.continue_block.into()), expr);
-                self.read().end_current_bb(b);
+                self.read().end_current_block(b);
                 // Must create unreachable basic block in case there are more statements in this loop
-                let unreachable_bb = self.read().create_bb(b);
-                self.read().start_bb(b, unreachable_bb);
+                let unreachable_block = b.core.create_block();
+                b.start_block(unreachable_block);
 
                 return branch.direct();
             },
@@ -3337,8 +3339,8 @@ impl DriverRwRef<'_> {
     fn handle_pattern_matching(&self, b: &mut FunctionBuilder, expr: ExprId, ctx: Context, tp: &dyn TypeProvider, og_scrutinee: ExprId, node: &SwitchDecisionNode, pattern_matching_ctx_id: PatternMatchingContextId, pattern_matching_ctx: &IndexVec<SwitchScrutineeValueId, TypedSwitchScrutineeValue>) {
         match *node {
             SwitchDecisionNode::Branch { scrutinee: scrutinee_id, ref paths, ref default_path } => {
-                let begin_bb = b.current_block;
-                self.read().start_bb(b, begin_bb);
+                let begin_block = b.current_block;
+                b.start_block(begin_block);
 
                 let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, pattern_matching_ctx_id);
                 // TODO: support pattern matching of pointers
@@ -3364,28 +3366,28 @@ impl DriverRwRef<'_> {
                         SwitchDecisionValue::UnsignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
                     };
 
-                    let case_bb = self.read().create_bb(b);
-                    mir_cases.push(SwitchCase { value: const_value, target: case_bb.into() });
+                    let case_block = b.core.create_block();
+                    mir_cases.push(SwitchCase { value: const_value, target: case_block.into() });
                     nodes.push(node);
                 }
 
-                let default_bb = self.read().create_bb(b);
+                let default_block = b.core.create_block();
 
-                self.read().push_instr(b, InstrKind::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_target: default_bb.into() }, expr);
-                self.read().end_current_bb(b);
+                self.read().push_instr(b, InstrKind::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_target: default_block.into() }, expr);
+                self.read().end_current_block(b);
 
                 for (mir_case, node) in mir_cases.iter().zip(nodes) {
-                    self.read().start_bb(b, mir_case.target.bb);
+                    b.start_block(mir_case.target.block);
                     self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, node, pattern_matching_ctx_id, pattern_matching_ctx);
                 }
 
-                self.read().start_bb(b, default_bb);
+                b.start_block(default_block);
                 if let Some(default_path) = &default_path {
                     self.handle_pattern_matching(b, expr, ctx, tp, og_scrutinee, default_path, pattern_matching_ctx_id, pattern_matching_ctx);
                 } else {
                     // TODO: add unreachable instruction I guess?
                     self.read().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, SourceRange::default());
-                    self.read().end_current_bb(b);
+                    self.read().end_current_block(b);
                 }
             },
             SwitchDecisionNode::Destination { destination, .. } => {
@@ -3394,7 +3396,7 @@ impl DriverRwRef<'_> {
             SwitchDecisionNode::Failure => {
                 self.read().diag.report_error_no_range_msg("pattern matching failure", expr);
                 self.read().push_instr(b, InstrKind::LegacyIntrinsic { arguments: SmallVec::new(), ty: Type::Never, intr: LegacyIntrinsic::Panic }, expr);
-                self.read().end_current_bb(b);
+                self.read().end_current_block(b);
             }
         }
     }
@@ -3444,7 +3446,7 @@ impl Driver {
         match control {
             ControlDest::Jump(target) => {
                 let val: IndirectValue = self.push_instr(b, InstrKind::Jump(target.into()), val.value).direct();
-                self.end_current_bb(b);
+                self.end_current_block(b);
                 val
             },
             ControlDest::IncrementVariableAndThenJump { location, target } => {
@@ -3453,13 +3455,13 @@ impl Driver {
 
                 // br block
                 let val = self.push_instr(b, InstrKind::Jump(target.into()), val.value).direct();
-                self.end_current_bb(b);
+                self.end_current_block(b);
                 val
             },
             ControlDest::Continue => val,
             ControlDest::RetVoid => {
                 let val = self.push_instr(b, InstrKind::Ret(VOID_VALUE), val.value).direct();
-                self.end_current_bb(b);
+                self.end_current_block(b);
                 val
             },
             ControlDest::Unreachable => VOID_VALUE.direct(),
@@ -3475,38 +3477,38 @@ impl DriverRwRef<'_> {
             DataDest::Ret => {
                 let instr = self.read().handle_indirection(b, val);
                 let val = self.read().push_instr(b, InstrKind::Ret(instr), instr).direct();
-                self.read().end_current_bb(b);
+                self.read().end_current_block(b);
                 return val;
             },
-            DataDest::JumpWithArgument(bb) => {
+            DataDest::JumpWithArgument(block) => {
                 let instr = self.read().handle_indirection(b, val);
-                let val = self.read().push_instr(b, InstrKind::Jump(JumpTarget { bb, arguments: smallvec![instr] }), instr).direct();
-                self.read().end_current_bb(b);
+                let val = self.read().push_instr(b, InstrKind::Jump(JumpTarget { block, arguments: smallvec![instr] }), instr).direct();
+                self.read().end_current_block(b);
                 return val;
             },
-            DataDest::Branch(true_bb, false_bb) => {
+            DataDest::Branch(true_block, false_block) => {
                 let condition = self.read().handle_indirection(b, val);
                 let next_instr = match b.core.values[condition].kind {
                     ValueKind::InstrResult(condition_instr) => {
                         if let &InstrKind::Const(Const::Bool(val)) = &b.core.instrs[condition_instr].kind {
-                            let bb = if val {
-                                true_bb
+                            let block = if val {
+                                true_block
                             } else {
-                                false_bb
+                                false_block
                             };
-                            InstrKind::Jump(bb.into())
+                            InstrKind::Jump(block.into())
                         } else {
-                            InstrKind::CondBr { condition, true_target: true_bb.into(), false_target: false_bb.into() }
+                            InstrKind::CondBr { condition, true_target: true_block.into(), false_target: false_block.into() }
                         }
                     },
-                    ValueKind::Parameter { .. } => InstrKind::CondBr { condition, true_target: true_bb.into(), false_target: false_bb.into() },
+                    ValueKind::Parameter { .. } => InstrKind::CondBr { condition, true_target: true_block.into(), false_target: false_block.into() },
                     ValueKind::Void => {
                         panic!("internal compiler error: branching on void")
                     },
                 };
 
                 let val = self.read().push_instr(b, next_instr, condition).direct();
-                self.read().end_current_bb(b);
+                self.read().end_current_block(b);
                 return val;
             },
             DataDest::Receive { value } => {

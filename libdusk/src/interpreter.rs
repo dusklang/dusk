@@ -417,9 +417,9 @@ pub struct StackFrame {
 
 impl StackFrame {
     fn jump_to(&mut self, target: &JumpTarget, d: &Driver) {
-        self.block = target.bb;
+        self.block = target.block;
         let func = function_by_ref(&d.mir, &self.func_ref);
-        let block = &func.blocks[target.bb];
+        let block = &func.blocks[target.block];
         assert_eq!(
             target.arguments.len(), block.params.len(),
             "internal compiler error: {} basic block arguments provided, but {} were expected.",
