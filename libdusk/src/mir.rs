@@ -17,7 +17,7 @@ use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScr
 use crate::source_info::SourceRange;
 
 use crate::internal_types::InternalField;
-use crate::ast::{self, Attribute, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, IntrinsicId, Item, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
+use crate::ast::{self, Attribute, CompilerTestCondition, DeclId, DeclRefId, EnumId, Expr, ExprId, ExternFunctionRef, ExternModId, GenericParamId, ImperScopeId, Item, IntrinsicId, LegacyIntrinsic, LoopId, NewNamespaceId, PatternMatchingContextId, ScopedItem, StoredDeclId, StructId, VOID_TYPE};
 use crate::ty::{EnumType, FloatWidth, FunctionType, LegacyInternalType, StructType, Type};
 use crate::driver::{Driver, DriverRwRef};
 use crate::typechecker as tc;
@@ -1185,7 +1185,7 @@ impl Driver {
                 write_args!(arguments);
             },
             InstrKind::Intrinsic { arguments, intr, .. } => {
-                write!(f, "new_style_intrinsic `{}`", self.ast.intrinsics[*intr].name)?;
+                write!(f, "new_style_intrinsic `{}`", &self.ast.intrinsics[*intr].kind.name())?;
                 write_args!(arguments);
             },
             &InstrKind::Pointer { value, is_mut } => {

@@ -1659,9 +1659,10 @@ impl DriverRwRef<'_> {
                 },
                 InstrKind::Intrinsic { ref arguments, intr } => {
                     let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                    let implementation = d.ast.intrinsics[intr].implementation;
+                    let intr = d.ast.intrinsics[intr].clone();
                     drop(d);
-                    implementation(self, arguments)
+
+                    intr.kind.call(self, arguments)
                 },
                 InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
                 InstrKind::Truncate(instr, ref ty) => {

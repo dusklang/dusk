@@ -487,7 +487,26 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
 pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     assert!(attr.is_empty());
 
+    /// Converts a bridged method's dotted path and Rust name into a PascalCase variant name,
+    /// e.g. ("compiler.ModuleBuilder", "add_usize_constant") -> `CompilerModuleBuilderAddUsizeConstant`.
+    fn variant_name(path: &str, method: &str) -> String {
+        let mut result = String::new();
+        for segment in path.split('.').chain(method.split('_')) {
+            let mut chars = segment.chars();
+            if let Some(first) = chars.next() {
+                result.extend(first.to_uppercase());
+                result.push_str(chars.as_str());
+            }
+        }
+        result
+    }
+
     let mut item: Item = syn::parse(item).unwrap();
+    let mut variants: Vec<syn::Ident> = Vec::new();
+    let mut names = Vec::new();
+    let mut paths = Vec::new();
+    let mut is_methods = Vec::new();
+    let mut call_arms = Vec::new();
     let mut registrations = Vec::new();
     match &mut item {
         Item::Impl(impl_block) => {
@@ -610,34 +629,49 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         } else {
                             quote! { Driver::#mangled_name }
                         };
+                        let variant = syn::Ident::new(&variant_name(&path, &name), method.sig.ident.span());
+                        if let Some(existing) = variants.iter().find(|v| **v == variant) {
+                            return syn::Error::new(
+                                existing.span(),
+                                format!("bridged methods `{}` at path \"{}\" would produce a duplicate `IntrinsicKind::{}` variant", name, path, variant),
+                            ).to_compile_error().into();
+                        }
+
                         let decl = if has_self {
                             quote! { Decl::MethodIntrinsic(intr_id) }
                         } else {
                             quote! { Decl::Intrinsic(intr_id) }
                         };
-                        registrations.push(
+                        call_arms.push(
                             quote! {
-                                fn thunk(d: &mut DriverRwRef, parameters: Vec<&Value>) -> Value {
+                                IntrinsicKind::#variant => {
                                     #(#param_val_decls)*
                                     let val = #implementation(#(#param_val_names),*);
                                     val.bridge_to_dusk(&d.read())
                                 }
+                            }
+                        );
+                        registrations.push(
+                            quote! {
                                 let ret_ty = <#ret_ty>::to_dusk_type(d);
-                                let intr = Intrinsic {
+                                let info = crate::ast::IntrinsicInfo {
                                     param_tys: smallvec![
                                         #(
                                             d.add_const_ty(b, <#param_tys>::to_dusk_type(d)),
                                         )*
                                     ],
                                     ret_ty: ret_ty.clone(),
-                                    name: String::from(#name),
-                                    implementation: thunk,
+                                    kind: self::IntrinsicKind::#variant,
                                 };
                                 let ret_ty = d.add_const_ty(b, ret_ty);
-                                let intr_id = d.ast.intrinsics.push(intr);
+                                let intr_id = d.ast.intrinsics.push(info);
                                 d.add_decl_to_path(b, #name, #path, #decl, Some(ret_ty));
                             }
                         );
+                        variants.push(variant);
+                        names.push(name);
+                        paths.push(path);
+                        is_methods.push(has_self);
                     },
                     _ => panic!("unhandled item in dusk_bridge impl block"),
                 }
@@ -648,12 +682,49 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #item
 
+        /// One variant per Rust method bridged to Dusk via `#[dusk_bridge]`.
+        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+        pub enum IntrinsicKind {
+            #(#variants,)*
+        }
+
+        impl IntrinsicKind {
+            /// Every bridged intrinsic, in declaration order.
+            pub const ALL: &'static [IntrinsicKind] = &[#(IntrinsicKind::#variants,)*];
+
+            /// The name of the intrinsic as seen from Dusk code.
+            pub fn name(self) -> &'static str {
+                match self {
+                    #(IntrinsicKind::#variants => #names,)*
+                }
+            }
+
+            /// The dotted module or type path the intrinsic is declared under in Dusk (empty for the root).
+            pub fn path(self) -> &'static str {
+                match self {
+                    #(IntrinsicKind::#variants => #paths,)*
+                }
+            }
+
+            /// Whether the intrinsic takes a `#[self]` parameter, and is therefore callable as a method.
+            pub fn is_method(self) -> bool {
+                match self {
+                    #(IntrinsicKind::#variants => #is_methods,)*
+                }
+            }
+
+            /// Bridges `parameters` to Rust, calls the underlying Rust method, and bridges the result back to Dusk.
+            pub fn call(self, d: &mut crate::driver::DriverRwRef, parameters: Vec<&crate::interpreter::Value>) -> crate::interpreter::Value {
+                use crate::internal_types::DuskBridge;
+                match self {
+                    #(#call_arms)*
+                }
+            }
+        }
+
         pub fn register_bridged_rust_methods(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
             use crate::internal_types::DuskBridge;
             use crate::{ast::*, ty::*, mir::*};
-            use crate::driver::DriverRwRef;
-            use crate::ast::Intrinsic;
-            use crate::interpreter::Value;
             use smallvec::smallvec;
 
             #({ #registrations })*

@@ -16,6 +16,7 @@ use crate::index_counter::{IndexCounter, ConcurrentIndexCounter};
 use crate::source_info::{SourceFileId, SourceRange};
 use crate::internal_types::InternalField;
 
+use crate::builtins::IntrinsicKind;
 use crate::ty::{Type, InternalType, InternalTypeId};
 use crate::autopop::{AutoPopStack, AutoPopStackEntry};
 use crate::driver::Driver;
@@ -23,8 +24,6 @@ use crate::error::Error;
 use crate::index_vec::*;
 use crate::builder::{BinOp, UnOp};
 use crate::source_info::ToSourceRange;
-use crate::interpreter;
-use crate::driver::DriverRwRef;
 
 use dusk_proc_macros::*;
 
@@ -593,7 +592,7 @@ pub struct Ast {
     pub attr_to_items: IndexVec<AttrId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
-    pub intrinsics: IndexVec<IntrinsicId, Intrinsic>,
+    pub intrinsics: IndexVec<IntrinsicId, IntrinsicInfo>,
     pub imper_scopes: IndexVec<ImperScopeId, ImperScope>,
     pub imper_ns: IndexVec<ImperScopeNsId, ImperScopeNs>,
     pub mod_ns: IndexVec<ModScopeNsId, ModScopeNs>,
@@ -639,13 +638,11 @@ pub struct GenericParamList {
     pub ranges: SmallVec<[SourceRange; 1]>,
 }
 
-pub type IntrinsicImpl = fn(&mut DriverRwRef, Vec<&interpreter::Value>) -> interpreter::Value;
-
-pub struct Intrinsic {
+#[derive(Clone)]
+pub struct IntrinsicInfo {
     pub param_tys: SmallVec<[ExprId; 2]>,
     pub ret_ty: Type,
-    pub name: String,
-    pub implementation: IntrinsicImpl,
+    pub kind: IntrinsicKind,
 }
 
 impl Driver {
