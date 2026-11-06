@@ -75,7 +75,7 @@ pub struct InstrNode {
     pub next: Option<InstrId>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, InstrOperands)]
 pub struct JumpTarget {
     pub block: BlockId,
     pub arguments: SmallVec<[ValueId; 2]>,
@@ -87,13 +87,13 @@ impl From<BlockId> for JumpTarget {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, InstrOperands)]
 pub struct SwitchCase {
     pub value: Const,
     pub target: JumpTarget,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, InstrOperands)]
 pub enum InstrKind {
     Invalid, // Used temporarily when copying functions
     Const(Const),
@@ -133,126 +133,6 @@ pub enum InstrKind {
     /// This variant currently exists (rather than just stuffing a constant `Type` into `InstrKind::Const()`) so that we
     /// know to lookup the generic param instead of preserving it as-is.
     GenericParam(GenericParamId),
-}
-
-pub trait InstrTrait {
-    // TODO: allocating a Vec here sucks!
-    fn referenced_values(&self) -> Vec<ValueId>;
-
-    fn replace_value(&mut self, old: ValueId, new: ValueId);
-    fn replace_block(&mut self, old: BlockId, new: BlockId);
-
-    fn references_value(&self, val: ValueId) -> bool {
-        self.referenced_values().contains(&val)
-    }
-}
-
-impl InstrTrait for InstrKind {
-    fn referenced_values(&self) -> Vec<ValueId> {
-        match *self {
-            InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
-                | InstrKind::GenericParam(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => vec![],
-            InstrKind::LogicalNot(value) | InstrKind::Reinterpret(value, _) | InstrKind::Truncate(value, _) | InstrKind::SignExtend(value, _)
-                | InstrKind::ZeroExtend(value, _) | InstrKind::FloatCast(value, _) | InstrKind::FloatToInt(value, _)
-                | InstrKind::IntToFloat(value, _) | InstrKind::Load(value) | InstrKind::Pointer { value, .. }
-                | InstrKind::DirectFieldAccess { val: value, .. } | InstrKind::IndirectFieldAccess { val: value, .. }
-                | InstrKind::DiscriminantAccess { val: value } | InstrKind::Ret(value) | InstrKind::Variant { payload: value, .. } | InstrKind::PayloadAccess { val: value, .. }
-                | InstrKind::InternalFieldAccess { val: value, .. } => vec![value],
-            InstrKind::Store { location, value } => vec![location, value],
-            InstrKind::Call { arguments: ref values, .. } | InstrKind::ExternCall { arguments: ref values, .. }
-                | InstrKind::LegacyIntrinsic { arguments: ref values, .. } | InstrKind::Struct { fields: ref values, .. }
-                | InstrKind::Enum { variants: ref values, .. } | InstrKind::StructLit { fields: ref values, .. }
-                | InstrKind::Intrinsic { arguments: ref values, .. } => values.iter().copied().collect(),
-            InstrKind::FunctionTy { ref param_tys, ret_ty, .. } => param_tys.iter().copied().chain(std::iter::once(ret_ty)).collect(),
-            InstrKind::Jump(ref target) => target.arguments.iter().copied().collect(),
-            InstrKind::CondBr { condition: value, ref true_target, ref false_target } => std::iter::once(value)
-                .chain(true_target.arguments.iter().copied())
-                .chain(false_target.arguments.iter().copied())
-                .collect(),
-            InstrKind::SwitchBr { scrutinee: value, ref cases, ref catch_all_target } => std::iter::once(value)
-                .chain(cases.iter().flat_map(|case| case.target.arguments.iter().copied()))
-                .chain(catch_all_target.arguments.iter().copied())
-                .collect()
-        }
-    }
-
-    fn replace_value(&mut self, old: ValueId, new: ValueId) {
-        fn replace(target: &mut ValueId, old: ValueId, new: ValueId) {
-            if *target == old {
-                *target = new;
-            }
-        }
-        fn replace_args(target: &mut JumpTarget, old: ValueId, new: ValueId) {
-            for arg in &mut target.arguments {
-                replace(arg, old, new);
-            }
-        }
-        match self {
-            InstrKind::Const(_) | InstrKind::Alloca(_) | InstrKind::AddressOfStatic(_)
-                | InstrKind::GenericParam(_) | InstrKind::FunctionRef { .. } | InstrKind::Invalid | InstrKind::ObjcClassRef { .. } => {},
-            InstrKind::LogicalNot(value) | InstrKind::Reinterpret(value, _) | InstrKind::Truncate(value, _) | InstrKind::SignExtend(value, _)
-                | InstrKind::ZeroExtend(value, _) | InstrKind::FloatCast(value, _) | InstrKind::FloatToInt(value, _)
-                | InstrKind::IntToFloat(value, _) | InstrKind::Load(value) | InstrKind::Pointer { value, .. }
-                | InstrKind::DirectFieldAccess { val: value, .. } | InstrKind::IndirectFieldAccess { val: value, .. }
-                | InstrKind::DiscriminantAccess { val: value } | InstrKind::Ret(value) | InstrKind::Variant { payload: value, .. } | InstrKind::PayloadAccess { val: value, .. }
-                | InstrKind::InternalFieldAccess { val: value, .. } => replace(value, old, new),
-            InstrKind::Store { location, value } => {
-                replace(location, old, new);
-                replace(value, old, new);
-            },
-            InstrKind::Call { arguments: values, .. } | InstrKind::ExternCall { arguments: values, .. }
-                | InstrKind::LegacyIntrinsic { arguments: values, .. } | InstrKind::Struct { fields: values, .. }
-                | InstrKind::Enum { variants: values, .. } | InstrKind::StructLit { fields: values, .. }
-                | InstrKind::Intrinsic { arguments: values, .. } => {
-                    for value in values {
-                        replace(value, old, new);
-                    }
-                }
-            InstrKind::FunctionTy { param_tys, ret_ty, .. } => {
-                for value in param_tys {
-                    replace(value, old, new);
-                }
-                replace(ret_ty, old, new);
-            },
-            InstrKind::Jump(target) => replace_args(target, old, new),
-            InstrKind::CondBr { condition: value, true_target, false_target } => {
-                replace(value, old, new);
-                replace_args(true_target, old, new);
-                replace_args(false_target, old, new);
-            },
-            InstrKind::SwitchBr { scrutinee: value, cases, catch_all_target } => {
-                replace(value, old, new);
-                for case in cases {
-                    replace_args(&mut case.target, old, new);
-                }
-                replace_args(catch_all_target, old, new);
-            },
-        }
-    }
-
-    fn replace_block(&mut self, old: BlockId, new: BlockId) {
-        fn replace(target: &mut JumpTarget, old: BlockId, new: BlockId) {
-            // TODO: handle basic block arguments (currently not needed by any callers of this method)
-            assert_eq!(target.arguments.len(), 0);
-            if target.block == old {
-                target.block = new;
-            }
-        }
-        match self {
-            InstrKind::Jump(target) => replace(target, old, new),
-            InstrKind::CondBr { true_target, false_target, .. } => {
-                replace(true_target, old, new);
-                replace(false_target, old, new);
-            },
-            InstrKind::SwitchBr { cases, catch_all_target, .. } => {
-                for case in cases {
-                    replace(&mut case.target, old, new);
-                }
-                replace(catch_all_target, old, new);
-            },
-            _ => {}
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

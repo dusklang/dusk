@@ -10,6 +10,15 @@ use syn::spanned::Spanned;
 
 use std::iter::Peekable;
 
+mod instr_operands;
+
+/// Generates inherent methods for visiting and rewriting the `ValueId`s and `BlockId`s a MIR instruction refers to.
+/// See the `instr_operands` module for details.
+#[proc_macro_derive(InstrOperands)]
+pub fn derive_instr_operands(input: TokenStream) -> TokenStream {
+    instr_operands::derive(parse_macro_input!(input as DeriveInput)).into()
+}
+
 #[proc_macro_attribute]
 pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
     let lifetime = if attr.is_empty() {
