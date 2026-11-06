@@ -71,6 +71,15 @@ pub enum Pointer {
     Opaque(usize),
 }
 
+impl Pointer {
+    pub fn as_raw_ptr(&self) -> *mut u8 {
+        match *self {
+            Pointer::Unowned(ptr) => ptr.allocation.cast_mut().cast(),
+            Pointer::Opaque(addr) => core::ptr::with_exposed_provenance_mut(addr),
+        }
+    }
+}
+
 impl std::ops::Add<usize> for Pointer {
     type Output = Pointer;
     fn add(self, rhs: usize) -> Self::Output {
@@ -141,7 +150,7 @@ struct Enum {
 }
 
 impl Value {
-    fn as_allocation(&self) -> Pointer {
+    pub fn as_allocation(&self) -> Pointer {
         match *self {
             Value::OwnedPointer(ref buf) => {
                 Pointer::Unowned(UnownedPointer { allocation: &**buf, offset: 0 })
@@ -224,7 +233,7 @@ impl Value {
     }
 
     pub fn as_raw_ptr(&self) -> *mut u8 {
-        std::ptr::without_provenance_mut(usize::from_le_bytes(self.as_bytes_without_driver().as_ref().try_into().unwrap()))
+        std::ptr::with_exposed_provenance_mut(usize::from_le_bytes(self.as_bytes_without_driver().as_ref().try_into().unwrap()))
     }
 
     fn as_f64(&self) -> f64 {
@@ -281,7 +290,7 @@ impl Value {
         }
     }
 
-    fn from_allocation(allocation: Pointer) -> Value {
+    pub fn from_allocation(allocation: Pointer) -> Value {
         match allocation {
             Pointer::Opaque(addr) => Value::from_usize(addr),
             Pointer::Unowned(allocation) => Value::UnownedPointer(allocation),
@@ -508,7 +517,7 @@ unsafe impl Send for CachedLib {}
 
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
-    allocations: HashMap<usize, alloc::Layout>,
+    pub allocations: HashMap<usize, alloc::Layout>,
     switch_cache: HashMap<InstrId, HashMap<Box<[u8]>, JumpTarget>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
@@ -1551,28 +1560,6 @@ impl DriverRwRef<'_> {
                             std::io::stdout().flush().unwrap();
                             Value::Nothing
                         },
-                        LegacyIntrinsic::Malloc => {
-                            assert_eq!(arguments.len(), 1);
-                            assert_eq!(self.read().arch.pointer_size(), 64);
-                            let size = frame.get_val(arguments[0], &self.read()).as_u64() as usize;
-                            let layout = alloc::Layout::from_size_align(size, 8).unwrap();
-                            let buf = unsafe { alloc::alloc(layout) };
-                            let address = buf as usize;
-                            INTERP.write().unwrap().allocations.insert(address, layout);
-                            Value::UnownedPointer(UnownedPointer {
-                                allocation: std::ptr::slice_from_raw_parts_mut(buf, size),
-                                offset: 0,
-                            })
-                        }
-                        LegacyIntrinsic::Free => {
-                            assert_eq!(arguments.len(), 1);
-                            assert_eq!(self.read().arch.pointer_size(), 64);
-                            let ptr = frame.get_val(arguments[0], &self.read()).as_raw_ptr();
-                            let address = ptr as usize;
-                            let layout = INTERP.write().unwrap().allocations.remove(&address).unwrap();
-                            unsafe { alloc::dealloc(ptr, layout) };
-                            Value::Nothing
-                        },
                         LegacyIntrinsic::PrintType => {
                             let frame = stack.last().unwrap();
                             assert_eq!(arguments.len(), 1);
@@ -1950,7 +1937,7 @@ impl DriverRwRef<'_> {
     }
 }
 
-static INTERP: LazyLock<RwLock<Interpreter>> = LazyLock::new(|| RwLock::new(Interpreter::new(InterpMode::CompileTime)));
+pub static INTERP: LazyLock<RwLock<Interpreter>> = LazyLock::new(|| RwLock::new(Interpreter::new(InterpMode::CompileTime)));
 
 thread_local! {
     static INTERP_STACK: RefCell<Vec<StackFrame>> = const { RefCell::new(Vec::new()) };

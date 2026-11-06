@@ -483,6 +483,93 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
     }
 }
 
+/// The interpreter pointer types that `#[dusk_bridge]` knows how to bridge intrinsically.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum PointerKind {
+    /// `crate::interpreter::Pointer`; allowed for parameters and return values.
+    Pointer,
+    /// `crate::interpreter::UnownedPointer`; allowed for return values only.
+    UnownedPointer,
+}
+
+/// Recognizes `Pointer` and `UnownedPointer` by the last segment of the type's path (so a type alias won't be
+/// recognized).
+fn pointer_kind(ty: &Type) -> Option<PointerKind> {
+    let Type::Path(path) = ty else { return None };
+    if path.qself.is_some() {
+        return None;
+    }
+    let segment = path.path.segments.last()?;
+    if !segment.arguments.is_empty() {
+        return None;
+    }
+    match segment.ident.to_string().as_str() {
+        "Pointer" => Some(PointerKind::Pointer),
+        "UnownedPointer" => Some(PointerKind::UnownedPointer),
+        _ => None,
+    }
+}
+
+/// Removes the attribute named `name` from `attrs` and parses its contents as a Dusk pointer type, if present.
+fn take_dusk_ptr_annotation(attrs: &mut Vec<Attribute>, name: &str) -> syn::Result<Option<(proc_macro2::Span, proc_macro2::TokenStream)>> {
+    let mut result = None;
+    for attr in attrs.iter().filter(|attr| attr.path.is_ident(name)) {
+        if result.is_some() {
+            return Err(syn::Error::new(attr.span(), format!("duplicate `{}` attribute", name)));
+        }
+        let (ty, is_ptr) = attr.parse_args_with(parse_dusk_type)?;
+        if !is_ptr {
+            return Err(syn::Error::new(attr.span(), format!("the Dusk type in `{}` must be a pointer type, like `void *mut`", name)));
+        }
+        result = Some((attr.span(), ty));
+    }
+    attrs.retain(|attr| !attr.path.is_ident(name));
+    Ok(result)
+}
+
+/// Parses a Dusk type written in Dusk syntax (e.g. `void *mut`, `u8 * *mut`) into an expression that constructs the
+/// corresponding `crate::ty::Type`, plus whether it's a pointer type. Supports a primitive base type followed by any
+/// number of `*` / `*mut` suffixes.
+fn parse_dusk_type(input: ParseStream) -> syn::Result<(proc_macro2::TokenStream, bool)> {
+    let base: syn::Ident = input.parse()?;
+    let mut ty = match base.to_string().as_str() {
+        "void" => quote! { crate::ty::Type::Void },
+        "never" => quote! { crate::ty::Type::Never },
+        "bool" => quote! { crate::ty::Type::Bool },
+        "u8" | "u16" | "u32" | "u64" | "usize" |
+        "i8" | "i16" | "i32" | "i64" | "isize" |
+        "f32" | "f64" => quote! { crate::ty::Type::#base() },
+        other => return Err(syn::Error::new(base.span(), format!("unsupported base type `{}` in Dusk type", other))),
+    };
+    let mut is_ptr = false;
+    while !input.is_empty() {
+        input.parse::<syn::Token![*]>()?;
+        is_ptr = true;
+        if input.peek(syn::Token![mut]) {
+            input.parse::<syn::Token![mut]>()?;
+            ty = quote! { #ty.mut_ptr() };
+        } else {
+            ty = quote! { #ty.ptr() };
+        }
+    }
+    Ok((ty, is_ptr))
+}
+
+/// Bridges each method in an `impl Driver` block to Dusk as an intrinsic.
+///
+/// Parameter and return types are normally bridged via their `DuskBridge` impls. The exception is the interpreter's
+/// pointer types, which the macro bridges intrinsically and which can stand for any Dusk pointer type, so they must be
+/// annotated with the Dusk type they represent (a missing annotation is a compile error):
+/// - Parameters of type `Pointer`, annotated like `#[ty(void *mut)] ptr: Pointer`.
+/// - Return values of type `Pointer` or `UnownedPointer`, annotated on the method like `#[ret_ty(void *mut)]`.
+///
+/// Per-method attributes:
+/// - `#[path = "a.b.C"]`: the module or type path to declare the intrinsic under.
+/// - `#[ret_ty(<dusk pointer type>)]`: the Dusk type of a `Pointer`/`UnownedPointer` return value.
+///
+/// Per-parameter attributes:
+/// - `#[self]`: makes the intrinsic callable as a method on the first parameter.
+/// - `#[ty(<dusk pointer type>)]`: the Dusk type of a `Pointer` parameter.
 #[proc_macro_attribute]
 pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
     assert!(attr.is_empty());
@@ -547,6 +634,11 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             .unwrap_or_else(|| String::from(""));
                         method.attrs.retain(|attr| !attr.path.is_ident("path"));
 
+                        let ret_ty_annotation = match take_dusk_ptr_annotation(&mut method.attrs, "ret_ty") {
+                            Ok(annotation) => annotation,
+                            Err(err) => return err.to_compile_error().into(),
+                        };
+
                         struct DriverReceiver {
                             is_mut: bool,
                         }
@@ -579,24 +671,83 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                         has_self = true;
                                     }
 
+                                    let ty_annotation = match take_dusk_ptr_annotation(&mut ty.attrs, "ty") {
+                                        Ok(annotation) => annotation,
+                                        Err(err) => return err.to_compile_error().into(),
+                                    };
                                     let ty = ty.ty.clone();
                                     let param_val_variable_name = format!("__param_{}", param_index);
                                     let param_val_variable_name = syn::Ident::new(&param_val_variable_name, input.span());
-                                    param_tys.push(ty.clone());
-                                    param_val_decls.push(
-                                        quote! {
-                                            let #param_val_variable_name = <#ty>::bridge_from_dusk(parameters[#param_index], &d.read());
-                                        }
-                                    );
+                                    match (pointer_kind(&ty), ty_annotation) {
+                                        (Some(PointerKind::Pointer), Some((_, dusk_ty))) => {
+                                            param_tys.push(dusk_ty);
+                                            param_val_decls.push(
+                                                quote! {
+                                                    let #param_val_variable_name = parameters[#param_index].as_allocation();
+                                                }
+                                            );
+                                        },
+                                        (Some(PointerKind::Pointer), None) => {
+                                            return syn::Error::new(
+                                                ty.span(),
+                                                "`Pointer` parameters must be annotated with the Dusk type they represent, like `#[ty(void *mut)]`",
+                                            ).to_compile_error().into();
+                                        },
+                                        (Some(PointerKind::UnownedPointer), _) => {
+                                            return syn::Error::new(
+                                                ty.span(),
+                                                "`UnownedPointer` is not supported for parameters, because a pointer passed from Dusk may not point into an interpreter allocation; use `Pointer` instead",
+                                            ).to_compile_error().into();
+                                        },
+                                        (None, Some((span, _))) => {
+                                            return syn::Error::new(
+                                                span,
+                                                "`ty` attribute is only supported on parameters of type `Pointer`",
+                                            ).to_compile_error().into();
+                                        },
+                                        (None, None) => {
+                                            param_tys.push(quote! { <#ty>::to_dusk_type(d) });
+                                            param_val_decls.push(
+                                                quote! {
+                                                    let #param_val_variable_name = <#ty>::bridge_from_dusk(parameters[#param_index], &d.read());
+                                                }
+                                            );
+                                        },
+                                    }
                                     param_val_names.push(param_val_variable_name);
                                     param_index += 1;
                                 },
                             }
                         }
 
-                        let ret_ty = match &method.sig.output {
+                        let ret_ty: Type = match &method.sig.output {
                             ReturnType::Default => syn::parse2(quote! { () }).unwrap(),
                             ReturnType::Type(_, ty) => ty.as_ref().clone(),
+                        };
+                        let (ret_dusk_ty, ret_val_to_dusk) = match (pointer_kind(&ret_ty), ret_ty_annotation) {
+                            (Some(kind), Some((_, dusk_ty))) => {
+                                let to_dusk = match kind {
+                                    PointerKind::Pointer => quote! { crate::interpreter::Value::from_allocation(val) },
+                                    PointerKind::UnownedPointer => quote! { crate::interpreter::Value::UnownedPointer(val) },
+                                };
+                                (dusk_ty, to_dusk)
+                            },
+                            (Some(_), None) => {
+                                return syn::Error::new(
+                                    ret_ty.span(),
+                                    "pointer return values must be annotated with the Dusk type they represent, like `#[ret_ty(void *mut)]` on the method",
+                                ).to_compile_error().into();
+                            },
+                            (None, Some((span, _))) => {
+                                return syn::Error::new(
+                                    span,
+                                    "`ret_ty` attribute is only supported on methods returning `Pointer` or `UnownedPointer`",
+                                ).to_compile_error().into();
+                            },
+                            (None, None) => (
+                                quote! { <#ret_ty>::to_dusk_type(d) },
+                                quote! { val.bridge_to_dusk(&d.read()) },
+                            ),
                         };
                         let name = method.sig.ident.to_string();
 
@@ -647,17 +798,17 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 IntrinsicKind::#variant => {
                                     #(#param_val_decls)*
                                     let val = #implementation(#(#param_val_names),*);
-                                    val.bridge_to_dusk(&d.read())
+                                    #ret_val_to_dusk
                                 }
                             }
                         );
                         registrations.push(
                             quote! {
-                                let ret_ty = <#ret_ty>::to_dusk_type(d);
+                                let ret_ty = #ret_dusk_ty;
                                 let info = crate::ast::IntrinsicInfo {
                                     param_tys: smallvec![
                                         #(
-                                            d.add_const_ty(b, <#param_tys>::to_dusk_type(d)),
+                                            d.add_const_ty(b, #param_tys),
                                         )*
                                     ],
                                     ret_ty: ret_ty.clone(),

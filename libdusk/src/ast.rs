@@ -452,8 +452,6 @@ pub enum LegacyIntrinsic {
 
     Panic,
     Print,
-    Malloc,
-    Free,
     SizeOf,
     StrideOf,
     AlignOf,
@@ -505,8 +503,6 @@ impl LegacyIntrinsic {
 
             Panic => "panic",
             Print => "print",
-            Malloc => "malloc",
-            Free => "free",
             Import => "import",
 
             PrintType => "print_type",

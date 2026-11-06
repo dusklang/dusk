@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::mem;
+use std::alloc;
 
 use internal_types::ExternParam;
 use smallvec::{smallvec, SmallVec};
@@ -7,6 +8,8 @@ use num_bigint::BigInt;
 use string_interner::DefaultSymbol as Sym;
 
 use crate::index_vec::empty_range;
+use crate::interpreter::Pointer;
+use crate::interpreter::UnownedPointer;
 use crate::{ast, internal_types};
 use crate::source_info::SourceRange;
 use crate::ast::{ModScopeNs, LegacyIntrinsic, Expr, Decl, VOID_TYPE, ModScopeNsId, NewNamespaceId, ExprId, StaticDecl, InstanceDecl, NewNamespace, ExternFunctionRef, ExternFunction, ParamList};
@@ -17,6 +20,7 @@ use crate::driver::Driver;
 use crate::ast::ScopeState;
 use crate::autopop::AutoPopStackEntry;
 use crate::parser::ParseResult;
+use crate::interpreter::INTERP;
 
 use crate::internal_types::{ModuleBuilder, Module, ExternFunctionBuilder};
 
@@ -109,6 +113,25 @@ impl Driver {
     fn print_int(&self, val: usize) {
         println!("int: {}", val);
     }
+
+    #[ret_ty(void *mut)]
+    fn malloc(&self, size: usize) -> UnownedPointer {
+        let layout = alloc::Layout::from_size_align(size, 8).unwrap();
+        let buf = unsafe { alloc::alloc(layout) };
+        let address = buf as usize;
+        INTERP.write().unwrap().allocations.insert(address, layout);
+        UnownedPointer {
+            allocation: std::ptr::slice_from_raw_parts_mut(buf, size),
+            offset: 0,
+        }
+    }
+
+    fn free(&self, #[ty(void *mut)] ptr: Pointer) {
+        let ptr = ptr.as_raw_ptr();
+        let address = ptr as usize;
+        let layout = INTERP.write().unwrap().allocations.remove(&address).unwrap();
+        unsafe { alloc::dealloc(ptr, layout) };
+    }
 }
 
 struct VariantBuilder {
@@ -163,7 +186,6 @@ impl Driver {
         let never        = self.add_const_ty(b, Type::Never);
         let uusize       = self.add_const_ty(b, Type::usize());
         let u8_ptr       = self.add_const_ty(b, Type::u8().ptr());
-        let void_mut_ptr = self.add_const_ty(b, Type::Void.mut_ptr());
         let type_type    = self.add_const_ty(b, Type::Ty);
         let mod_type     = self.add_const_ty(b, Type::Mod);
 
@@ -217,9 +239,6 @@ impl Driver {
 
         self.add_intrinsic(b, Panic, SmallVec::new(), never, true);
         self.add_intrinsic(b, Panic, smallvec![u8_ptr], never, true);
-
-        self.add_intrinsic(b, Malloc, smallvec![uusize], void_mut_ptr, true);
-        self.add_intrinsic(b, Free, smallvec![void_mut_ptr], VOID_TYPE, true);
 
         self.add_intrinsic(b, Print, smallvec![u8_ptr], VOID_TYPE, true);
         self.add_intrinsic(b, Print, smallvec![uu8], VOID_TYPE, true);
