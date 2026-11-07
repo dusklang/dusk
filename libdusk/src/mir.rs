@@ -217,7 +217,7 @@ pub struct CompilerTestCase {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionCore {
+pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
     pub blocks: IndexVec<BlockId, Block>,
@@ -233,10 +233,13 @@ pub struct FunctionCore {
     pub decl: Option<DeclId>,
     pub generic_params: Range<GenericParamId>,
     pub is_comptime: bool,
+
+    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
+    pub poisoned_instrs: HashSet<InstrId>,
 }
 
 struct FunctionBuilder {
-    core: FunctionCore,
+    func: Function,
 
     block_states: HashMap<BlockId, BlockState>,
     current_block: BlockId,
@@ -245,23 +248,7 @@ struct FunctionBuilder {
     pattern_matching_scrutinees: HashMap<PatternMatchingContextId, HashMap<SwitchScrutineeValueId, IndirectValue>>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Function {
-    pub core: FunctionCore,
-
-    // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
-    pub poisoned_instrs: HashSet<InstrId>,
-}
-
-impl std::ops::Deref for Function {
-    type Target = FunctionCore;
-
-    fn deref(&self) -> &Self::Target {
-        &self.core
-    }
-}
-
-impl Default for FunctionCore {
+impl Default for Function {
     fn default() -> Self {
         Self {
             name: Default::default(),
@@ -279,6 +266,7 @@ impl Default for FunctionCore {
             generic_params: empty_range(),
             value_namespace: Default::default(),
             is_comptime: Default::default(),
+            poisoned_instrs: Default::default(),
         }
     }
 }
@@ -286,10 +274,10 @@ impl Default for FunctionCore {
 impl Driver {
     #[display_adapter]
     pub fn display_block(&self, b: &FunctionBuilder, block: BlockId, w: &mut Formatter) {
-        let mut cursor = b.make_cursor();
+        let mut cursor = b.func.make_cursor();
         cursor.goto_top(block);
         while let Some(instr) = cursor.next_instr() {
-            writeln!(w, "    %instr{} = mir.{:?}", instr.index(), b.core.instrs[instr].kind)?;
+            writeln!(w, "    %instr{} = mir.{:?}", instr.index(), b.func.instrs[instr].kind)?;
         }
         Ok(())
     }
@@ -1037,7 +1025,7 @@ impl Driver {
 
     // TODO: Move this out of MIR
     #[display_adapter('a)]
-    pub fn display_item(&'a self, ctx: Option<&'a FunctionCore>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
+    pub fn display_item(&'a self, ctx: Option<&'a Function>, item: impl Into<ToSourceRange> + Copy + 'a, f: &mut Formatter) {
         let range = self.get_range_with_mir_ctx(item, ctx);
         let mut fallback = || {
             match item.into() {
@@ -1084,7 +1072,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_value_from_builder(&self, b: &FunctionBuilder, value: ValueId, f: &mut Formatter) {
-        write!(f, "{}", self.display_value_impl(&b.core.values, &b.core.value_names, value))
+        write!(f, "{}", self.display_value_impl(&b.func.values, &b.func.value_names, value))
     }
 
     #[display_adapter]
@@ -1094,7 +1082,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_value_name_from_builder(&self, b: &FunctionBuilder, value: ValueId, f: &mut Formatter) {
-        write!(f, "{}", self.display_value_name_impl(&b.core.value_names, value))
+        write!(f, "{}", self.display_value_name_impl(&b.func.value_names, value))
     }
 
     #[display_adapter]
@@ -1426,10 +1414,10 @@ impl Driver {
     fn end_current_block(&self, b: &mut FunctionBuilder, terminator: TerminatorKind) -> IndirectValue {
         let block = b.current_block;
         if b.end_block(block).is_err() {
-            panic!("Failed to end block {} in function {}:\n{}", block.index(), self.fn_name(b.core.name), self.display_block(b, block));
+            panic!("Failed to end block {} in function {}:\n{}", block.index(), self.fn_name(b.func.name), self.display_block(b, block));
         }
 
-        let terminator_ref = &mut b.core.blocks[block].terminator;
+        let terminator_ref = &mut b.func.blocks[block].terminator;
         assert!(terminator_ref.is_none(), "attempted to end block that already has a terminator");
         if let TerminatorKind::Call(ref call) = terminator {
             let ty = self.generate_type_of_call(call);
@@ -1464,7 +1452,7 @@ impl DriverRwRef<'_> {
             entry.params.push(param_value);
         }
         blocks.push_at(entry_block, entry);
-        let core = FunctionCore {
+        let core = Function {
             name,
             ty: func_ty,
             blocks,
@@ -1484,9 +1472,10 @@ impl DriverRwRef<'_> {
                 None
             },
             is_comptime,
+            poisoned_instrs: Default::default(),
         };
         let mut b = FunctionBuilder {
-            core,
+            func: core,
             block_states: HashMap::new(),
             current_block: entry_block,
             stored_decl_locs: IndexVec::new(),
@@ -1508,13 +1497,13 @@ impl DriverRwRef<'_> {
                     InstrKind::Call(_) => {
                         let mut copier = MirCopier::default();
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
-                        let value = b.core.instrs[result].value;
+                        let value = b.func.instrs[result].value;
                         self.read().end_current_block(&mut b, TerminatorKind::Ret(value));
                     },
                     InstrKind::DiscriminantAccess { .. } | InstrKind::SignExtend(_, _) | InstrKind::ZeroExtend(_, _) => {
                         let mut copier = MirCopier::default();
                         let result = self.copy_instruction_if_needed(&mut b, &mut copier, parent_func, instr);
-                        let value = b.core.instrs[result].value;
+                        let value = b.func.instrs[result].value;
                         self.read().end_current_block(&mut b, TerminatorKind::Ret(value));
                     },
                     _ => unimplemented!("{:?}", instruction),
@@ -1522,194 +1511,115 @@ impl DriverRwRef<'_> {
             },
         };
         // Remove inactive blocks
-        let mut cursor = b.make_cursor_mut();
+        let mut cursor = b.func.make_cursor_mut();
         while cursor.next_block().is_some() {
             if cursor.next_instr().is_none() && cursor.terminator().is_none() {
                 cursor.remove_block();
             }
         }
         b.check_all_blocks_ended();
-        let mut function = Function {
-            core: b.core,
-            poisoned_instrs: Default::default(),
-        };
 
         let is_constant_instruction = matches!(body, FunctionBody::ConstantInstruction { .. });
-        self.optimize_function(&mut function, !is_constant_instruction, tp);
-        self.validate_function(&function);
+        self.optimize_function(&mut b.func, !is_constant_instruction, tp);
+        self.validate_function(&b.func);
         // At this point, it is assumed that any comptime functions that can be evaluated at compile time already have
         // been. Therefore, if there are any calls to comptime functions left, it must be because they were passed
         // non-const arguments. If *this* function itself is comptime, then this is perfectly fine.
-        if !function.is_comptime {
-            self.check_no_comptime_calls(&function);
+        if !b.func.is_comptime {
+            self.check_no_comptime_calls(&b.func);
         }
-        function
+        b.func
     }
 }
 
-#[derive(Default)]
-struct MirTransformer {
-    delete_list: HashSet<InstrId>,
-    ref_replace_list: Vec<(ValueId, ValueId)>,
-    replace_list: Vec<(InstrId, InstrKind)>,
-    terminator_replace_list: Vec<(BlockId, TerminatorKind)>,
-}
-
-impl MirTransformer {
-    fn q_delete_and_replace_references(&mut self, to_delete: InstrId, to_delete_value: ValueId, to_replace_with: ValueId) {
-        self.delete_list.insert(to_delete);
-        self.ref_replace_list.push((to_delete_value, to_replace_with));
-    }
-
-    fn q_delete(&mut self, to_delete: InstrId) {
-        self.delete_list.insert(to_delete);
-    }
-
-    fn q_delete_items(&mut self, to_delete: impl IntoIterator<Item=InstrId>) {
-        self.delete_list.extend(to_delete);
-    }
-
-    fn q_replace_terminator(&mut self, block: BlockId, new_terminator: TerminatorKind) {
-        self.terminator_replace_list.push((block, new_terminator));
-    }
-
-    fn q_replace_instr(&mut self, to_replace: InstrId, instr: InstrKind) {
-        self.replace_list.push((to_replace, instr));
-    }
-
-    fn transform(self, func: &mut Function) -> bool {
-        if self.delete_list.is_empty() && self.ref_replace_list.is_empty() && self.replace_list.is_empty() && self.terminator_replace_list.is_empty() {
-            return false;
-        }
-
-        let mut cursor = func.make_cursor_mut();
-        while let Some(block_id) = cursor.next_block() {
-            while let Some(instr) = cursor.next_instr() {
-                if self.delete_list.contains(&instr) {
-                    cursor.remove_instr();
-                }
-            }
-            cursor.goto_top(block_id);
-            while let Some(instr) = cursor.next_instr() {
-                for &(old, new) in &self.ref_replace_list {
-                    cursor.core.instrs[instr].kind.replace_value(old, new);
-                }
-            }
-            if let Some(terminator) = cursor.terminator_mut() {
-                for &(old, new) in &self.ref_replace_list {
-                    terminator.replace_value(old, new);
-                }
-            }
-        }
-        for (id, new_instr) in self.replace_list {
-            cursor.core.instrs[id].kind = new_instr;
-        }
-        for (block, terminator) in self.terminator_replace_list {
-            cursor.core.blocks[block].terminator = Some(terminator);
-        }
-
-        true
-    }
-}
 
 impl Driver {
     fn remove_redundant_loads(&self, func: &mut Function) -> bool {
         // Remove obviously-redundant loads (assumes no other threads are accessing a memory location simultaneously)
-        let mut transformer = MirTransformer::default();
-        let mut cursor = func.make_cursor();
+        let mut did_something = false;
+        let uses = func.get_uses();
+        let mut cursor = func.make_cursor_mut();
         while cursor.next_block().is_some() {
             while let Some(instr_id) = cursor.next_instr() {
-                let instr = &func.instrs[instr_id].kind;
+                let instr = &cursor.func.instrs[instr_id].kind;
                 if let &InstrKind::Store { location, value } = instr
-                    && let Some(next_instr) = cursor.core.instr_nodes[instr_id].next {
-                        let next_instr_value = func.instrs[next_instr].value;
-                        if let InstrKind::Load(load_loc) = func.instrs[next_instr].kind
+                    && let Some(next_instr) = cursor.peek_next_instr() {
+                        let next_instr_value = cursor.func.instrs[next_instr].value;
+                        if let InstrKind::Load(load_loc) = cursor.func.instrs[next_instr].kind
                             && load_loc == location {
-                                transformer.q_delete_and_replace_references(next_instr, next_instr_value, value);
+                                cursor.func.remove_instr(next_instr);
+                                cursor.func.replace_uses(&uses, next_instr_value, value);
+                                did_something = true;
                             }
                     }
             }
         }
-        transformer.transform(func)
+
+        did_something
     }
 
     fn remove_unused_allocas(&self, func: &mut Function) -> bool {
-        let mut transformer = MirTransformer::default();
-        let mut cursor = func.make_cursor();
+        let mut did_something = false;
+        let uses = func.get_uses();
+        let mut cursor = func.make_cursor_mut();
         while cursor.next_block().is_some() {
             while let Some(instr_id) = cursor.next_instr() {
-                let instr_value = func.instrs[instr_id].value;
-                let instr = &func.instrs[instr_id].kind;
+                let instr_value = cursor.func.instrs[instr_id].value;
+                let instr = &cursor.func.instrs[instr_id].kind;
                 let mut potential_deletions = Vec::new();
                 if let InstrKind::Alloca(_) = instr {
+                    let uses = uses.get(instr_value);
                     let mut is_used = false;
-                    let mut other_cursor = cursor.make_cursor();
-                    'check_uses: while other_cursor.next_block().is_some() {
-                        while let Some(other_instr_id) = other_cursor.next_instr() {
-                            let other_instr = &func.instrs[other_instr_id].kind;
-                            if other_instr.references_value(instr_value) {
-                                if let &InstrKind::Store { value, .. } = other_instr {
-                                    // If the address of the alloca is used as the *value* in the store, then we can't
-                                    // delete either instruction. Otherwise, it must be the location, in which case we
-                                    // can delete both (assuming the alloca isn't used elsewhere).
-                                    if value == instr_value {
-                                        is_used = true;
-                                        break 'check_uses;
-                                    } else {
-                                        potential_deletions.push(other_instr_id);
-                                    }
-                                } else {
-                                    is_used = true;
-                                    break 'check_uses;
-                                }
-                            }
-                        }
-                        if let Some(terminator) = other_cursor.terminator() && terminator.references_value(instr_value) {
-                            is_used = true;
-                            break;
-                        }
-                    }
-                    if !is_used {
-                        transformer.q_delete(instr_id);
-                        transformer.q_delete_items(potential_deletions);
-                    }
-                }
-            }
-
-        }
-        transformer.transform(func)
-    }
-
-    fn remove_unused_values(&self, func: &mut Function) -> bool {
-        let mut transformer = MirTransformer::default();
-        let mut cursor = func.make_cursor();
-        while cursor.next_block().is_some() {
-            while let Some(instr_id) = cursor.next_instr() {
-                let instr_value = func.instrs[instr_id].value;
-                let instr = &func.instrs[instr_id].kind;
-                if let InstrKind::Const(_) | InstrKind::Load(_) = instr {
-                    let mut is_used = false;
-                    let mut other_cursor = cursor.make_cursor();
-                    'check_uses: while other_cursor.next_block().is_some() {
-                        while let Some(other_instr_id) = other_cursor.next_instr() {
-                            let other_instr = &func.instrs[other_instr_id].kind;
-                            if other_instr.references_value(instr_value) {
+                    'check_uses: {
+                        for &other_instr_id in &uses.instrs {
+                            // If the address of the alloca is used as the *location* in the store, then it doesn't count
+                            // as a use, and we can potentially delete both it and the alloca later.
+                            if let InstrKind::Store { location, .. } = cursor.func.instrs[other_instr_id].kind
+                                && location != instr_value {
+                                potential_deletions.push(other_instr_id);
+                            } else {
                                 is_used = true;
                                 break 'check_uses;
                             }
                         }
-                        if let Some(terminator) = other_cursor.terminator() && terminator.references_value(instr_value) {
+                        if uses.terminators.len() > 0 {
                             is_used = true;
-                            break;
+                            break 'check_uses;
                         }
                     }
                     if !is_used {
-                        transformer.q_delete(instr_id);
+                        cursor.remove_instr();
+                        for potential_deletion in potential_deletions {
+                            cursor.func.remove_instr(potential_deletion);
+                        }
+                        did_something = true;
+                    }
+                }
+            }
+
+        }
+
+        did_something
+    }
+
+    fn remove_unused_values(&self, func: &mut Function) -> bool {
+        let mut did_something = false;
+        let uses = func.get_uses();
+        let mut cursor = func.make_cursor_mut();
+        while cursor.next_block().is_some() {
+            while let Some(instr_id) = cursor.next_instr() {
+                let instr_value = cursor.func.instrs[instr_id].value;
+                let instr = &cursor.func.instrs[instr_id].kind;
+                if let InstrKind::Const(_) | InstrKind::Load(_) = instr {
+                    if !uses.get(instr_value).is_used() {
+                        cursor.remove_instr();
+                        did_something = true;
                     }
                 }
             }
         }
-        transformer.transform(func)
+
+        did_something
     }
 
     fn register_edges(&self, func: &Function, mut register_edge: impl FnMut(BlockId, BlockId)) {
@@ -1811,12 +1721,12 @@ impl Driver {
             }
         }
         if let Some((new_entry_block_id, parameters)) = new_entry_block {
-            func.core.entry_block = new_entry_block_id;
+            func.entry_block = new_entry_block_id;
             for param in parameters {
-                let new_entry_block = &mut func.core.blocks[new_entry_block_id];
+                let new_entry_block = &mut func.blocks[new_entry_block_id];
                 let new_param_index = new_entry_block.params.len();
                 new_entry_block.params.push(param);
-                func.core.values[param].kind = ValueKind::Parameter { block: new_entry_block_id, index: new_param_index };
+                func.values[param].kind = ValueKind::Parameter { block: new_entry_block_id, index: new_param_index };
             }
         }
         let mut cursor = func.make_cursor_mut();
@@ -1859,37 +1769,39 @@ impl Driver {
     }
 
     fn remove_constant_branches(&self, func: &mut Function) -> bool {
-        let mut transformer = MirTransformer::default();
-        let mut cursor = func.make_cursor();
-        while let Some(block) = cursor.next_block() {
-            let terminator = cursor.terminator().unwrap();
-            match *terminator {
+        let mut did_something = false;
+        let mut cursor = func.make_cursor_mut();
+        while cursor.next_block().is_some() {
+            match *cursor.terminator().unwrap() {
                 TerminatorKind::CondBr { condition, ref true_target, ref false_target } => {
-                    match func.values[condition].kind {
+                    match cursor.func.values[condition].kind {
                         ValueKind::InstrResult(condition) => {
-                            let condition = &func.instrs[condition].kind;
+                            let condition = &cursor.func.instrs[condition].kind;
                             if let &InstrKind::Const(Const::Bool(condition)) = condition {
                                 let destination = if condition {
                                     true_target
                                 } else {
                                     false_target
                                 };
-                                transformer.q_replace_terminator(block, TerminatorKind::Jump(destination.clone()));
+                                cursor.replace_terminator(TerminatorKind::Jump(destination.clone()));
+                                did_something = true;
                             }
                         },
                         ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never => {},
                     }
                 },
                 TerminatorKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
-                    match func.values[scrutinee].kind {
+                    match cursor.func.values[scrutinee].kind {
                         ValueKind::InstrResult(scrutinee) => {
-                            let scrutinee = &func.instrs[scrutinee].kind;
+                            let scrutinee = &cursor.func.instrs[scrutinee].kind;
                             if let InstrKind::Const(scrutinee @ Const::Int { .. }) = scrutinee {
                                 let destination = cases.iter()
                                     .find(|case| *scrutinee == case.value)
                                     .map(|case| &case.target)
                                     .unwrap_or(catch_all_target);
-                                transformer.q_replace_terminator(block, TerminatorKind::Jump(destination.clone()));
+
+                                cursor.replace_terminator(TerminatorKind::Jump(destination.clone()));
+                                did_something = true;
                             }
                         },
                         ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never => {},
@@ -1899,20 +1811,22 @@ impl Driver {
             }
         }
 
-        transformer.transform(func)
+        did_something
     }
 
     fn remove_return_non_shared_void(&self, func: &mut Function) -> bool {
-        let mut transformer = MirTransformer::default();
-        let mut cursor = func.make_cursor();
-        while let Some(block) = cursor.next_block() {
+        let mut did_something = false;
+        let mut cursor = func.make_cursor_mut();
+        while cursor.next_block().is_some() {
             let terminator = cursor.terminator().unwrap();
             if let &TerminatorKind::Ret(ret_val) = terminator
-                && *func.ty.return_ty == Type::Void && ret_val != VOID_VALUE {
-                    transformer.q_replace_terminator(block, TerminatorKind::Ret(VOID_VALUE));
+                && *cursor.func.ty.return_ty == Type::Void && ret_val != VOID_VALUE {
+                    cursor.replace_terminator(TerminatorKind::Ret(VOID_VALUE));
+                    did_something = true;
                 }
         }
-        transformer.transform(func)
+
+        did_something
     }
 }
 
@@ -1972,7 +1886,7 @@ impl DriverRwRef<'_> {
         match src_function.values[value_id].kind {
             ValueKind::InstrResult(instr_id) => {
                 let instr = self.copy_instruction_if_needed(b, copier, src_function, instr_id);
-                b.core.instrs[instr].value
+                b.func.instrs[instr].value
             },
             ValueKind::Void => VOID_VALUE,
             ValueKind::Never => NEVER_VALUE,
@@ -2012,9 +1926,8 @@ impl DriverRwRef<'_> {
     }
 
     fn eval_constants(&self, func: &mut Function, tp: &dyn TypeProvider) -> bool {
-        let mut transformer = MirTransformer::default();
-        let mut poison_list = Vec::new();
-        let mut cursor = func.make_cursor();
+        let mut did_something = false;
+        let mut cursor = func.make_cursor_mut();
         while cursor.next_block().is_some() {
             while let Some(instr) = cursor.next_instr() {
                 // TODO: be greedy about the number of instructions you take to reduce the number of ad hoc MIR
@@ -2027,26 +1940,24 @@ impl DriverRwRef<'_> {
                 // possible to put them all together (or they each need to be returned from the function via tuples or
                 // something). So it's not quite as simple to do this as I had initially thought. But still a good idea
                 // probably.
-                if self.instruction_is_nontrivial_const(func, instr) && !func.poisoned_instrs.contains(&instr) {
-                    let ty = func.type_of_instr(instr).clone();
+                if self.instruction_is_nontrivial_const(&cursor.func, instr) && !cursor.func.poisoned_instrs.contains(&instr) {
+                    let ty = cursor.func.type_of_instr(instr).clone();
                     let func_ty = FunctionType { param_tys: vec![], has_c_variadic_param: false, return_ty: Box::new(ty.clone()) };
-                    let new_func = self.build_function(func.name, func_ty, FunctionBody::ConstantInstruction { parent_func: func, instr }, empty_range(), empty_range(), true, tp);
+                    let new_func = self.build_function(cursor.func.name, func_ty, FunctionBody::ConstantInstruction { parent_func: cursor.func, instr }, empty_range(), empty_range(), true, tp);
                     let Ok(result) = self.call(FunctionRef::Ref(new_func), Vec::new(), Vec::new()) else {
                         // Make sure we won't repeatedly try and fail to const-eval this instruction.
-                        poison_list.push(instr);
+                        cursor.func.poisoned_instrs.insert(instr);
+                        did_something = true;
                         continue;
                     };
                     let konst = self.read().value_to_const(result, ty);
-                    transformer.q_replace_instr(instr, InstrKind::Const(konst));
+                    cursor.replace_instr(InstrKind::Const(konst));
+                    did_something = true;
                 }
             }
         }
 
-        for instr in poison_list {
-            func.poisoned_instrs.insert(instr);
-        }
-
-        transformer.transform(func)
+        did_something
     }
 
     fn optimize_function(&self, func: &mut Function, should_eval_constants: bool, tp: &dyn TypeProvider) {
@@ -2139,7 +2050,7 @@ impl Driver {
         if matches!(ty, Type::Void) {
             VOID_VALUE
         } else {
-            b.core.values.push(Value::new(ty, ValueKind::InstrResult(id)))
+            b.func.values.push(Value::new(ty, ValueKind::InstrResult(id)))
         }
     }
 
@@ -2170,7 +2081,7 @@ impl Driver {
             &InstrKind::StructLit { ref fields, id } => {
                 let field_tys = fields.iter()
                     .map(|&val| {
-                        b.core.values[val].ty.clone()
+                        b.func.values[val].ty.clone()
                     })
                     .collect();
                 Type::Struct(
@@ -2189,20 +2100,20 @@ impl Driver {
             | InstrKind::ZeroExtend(_, ty) | InstrKind::FloatCast(_, ty) | InstrKind::FloatToInt(_, ty)
             | InstrKind::IntToFloat(_, ty)
             => ty.clone(),
-            &InstrKind::Load(value) => match b.core.type_of_val(value) {
+            &InstrKind::Load(value) => match b.func.type_of_val(value) {
                 Type::Pointer(pointee) => pointee.ty.clone(),
                 _ => Type::Error,
             },
             &InstrKind::AddressOfStatic(statik) => self.mir.statics[statik].val.ty().mut_ptr(),
             &InstrKind::DirectFieldAccess { val, index } => {
-                let base_ty = b.core.type_of_val(val);
+                let base_ty = b.func.type_of_val(val);
                 match base_ty {
                     Type::Struct(strukt) => strukt.field_tys[index].clone(),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
                 }
             },
             &InstrKind::IndirectFieldAccess { val, index } => {
-                let base_ty = b.core.type_of_val(val).deref().unwrap();
+                let base_ty = b.func.type_of_val(val).deref().unwrap();
                 match base_ty.ty {
                     Type::Struct(ref strukt) => strukt.field_tys[index].clone().ptr_with_mut(base_ty.is_mut),
                     _ => panic!("Cannot directly access field of non-struct type {:?}!", base_ty),
@@ -2219,7 +2130,7 @@ impl Driver {
                 )
             },
             &InstrKind::PayloadAccess { val, variant_index } => {
-                let base_ty = b.core.type_of_val(val);
+                let base_ty = b.func.type_of_val(val);
                 match base_ty {
                     &Type::Enum(EnumType { identity, .. }) => self.mir.enums.pin().get(&identity).unwrap().payload_tys[variant_index].clone(),
                     _ => panic!("Cannot directly access payload of non-enum type {:?}!", base_ty),
@@ -2230,9 +2141,9 @@ impl Driver {
     }
 
     fn push_instr_and_get_id(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>) -> (InstrId, ValueId) {
-        let id = b.core.instrs.next_idx();
+        let id = b.func.instrs.next_idx();
         let value = self.get_result_value(b, id, &instr);
-        let source_range = self.get_range_with_mir_ctx(item, Some(&b.core));
+        let source_range = self.get_range_with_mir_ctx(item, Some(&b.func));
         b.push_instr(id, instr, value, source_range);
 
         (id, value)
@@ -2252,7 +2163,7 @@ impl Driver {
 
     fn push_instr_with_name(&self, b: &mut FunctionBuilder, instr: InstrKind, item: impl Into<ToSourceRange>, name: impl Into<String>) -> ValueId {
         let value = self.push_instr(b, instr, item);
-        b.core.register_value_name(value, name);
+        b.func.register_value_name(value, name);
 
         value
     }
@@ -2275,7 +2186,7 @@ impl DriverRwRef<'_> {
                         b.stored_decl_locs.push_at(id, location);
                         let val = self.build_expr(b, root_expr, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                         let instr = self.read().handle_indirection(b, val);
-                        let range = self.read().get_range_with_mir_ctx(location, Some(&b.core)) + self.read().get_range_with_mir_ctx(instr, Some(&b.core));
+                        let range = self.read().get_range_with_mir_ctx(location, Some(&b.func)) + self.read().get_range_with_mir_ctx(instr, Some(&b.func));
                         self.read().push_instr(b, InstrKind::Store { location, value: instr }, range);
                     },
                     ast::Decl::Function { .. } => {},
@@ -2342,7 +2253,7 @@ impl DriverRwRef<'_> {
                 DeclRef::Value(scrutinee_value)
             },
             Decl::Parameter { index } => {
-                let entry_block = &b.core.blocks[b.core.entry_block];
+                let entry_block = &b.func.blocks[b.func.entry_block];
                 let param_value = entry_block.params[index];
                 DeclRef::Value(param_value.direct())
             },
@@ -2419,7 +2330,7 @@ impl DriverRwRef<'_> {
     }
 }
 
-impl FunctionCore {
+impl Function {
     fn create_block(&mut self) -> BlockId {
         let prev = self.last_block;
 
@@ -2558,6 +2469,84 @@ impl FunctionCore {
             next_node.prev = prev;
         }
     }
+
+    fn replace_uses(&mut self, uses: &ValueUses, old: ValueId, new: ValueId) {
+        let uses = uses.get(old);
+        for &instr_id in &uses.instrs {
+            self.instrs[instr_id].kind.replace_value(old, new);
+        }
+        for &block_id in &uses.terminators {
+            self.blocks[block_id].terminator.as_mut().unwrap().replace_value(old, new)
+        }
+    }
+
+    fn visit_uses(&self, mut instr_visitor: impl FnMut(ValueId, InstrId), mut terminator_visitor: impl FnMut(ValueId, BlockId)) {
+        let mut cursor = self.make_cursor();
+        while let Some(block_id) = cursor.next_block() {
+            while let Some(instr_id) = cursor.next_instr() {
+                let instr = &cursor.func.instrs[instr_id].kind;
+                instr.visit_values(&mut |value| {
+                    instr_visitor(value, instr_id);
+                });
+            }
+            if let Some(terminator) = cursor.terminator() {
+                terminator.visit_values(&mut |value| {
+                    terminator_visitor(value, block_id);
+                });
+            }
+        }
+    }
+
+    fn get_uses(&self) -> ValueUses {
+        let uses = RefCell::<ValueUses>::default();
+        self.visit_uses(|value, using_instr| {
+            uses.borrow_mut().add_using_instr(value, using_instr);
+        },
+    |value, using_terminator| {
+            uses.borrow_mut().add_using_terminator(value, using_terminator);
+        });
+        uses.into_inner()
+    }
+}
+
+#[derive(Default)]
+struct SingleValueUses {
+    instrs: Vec<InstrId>,
+    terminators: Vec<BlockId>,
+}
+
+impl SingleValueUses {
+    const fn new() -> Self {
+        Self {
+            instrs: Vec::new(),
+            terminators: Vec::new(),
+        }
+    }
+
+    const fn is_used(&self) -> bool {
+        !self.instrs.is_empty() || !self.terminators.is_empty()
+    }
+}
+
+const EMPTY_USES: &'static SingleValueUses = &SingleValueUses::new();
+
+#[derive(Default)]
+struct ValueUses {
+    uses: HashMap<ValueId, SingleValueUses>,
+}
+
+impl ValueUses {
+    fn add_using_instr(&mut self, value: ValueId, using_instr: InstrId) {
+        self.uses.entry(value).or_default().instrs.push(using_instr);
+    }
+
+    fn add_using_terminator(&mut self, value: ValueId, using_terminator: BlockId) {
+        self.uses.entry(value).or_default().terminators.push(using_terminator);
+    }
+
+    fn get(&self, value: ValueId) -> &SingleValueUses {
+        self.uses.get(&value).unwrap_or(EMPTY_USES)
+    }
 }
 
 impl FunctionBuilder {
@@ -2590,7 +2579,7 @@ impl FunctionBuilder {
     }
 
     pub fn first_unended_block(&self) -> Option<BlockId> {
-        for block_id in self.make_cursor().block_ids_iter() {
+        for block_id in self.func.make_cursor().block_ids_iter() {
             let state = &self.block_states[&block_id];
             if !matches!(state, BlockState::Ended) {
                 return Some(block_id)
@@ -2606,25 +2595,25 @@ impl FunctionBuilder {
     }
 
     fn push_instr(&mut self, id: InstrId, instr: InstrKind, value: ValueId, source_range: SourceRange) {
-        self.core.push_instr(self.current_block, id, instr, value, source_range)
+        self.func.push_instr(self.current_block, id, instr, value, source_range)
     }
 
     fn push_param(&mut self, ty: Type) -> ValueId {
-        self.core.push_param_on_block(self.current_block, ty)
+        self.func.push_param_on_block(self.current_block, ty)
     }
 }
 
 impl DriverRwRef<'_> {
     fn build_if_expr(&self, b: &mut FunctionBuilder, _expr: ExprId, ty: Type, condition: ExprId, then_scope: ImperScopeId, else_scope: Option<ImperScopeId>, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
-        let true_block = b.core.create_block();
-        let mut false_block: BlockId = b.core.create_block();
+        let true_block = b.func.create_block();
+        let mut false_block: BlockId = b.func.create_block();
         if matches!(ctx.data, DataDest::Read) {
             assert_matches!(ctx.control, ControlDest::Continue);
         }
         let pass_value_as_argument = matches!((&ctx.data, else_scope), (DataDest::Read, Some(_)));
         let (post_block, we_own_post_block) = match ctx.control {
             ControlDest::Jump(target) => (target, false),
-            _ => (b.core.create_block(), true),
+            _ => (b.func.create_block(), true),
         };
         if else_scope.is_none() && !pass_value_as_argument {
             false_block = post_block;
@@ -2647,9 +2636,9 @@ impl DriverRwRef<'_> {
                 let d = self.read();
                 if let Expr::If { condition, then_scope, else_scope } = ef!(d, terminal_expr.ast) {
                     drop(d);
-                    let true_block = b.core.create_block();
+                    let true_block = b.func.create_block();
                     let false_block = if else_scope.is_some() {
-                        b.core.create_block()
+                        b.func.create_block()
                     } else {
                         post_block
                     };
@@ -2772,7 +2761,7 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::LogicalAnd => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
-                            let left_true_block = b.core.create_block();
+                            let left_true_block = b.func.create_block();
                             let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                             if let DataDest::Branch(true_block, false_block) = ctx.data {
                                 self.build_expr(
@@ -2790,8 +2779,8 @@ impl DriverRwRef<'_> {
                                     tp,
                                 );
                             } else {
-                                let left_false_block = b.core.create_block();
-                                let after_block = b.core.create_block();
+                                let left_false_block = b.func.create_block();
+                                let after_block = b.func.create_block();
                                 self.build_expr(
                                     b,
                                     lhs,
@@ -2821,7 +2810,7 @@ impl DriverRwRef<'_> {
                         LegacyIntrinsic::LogicalOr => {
                             assert_eq!(arguments.len(), 2);
                             let (lhs, rhs) = (arguments[0], arguments[1]);
-                            let left_false_block = b.core.create_block();
+                            let left_false_block = b.func.create_block();
                             if let DataDest::Branch(true_block, false_block) = ctx.data {
                                 self.build_expr(
                                     b,
@@ -2838,8 +2827,8 @@ impl DriverRwRef<'_> {
                                     tp
                                 );
                             } else {
-                                let left_true_block = b.core.create_block();
-                                let after_block = b.core.create_block();
+                                let left_true_block = b.func.create_block();
+                                let after_block = b.func.create_block();
                                 let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
                                 self.build_expr(
                                     b,
@@ -3099,7 +3088,7 @@ impl DriverRwRef<'_> {
             Expr::Switch { scrutinee, context: pattern_matching_ctx_id, ref cases } => {
                 let _cases = cases.clone();
                 let pass_value_as_argument = matches!(ctx.data, DataDest::Read);
-                let post_block = b.core.create_block();
+                let post_block = b.func.create_block();
                 let scope_ctx = ctx.redirect(post_block, pass_value_as_argument);
                 let decision_tree = tp.switch_expr_decision_tree(pattern_matching_ctx_id).as_ref().expect("should always set decision tree on switch expr");
                 let pattern_matching_ctx = tp.pattern_matching_context(pattern_matching_ctx_id).as_ref().expect("should always set pattern matching context on switch expr");
@@ -3113,10 +3102,10 @@ impl DriverRwRef<'_> {
                 }
             },
             Expr::While { loop_id, condition, scope } => {
-                let test_block = b.core.create_block();
-                let loop_block = b.core.create_block();
+                let test_block = b.func.create_block();
+                let loop_block = b.func.create_block();
                 let post_block = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.core.create_block(),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.func.create_block(),
                     ControlDest::Jump(block) => block,
                 };
 
@@ -3154,15 +3143,15 @@ impl DriverRwRef<'_> {
                 b.stored_decl_locs.push_at(binding_stored_decl_id, binding_location);
                 let val = self.build_expr(b, lower_bound, Context::new(0, DataDest::Read, ControlDest::Continue), tp);
                 let instr = self.read().handle_indirection(b, val);
-                let range = self.read().get_range_with_mir_ctx(binding_location, Some(&b.core)) + self.read().get_range_with_mir_ctx(instr, Some(&b.core));
+                let range = self.read().get_range_with_mir_ctx(binding_location, Some(&b.func)) + self.read().get_range_with_mir_ctx(instr, Some(&b.func));
                 self.read().push_instr(b, InstrKind::Store { location: binding_location, value: instr }, range);
                 let upper_bound = self.build_expr(b, upper_bound, Context::default(), tp);
                 let upper_bound = self.read().handle_indirection(b, upper_bound);
 
-                let test_block = b.core.create_block();
-                let loop_block = b.core.create_block();
+                let test_block = b.func.create_block();
+                let loop_block = b.func.create_block();
                 let post_block = match ctx.control {
-                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.core.create_block(),
+                    ControlDest::Continue | ControlDest::Unreachable | ControlDest::RetVoid | ControlDest::IncrementVariableAndThenJump { .. } => b.func.create_block(),
                     ControlDest::Jump(target) => target,
                 };
 
@@ -3195,7 +3184,7 @@ impl DriverRwRef<'_> {
                 let loop_state = b.loops[loop_id].clone();
                 self.read().end_current_block(b, TerminatorKind::Jump(loop_state.break_block.into()));
                 // Must create unreachable basic block in case there are more statements in this loop
-                let unreachable_block = b.core.create_block();
+                let unreachable_block = b.func.create_block();
                 b.start_block(unreachable_block);
 
                 return NEVER_VALUE.direct();
@@ -3208,7 +3197,7 @@ impl DriverRwRef<'_> {
                 }
                 self.read().end_current_block(b, TerminatorKind::Jump(loop_state.continue_block.into()));
                 // Must create unreachable basic block in case there are more statements in this loop
-                let unreachable_block = b.core.create_block();
+                let unreachable_block = b.func.create_block();
                 b.start_block(unreachable_block);
 
                 return NEVER_VALUE.direct();
@@ -3258,7 +3247,7 @@ impl DriverRwRef<'_> {
                 let scrutinee_val = self.get_scrutinee_value(b, tp, og_scrutinee, scrutinee_id, pattern_matching_ctx, pattern_matching_ctx_id);
                 // TODO: support pattern matching of pointers
                 let scrutinee = self.read().handle_indirection(b, scrutinee_val);
-                let scrutinee_ty = b.core.type_of_val(scrutinee).clone();
+                let scrutinee_ty = b.func.type_of_val(scrutinee).clone();
 
                 let mut discriminant_enum_ty = None;
                 let discriminant: ValueId = match scrutinee_ty {
@@ -3279,12 +3268,12 @@ impl DriverRwRef<'_> {
                         SwitchDecisionValue::UnsignedInt(value) => Const::Int { lit: BigInt::from(value), ty: scrutinee_ty.clone() },
                     };
 
-                    let case_block = b.core.create_block();
+                    let case_block = b.func.create_block();
                     mir_cases.push(SwitchCase { value: const_value, target: case_block.into() });
                     nodes.push(node);
                 }
 
-                let default_block = b.core.create_block();
+                let default_block = b.func.create_block();
 
                 self.read().end_current_block(b, TerminatorKind::SwitchBr { scrutinee: discriminant, cases: mir_cases.clone(), catch_all_target: default_block.into() });
 
@@ -3330,7 +3319,7 @@ impl Driver {
                 val.indirection -= 1;
             }
         } else if val.indirection < 0 {
-            let mut ty = b.core.type_of_val(val.value).clone();
+            let mut ty = b.func.type_of_val(val.value).clone();
             while val.indirection < 0 {
                 let location = self.push_instr(b, InstrKind::Alloca(ty.clone()), val.value);
                 self.push_instr(b, InstrKind::Store { location, value: val.value }, val.value);
@@ -3344,7 +3333,7 @@ impl Driver {
     }
 
     fn increment_variable(&self, b: &mut FunctionBuilder, location: ValueId) {
-        let ty = b.core.type_of_val(location).deref().unwrap().clone().ty;
+        let ty = b.func.type_of_val(location).deref().unwrap().clone().ty;
         let loaded = self.push_instr(b, InstrKind::Load(location), location);
         let one = self.push_instr(b, InstrKind::Const(Const::Int { lit: BigInt::from(1), ty: ty.clone() }), location);
         let value = self.push_call(b, CallKind::LegacyIntrinsic { arguments: smallvec![loaded, one], ty, intr: LegacyIntrinsic::Add }, location);
@@ -3383,9 +3372,9 @@ impl DriverRwRef<'_> {
             },
             DataDest::Branch(true_block, false_block) => {
                 let condition = self.read().handle_indirection(b, val);
-                let terminator = match b.core.values[condition].kind {
+                let terminator = match b.func.values[condition].kind {
                     ValueKind::InstrResult(condition_instr) => {
-                        if let &InstrKind::Const(Const::Bool(val)) = &b.core.instrs[condition_instr].kind {
+                        if let &InstrKind::Const(Const::Bool(val)) = &b.func.instrs[condition_instr].kind {
                             let block = if val {
                                 true_block
                             } else {
@@ -3407,7 +3396,7 @@ impl DriverRwRef<'_> {
             },
             DataDest::Receive { value } => {
                 let location = self.read().handle_indirection(b, val.get_address());
-                let range = self.read().get_range_with_mir_ctx(location, Some(&b.core)) + self.read().get_range_with_mir_ctx(value, Some(&b.core));
+                let range = self.read().get_range_with_mir_ctx(location, Some(&b.func)) + self.read().get_range_with_mir_ctx(value, Some(&b.func));
                 self.read().push_instr(b, InstrKind::Store { location, value }, range);
             },
             DataDest::Void => {},
