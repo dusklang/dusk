@@ -2,7 +2,7 @@
 [Dusk](https://dusklang.org/) is a work-in-progress systems programming language.
 
 ## Status
-Pre-pre-alpha. Barely usable for anything. There is a working interpreter and a VSCode plugin, and some early work has been done on a few backends and linkers, as shown in the tables below. But fundamental aspects of the language are still missing.
+Pre-pre-alpha. There is a working interpreter and a VSCode plugin, and some early work has been done on a few backends and linkers, as shown in the tables below.
 
 #### Legend
 | Symbol | Meaning                                      |
