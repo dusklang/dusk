@@ -1,7 +1,7 @@
 use crate::driver::Driver;
 use crate::ast::LegacyIntrinsic;
 use crate::mir::cursor::Cursor;
-use crate::mir::{Const, FuncId, InstrKind, ValueKind};
+use crate::mir::{CallKind, Const, FuncId, InstrKind, TerminatorKind, ValueKind};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
 use crate::backend::Backend;
@@ -46,46 +46,54 @@ impl Backend for X64Backend {
                         _ => todo!("{}", d.display_const(konst)),
                     }
                 },
-                InstrKind::LegacyIntrinsic { intr, .. } => {
-                    match intr {
-                        LegacyIntrinsic::Print => {
-                            // Store string address in R12 (assuming it's already in rax for now, which is obviously dumb)
-                            code.mov64(Reg64::R12, Reg64::Rax);
+                InstrKind::Call(call) => match *call {
+                    CallKind::LegacyIntrinsic { intr, .. } => {
+                        match intr {
+                            LegacyIntrinsic::Print => {
+                                // Store string address in R12 (assuming it's already in rax for now, which is obviously dumb)
+                                code.mov64(Reg64::R12, Reg64::Rax);
 
-                            // Store stdout handle in R13
-                            code.mov32_imm(Reg32::Ecx, -11);
-                            code.call(exe.use_imported_symbol(get_std_handle));
-                            code.mov64(Reg64::R13, Reg64::Rax);
+                                // Store stdout handle in R13
+                                code.mov32_imm(Reg32::Ecx, -11);
+                                code.call(exe.use_imported_symbol(get_std_handle));
+                                code.mov64(Reg64::R13, Reg64::Rax);
 
-                            // Store string length in R14d
-                            code.mov64(Reg64::Rcx, Reg64::R12);
-                            code.call(exe.use_imported_symbol(lstrlen));
-                            code.mov32(Reg32::R14d, Reg32::Eax);
+                                // Store string length in R14d
+                                code.mov64(Reg64::Rcx, Reg64::R12);
+                                code.call(exe.use_imported_symbol(lstrlen));
+                                code.mov32(Reg32::R14d, Reg32::Eax);
 
-                            // Call WriteConsoleA
-                            code.store64_imm(Reg64::Rsp + 32, 0);
-                            code.xor32(Reg32::R9d, Reg32::R9d);
-                            code.mov32(Reg32::R8d, Reg32::R14d);
-                            code.mov64(Reg64::Rdx, Reg64::R12);
-                            code.mov64(Reg64::Rcx, Reg64::R13);
-                            code.call(exe.use_imported_symbol(write_console));
-                        },
-                        _ => todo!("{}", d.display_mir_instr(func, instr)),
-                    }
-                },
-                &InstrKind::Ret(value) => {
-                    let ret_void = matches!(func.values[value].kind, ValueKind::Void);
-                    // If this is the main function, we should call ExitProcess.
-                    if is_main {
-                        assert!(ret_void);
-                        code.mov32_imm(Reg32::Ecx, 0);
-                        code.call(exe.use_imported_symbol(exit_process));
-                    } else {
-                        todo!();
-                    }
+                                // Call WriteConsoleA
+                                code.store64_imm(Reg64::Rsp + 32, 0);
+                                code.xor32(Reg32::R9d, Reg32::R9d);
+                                code.mov32(Reg32::R8d, Reg32::R14d);
+                                code.mov64(Reg64::Rdx, Reg64::R12);
+                                code.mov64(Reg64::Rcx, Reg64::R13);
+                                code.call(exe.use_imported_symbol(write_console));
+                            },
+                            _ => todo!("{}", d.display_mir_call(func, call)),
+                        }
+                    },
+                    _ => todo!("{}", d.display_mir_call(func, call)),
                 },
                 _ => todo!("{}", d.display_mir_instr(func, instr)),
             }
+        }
+
+        let terminator = cursor.terminator().unwrap();
+        match *terminator {
+            TerminatorKind::Ret(value) => {
+                let ret_void = matches!(func.values[value].kind, ValueKind::Void);
+                // If this is the main function, we should call ExitProcess.
+                if is_main {
+                    assert!(ret_void);
+                    code.mov32_imm(Reg32::Ecx, 0);
+                    code.call(exe.use_imported_symbol(exit_process));
+                } else {
+                    todo!();
+                }
+            },
+            _ => todo!("{}", d.display_mir_terminator(func, terminator)),
         }
 
         exe.add_code_blob(Box::new(code));

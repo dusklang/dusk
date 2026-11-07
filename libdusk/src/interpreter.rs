@@ -22,7 +22,7 @@ use crate::index_vec::range_iter;
 use crate::target::Arch;
 use crate::ast::{CompilerTestCondition, EnumId, ExternFunctionRef, ExternModId, GenericParamId, LegacyIntrinsic, NewNamespaceId};
 use crate::dvm::{self, Call, DirectCall, MessageKind};
-use crate::mir::{BlockId, CompilerTestCase, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, StaticId, VOID_VALUE, ValueId};
+use crate::mir::{BlockId, CallKind, CompilerTestCase, Const, ExternFunction, FuncId, InstrId, InstrKind, JumpTarget, StaticId, TerminatorKind, VOID_VALUE, ValueId};
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
@@ -416,10 +416,16 @@ impl Value {
     }
 }
 
+#[derive(Copy, Clone)]
+enum ProgramCounter {
+    Instr(InstrId),
+    Terminator(BlockId),
+}
+
 pub struct StackFrame {
     func_ref: FunctionRef,
     block: BlockId,
-    pc: InstrId,
+    pc: ProgramCounter,
     results: HashMap<ValueId, Value>,
     generic_ctx: HashMap<GenericParamId, Type>,
 }
@@ -444,7 +450,7 @@ impl StackFrame {
         for (arg, &param) in arguments.into_iter().zip(&block.params) {
             self.results.insert(param, arg);
         }
-        self.pc = block.first_instr.unwrap();
+        self.pc = block.first_instr.map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(target.block));
     }
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
@@ -518,7 +524,7 @@ unsafe impl Send for CachedLib {}
 pub struct Interpreter {
     statics: HashMap<StaticId, Value>,
     pub allocations: HashMap<usize, alloc::Layout>,
-    switch_cache: HashMap<InstrId, HashMap<Box<[u8]>, JumpTarget>>,
+    switch_cache: HashMap<BlockId, HashMap<Box<[u8]>, JumpTarget>>,
     #[cfg(windows)]
     inverse_thunk_cache: HashMap<FuncId, Allocation>,
     #[allow(unused)]
@@ -773,7 +779,7 @@ impl Driver {
             );
         }
         let entry_block = &func.blocks[entry_block_id];
-        let pc = entry_block.first_instr.unwrap();
+        let pc = entry_block.first_instr.map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(entry_block_id));
         for (arg, &param) in arguments.into_iter().zip(&entry_block.params) {
             results.insert(param, arg);
         }
@@ -1368,572 +1374,619 @@ impl DriverRwRef<'_> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last().unwrap();
-            let next_instr = frame.pc;
+            let pc = frame.pc;
             let d = self.read();
             let func = function_by_ref(&d.mir, &frame.func_ref);
-            match func.instrs[next_instr].kind.clone() {
-                InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
-                InstrKind::Alloca(ty) => {
-                    let storage = vec![0; self.read().size_of(&ty)];
-                    Value::OwnedPointer(storage.into_boxed_slice())
-                },
-                InstrKind::LogicalNot(val) => {
-                    let val = frame.get_val(val, &self.read()).as_bool();
-                    Value::from_bool(!val)
-                },
-                InstrKind::FunctionRef { ref generic_arguments, func } => {
-                    Value::from_internal(InternalValue::FunctionPointer { generic_arguments: generic_arguments.clone(), func })
-                },
-                InstrKind::Call { ref arguments, ref generic_arguments, func } => {
-                    let mut copied_args = Vec::new();
-                    copied_args.reserve_exact(arguments.len());
-                    for &arg in arguments {
-                        copied_args.push(frame.get_val(arg, &self.read()).clone());
-                    }
-                    let generic_arguments = generic_arguments.iter()
-                        .map(|arg| frame.canonicalize_type(arg))
-                        .collect();
-                    // Stop immutably borrowing the stack, so it can be borrowed again in call()
-                    drop(stack);
-                    drop(d);
-                    self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
-                },
-                InstrKind::ExternCall { ref arguments, func: callee } => {
-                    let mut copied_args = Vec::new();
-                    copied_args.reserve_exact(arguments.len());
-                    let mut arg_tys = Vec::new();
-                    arg_tys.reserve_exact(arguments.len());
-                    for &arg in arguments {
-                        copied_args.push(frame.get_val(arg, &self.read()).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
-                        arg_tys.push(func.type_of_val(arg).clone());
-                    }
-                    drop(stack);
-                    drop(d);
-                    self.read_only();
-                    self.extern_call(callee, copied_args, arg_tys)
-                },
-                #[cfg(target_os = "macos")]
-                InstrKind::ObjcClassRef { extern_mod, index } => {
-                    let d = self.read();
-                    let extern_mods = d.mir.extern_mods.pin();
-                    let library = extern_mods.get(&extern_mod).unwrap();
-                    let mut interp = INTERP.write().unwrap();
-                    let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
-                        // TODO: cache library and proc addresses (and thunks when possible)
-                        let base = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
-                        if base.is_null() {
-                            panic!("unable to load library {:?}", library.library_path);
+            match pc {
+                ProgramCounter::Instr(next_instr) => match func.instrs[next_instr].kind.clone() {
+                    InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
+                    InstrKind::Alloca(ty) => {
+                        let storage = vec![0; self.read().size_of(&ty)];
+                        Value::OwnedPointer(storage.into_boxed_slice())
+                    },
+                    InstrKind::LogicalNot(val) => {
+                        let val = frame.get_val(val, &self.read()).as_bool();
+                        Value::from_bool(!val)
+                    },
+                    InstrKind::FunctionRef { ref generic_arguments, func } => {
+                        Value::from_internal(InternalValue::FunctionPointer { generic_arguments: generic_arguments.clone(), func })
+                    },
+                    #[cfg(target_os = "macos")]
+                    InstrKind::ObjcClassRef { extern_mod, index } => {
+                        let d = self.read();
+                        let extern_mods = d.mir.extern_mods.pin();
+                        let library = extern_mods.get(&extern_mod).unwrap();
+                        let mut interp = INTERP.write().unwrap();
+                        let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
+                            // TODO: cache library and proc addresses (and thunks when possible)
+                            let base = unsafe { open_dyn_lib(library.library_path.as_ptr()) };
+                            if base.is_null() {
+                                panic!("unable to load library {:?}", library.library_path);
+                            }
+                            let mut objc_classes = Vec::new();
+                            for class_name in &self.read().ast.extern_mods[extern_mod].objc_class_references {
+                                let class_name = CString::new(class_name.clone()).unwrap();
+                                let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
+                                objc_classes.push(class_ptr as *const c_void);
+                            }
+                            CachedLib {
+                                base,
+                                objc_classes
+                            }
+                        });
+                        Value::from_usize(cache.objc_classes[index] as usize)
+                    },
+                    #[cfg(not(target_os = "macos"))]
+                    InstrKind::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
+                    InstrKind::GenericParam(id) => {
+                        let ty = Type::GenericParam(id);
+                        let ty = frame.canonicalize_type(&ty);
+                        Value::from_new_internal(ty, &d)
+                    },
+                    InstrKind::Call(ref call) => {
+                        drop(stack);
+                        drop(d);
+                        self.execute_call(call, pc, stack_cell)?
+                    },
+                    InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
+                    InstrKind::Truncate(instr, ref ty) => {
+                        let frame = stack.last().unwrap();
+                        let bytes = frame.get_val(instr, &self.read()).as_bytes_without_driver();
+                        let new_size = self.read().size_of(ty);
+                        Value::from_bytes(&bytes[0..new_size])
+                    },
+                    InstrKind::SignExtend(val, ref dest_ty) => {
+                        let frame = stack.last().unwrap();
+                        let src_ty = func.type_of_val(val);
+                        let val = frame.get_val(val, &self.read());
+                        match (src_ty, dest_ty) {
+                            (
+                                &Type::Int { is_signed: src_is_signed, .. },
+                                &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
+                            (_, _) => panic!("Invalid operand types to sign extension")
                         }
-                        let mut objc_classes = Vec::new();
-                        for class_name in &self.read().ast.extern_mods[extern_mod].objc_class_references {
-                            let class_name = CString::new(class_name.clone()).unwrap();
-                            let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
-                            objc_classes.push(class_ptr as *const c_void);
+                    },
+                    InstrKind::ZeroExtend(val, ref dest_ty) => {
+                        let frame = stack.last().unwrap();
+                        let src_ty = func.type_of_val(val);
+                        let val = frame.get_val(val, &self.read());
+                        match (src_ty, dest_ty) {
+                            (
+                                &Type::Int { is_signed: src_is_signed, .. },
+                                &Type::Int { width: dest_width, is_signed: dest_is_signed }
+                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
+                            (_, _) => panic!("Invalid operand types to zero extension")
                         }
-                        CachedLib {
-                            base,
-                            objc_classes
+                    },
+                    InstrKind::FloatCast(instr, ref ty) => {
+                        let frame = stack.last().unwrap();
+                        let val = frame.get_val(instr, &self.read());
+                        match (val.as_bytes_without_driver().len(), self.read().size_of(ty)) {
+                            (x, y) if x == y => val.clone(),
+                            (4, 8) => Value::from_f64(val.as_f32() as f64),
+                            (8, 4) => Value::from_f32(val.as_f64() as f32),
+                            (4, _) | (8, _) => panic!("Unexpected destination float cast type size"),
+                            (_, 4) | (_, 8) => panic!("Unexpected source float cast type size"),
+                            (_, _) => panic!("Unexpected float cast type sizes"),
                         }
-                    });
-                    Value::from_usize(cache.objc_classes[index] as usize)
-                },
-                #[cfg(not(target_os = "macos"))]
-                InstrKind::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
-                InstrKind::GenericParam(id) => {
-                    let ty = Type::GenericParam(id);
-                    let ty = frame.canonicalize_type(&ty);
-                    Value::from_new_internal(ty, &d)
-                },
-                InstrKind::LegacyIntrinsic { ref arguments, intr, .. } => {
-                    match intr {
-                        LegacyIntrinsic::Mult => bin_op!(self, func, stack, arguments, convert, Int | Float, {*}),
-                        LegacyIntrinsic::Div => bin_op!(self, func, stack, arguments, convert, Int | Float, {/}),
-                        LegacyIntrinsic::Mod => bin_op!(self, func, stack, arguments, convert, Int | Float, {%}),
-                        LegacyIntrinsic::Add => bin_op!(self, func, stack, arguments, convert, Int | Float, {+}),
-                        LegacyIntrinsic::Sub => bin_op!(self, func, stack, arguments, convert, Int | Float, {-}),
-                        LegacyIntrinsic::Less => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<}),
-                        LegacyIntrinsic::LessOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<=}),
-                        LegacyIntrinsic::Greater => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>}),
-                        LegacyIntrinsic::GreaterOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>=}),
-                        LegacyIntrinsic::Eq => {
-                            let ty = func.type_of_val(arguments[0]);
-                            match ty {
-                                Type::Enum(_) => {
-                                    assert_eq!(arguments.len(), 2);
-                                    let frame = stack.last().unwrap();
-                                    let a = frame.get_val(arguments[0], &self.read());
-                                    let b = frame.get_val(arguments[1], &self.read());
-                                    let a = a.as_big_int(false);
-                                    let b = b.as_big_int(false);
-                                    Value::from_bool(a == b)
-                                }
-                                _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {==}),
-                            }
-                        },
-                        LegacyIntrinsic::NotEq => {
-                            let ty = func.type_of_val(arguments[0]);
-                            match ty {
-                                Type::Enum(_) => {
-                                    assert_eq!(arguments.len(), 2);
-                                    let frame = stack.last().unwrap();
-                                    let a = frame.get_val(arguments[0], &self.read());
-                                    let b = frame.get_val(arguments[1], &self.read());
-                                    let a = a.as_big_int(false);
-                                    let b = b.as_big_int(false);
-                                    Value::from_bool(a != b)
-                                }
-                                _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
-                            }
-                        },
-                        LegacyIntrinsic::BitwiseAnd => bin_op!(self, func, stack, arguments, convert, Int | Bool, {&}),
-                        LegacyIntrinsic::BitwiseOr => bin_op!(self, func, stack, arguments, convert, Int | Bool, {|}),
-                        LegacyIntrinsic::BitwiseXor => bin_op!(self, func, stack, arguments, convert, Int | Bool, {^}),
-                        LegacyIntrinsic::LeftShift => bin_op!(self, func, stack, arguments, convert, Int, {<<}),
-                        LegacyIntrinsic::RightShift => bin_op!(self, func, stack, arguments, convert, Int, {>>}),
-                        LegacyIntrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
-                        LegacyIntrinsic::Neg => {
-                            assert_eq!(arguments.len(), 1);
-                            let frame = stack.last().unwrap();
-                            let arg = arguments[0];
-                            let ty = func.type_of_val(arg);
-                            let arg = frame.get_val(arg, &self.read());
-                            match *ty {
-                                Type::Int { width, is_signed } => {
-                                    Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.read().arch)
-                                },
-                                Type::Float(width) => match width {
-                                    FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
-                                    FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
-                                },
-                                _ => panic!("Unexpected type for intrinsic arguments"),
-                            }
-                        },
-                        LegacyIntrinsic::BitwiseNot => {
-                            assert_eq!(arguments.len(), 1);
-                            let arg = arguments[0];
-                            let ty = func.type_of_val(arg);
-                            let arg = frame.get_val(arg, &self.read());
-                            match ty {
-                                &Type::Int { width, .. } => {
-                                    match width {
-                                        IntWidth::Pointer | IntWidth::W64 => {
-                                            assert_eq!(self.read().arch.pointer_size(), 64);
-                                            Value::from_u64(!arg.as_u64())
-                                        },
-                                        IntWidth::W32 => Value::from_u32(!arg.as_u32()),
-                                        IntWidth::W16 => Value::from_u16(!arg.as_u16()),
-                                        IntWidth::W8  => Value::from_u8(!arg.as_u8()),
-                                    }
-                                },
-                                _ => panic!("Unexpected type for intrinsic arguments")
-                            }
-                        },
-                        LegacyIntrinsic::Pos => {
-                            assert_eq!(arguments.len(), 1);
-                            frame.get_val(arguments[0], &self.read()).clone()
-                        },
-                        LegacyIntrinsic::Panic => {
-                            assert!(arguments.len() <= 1);
-                            if INTERP.read().unwrap().mode != InterpMode::TestCompiler {
-                                let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
-                                self.read().diag.report_error(panic_message, func.source_ranges.get(&next_instr).copied().unwrap_or_default(), "panic occured here");
-                            }
-                            return Err(EvalError);
-                        },
-                        LegacyIntrinsic::Print => {
-                            let frame = stack.last().unwrap();
-                            assert_eq!(arguments.len(), 1);
-                            let id = arguments[0];
-                            let val = frame.get_val(id, &self.read());
-                            let ty = func.type_of_val(id);
-                            match ty {
-                                Type::Pointer(_) => unsafe {
-                                    let mut ptr = val.as_raw_ptr();
-                                    while *ptr != 0 {
-                                        print!("{}", *ptr as char);
-                                        ptr = ptr.offset(1);
-                                    }
-                                },
-                                Type::Int { .. } => print!("{}", val.as_u8() as char),
-                                _ => panic!("Unexpected type passed to `print`: {:?}", ty),
-                            }
-                            std::io::stdout().flush().unwrap();
-                            Value::Nothing
-                        },
-                        LegacyIntrinsic::PrintType => {
-                            let frame = stack.last().unwrap();
-                            assert_eq!(arguments.len(), 1);
-                            let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                            let ty = frame.canonicalize_type(&ty);
-                            print!("{:?}", ty);
-                            Value::Nothing
-                        },
-                        LegacyIntrinsic::AlignOf => {
-                            let frame = stack.last().unwrap();
-                            assert_eq!(arguments.len(), 1);
-                            let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                            let ty = frame.canonicalize_type(&ty);
-                            Value::from_usize(self.read().align_of(&ty))
-                        },
-                        LegacyIntrinsic::StrideOf => {
-                            let frame = stack.last().unwrap();
-                            assert_eq!(arguments.len(), 1);
-                            let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                            let ty = frame.canonicalize_type(&ty);
-                            Value::from_usize(self.read().stride_of(&ty))
-                        },
-                        LegacyIntrinsic::SizeOf => {
-                            let frame = stack.last().unwrap();
-                            assert_eq!(arguments.len(), 1);
-                            let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                            let ty = frame.canonicalize_type(&ty);
+                    },
+                    InstrKind::FloatToInt(op, ref dest_ty) => {
+                        let frame = stack.last().unwrap();
+                        let val = frame.get_val(op, &self.read());
+                        let src_ty = func.type_of_val(op);
+                        let src_size = self.read().size_of(src_ty);
 
-                            Value::from_usize(self.read().size_of(&ty))
-                        },
-                        LegacyIntrinsic::OffsetOf => {
-                            assert_eq!(arguments.len(), 2);
-                            let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                            let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &self.read()).as_raw_ptr() as *const _) };
-                            let field_name = self.read().interner.read().unwrap().get(field_name.to_str().unwrap());
-                            let mut offset = None;
-                            if let Some(field_name) = field_name {
-                                match ty {
-                                    Type::Struct(strukt) => {
-                                        let layout = self.read().layout_struct(&strukt);
-                                        for (index, field) in self.read().ast.structs[strukt.identity].fields.iter().enumerate() {
-                                            if field_name == field.name {
-                                                offset = Some(layout.field_offsets[index]);
-                                                break;
-                                            }
-                                        }
+                        match dest_ty {
+                            &Type::Int { width, is_signed } => {
+                                let big_int = if is_signed {
+                                    let int = match src_size * 8 {
+                                        32 => val.as_f32() as i64,
+                                        64 => val.as_f64() as i64,
+                                        _ => panic!("Invalid float size"),
+                                    };
+                                    BigInt::from(int)
+                                } else {
+                                    let int = match src_size * 8 {
+                                        32 => val.as_f32() as u64,
+                                        64 => val.as_f64() as u64,
+                                        _ => panic!("Invalid float size"),
+                                    };
+                                    BigInt::from(int)
+                                };
+                                Value::from_big_int(big_int, width, is_signed, self.read().arch)
+                            },
+                            _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
+                        }
+                    }
+                    InstrKind::IntToFloat(op, ref dest_ty) => {
+                        let frame = stack.last().unwrap();
+                        let val = frame.get_val(op, &self.read());
+                        let src_ty = func.type_of_val(op);
+                        let dest_size = self.read().size_of(dest_ty);
+                        match src_ty {
+                            &Type::Int { is_signed, .. } => {
+                                let big_int = val.as_big_int(is_signed);
+                                if is_signed {
+                                    let int: i64 = big_int.try_into().unwrap();
+                                    match dest_size * 8 {
+                                        32 => Value::from_f32(int as _),
+                                        64 => Value::from_f64(int as _),
+                                        _ => panic!("Invalid destination size in int to float cast"),
                                     }
-                                    _ => panic!("Can't get field offset on a non-struct type"),
+                                } else {
+                                    let int: u64 = big_int.try_into().unwrap();
+                                    match dest_size * 8 {
+                                        32 => Value::from_f32(int as _),
+                                        64 => Value::from_f64(int as _),
+                                        _ => panic!("Invalid destination size in int to float cast"),
+                                    }
                                 }
+                            },
+                            _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
+                        }
+                    }
+                    InstrKind::Load(location) => {
+                        let frame = stack.last().unwrap();
+                        let ty = func.type_of_instr(next_instr);
+                        let ty = frame.canonicalize_type(ty);
+                        let size = self.read().size_of(&ty);
+                        let frame = stack.last_mut().unwrap();
+                        frame.get_val(location, &self.read()).load(size)
+                    },
+                    InstrKind::Store { location, value } => {
+                        let val = frame.get_val(value, &self.read()).clone();
+                        let frame = stack.last_mut().unwrap();
+                        let result = frame.get_val_mut(location, &self.read());
+                        result.store(val);
+                        Value::Nothing
+                    },
+                    InstrKind::AddressOfStatic(statik) => {
+                        if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
+                            panic!("Can't access static at compile time!");
+                        }
+                        let static_value = Value::from_const(&self.read().mir.statics[statik].val.clone(), &self.read());
+                        let mut interp = INTERP.write().unwrap();
+                        let statik = interp.statics.entry(statik)
+                            .or_insert(static_value)
+                            .as_bytes_without_driver();
+                        Value::UnownedPointer(UnownedPointer { allocation: &*statik, offset: 0 })
+                    },
+                    InstrKind::Pointer { value, is_mut } => {
+                        let ty = frame.get_val(value, &self.read()).as_ty().ptr_with_mut(is_mut);
+                        Value::from_new_internal(ty, &d)
+                    },
+                    InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
+                        let param_tys = param_tys.iter()
+                            .map(|&ty| frame.get_val(ty, &self.read()).as_ty())
+                            .collect();
+                        let ret_ty = frame.get_val(ret_ty, &self.read()).as_ty();
+                        let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
+                        Value::from_new_internal(ty, &d)
+                    }
+                    InstrKind::Struct { ref fields, id } => {
+                        let mut field_tys = Vec::new();
+                        for &field in fields {
+                            field_tys.push(frame.get_val(field, &self.read()).as_ty());
+                        }
+                        let strukt = StructType {
+                            field_tys,
+                            identity: id,
+                        };
+                        Value::from_new_internal(Type::Struct(strukt), &self.read())
+                    },
+                    InstrKind::Enum { ref variants, id } => {
+                        if !self.read().mir.enums.pin().contains_key(&id) {
+                            let mut payload_tys = Vec::new();
+                            for &variant in variants {
+                                payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
                             }
-                            let offset = offset.expect("No such field name in call to offset_of");
-                            Value::from_usize(offset)
+                            let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
+                            self.read().mir.enums.pin().insert(
+                                id,
+                                layout,
+                            );
+                        }
+                        let payload_tys = self.read().mir.enums.pin().get(&id).unwrap().payload_tys.to_vec();
+                        Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
+                    }
+                    InstrKind::StructLit { ref fields, id } => {
+                        let frame = stack.last().unwrap();
+                        let field_tys: Vec<_> = fields.iter()
+                            .map(|&field_val| {
+                                let ty = func.type_of_val(field_val);
+                                frame.canonicalize_type(ty)
+                            })
+                            .collect();
+                        let fields: Vec<_> = fields.iter()
+                            .map(|&instr| frame.get_val(instr, &self.read()).clone())
+                            .collect();
+                        let strukt = StructType {
+                            field_tys,
+                            identity: id,
+                        };
+                        self.read().eval_struct_lit(&strukt, fields.into_iter())
+                    },
+                    InstrKind::Variant { enuum, index, payload } => {
+                        let payload = frame.get_val(payload, &self.read()).clone();
+                        Value::from_variant(&self.read(), enuum, index, payload)
+                    },
+                    InstrKind::PayloadAccess { val, variant_index: _ } => {
+                        let enum_ty = func.type_of_val(val).as_enum().unwrap();
+                        let enum_val = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
+                        enum_val.payload
+                    },
+                    InstrKind::DiscriminantAccess { val } => {
+                        let enum_ty = func.type_of_val(val).as_enum().unwrap();
+                        let enuum = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
+                        Value::from_u32(enuum.discriminant)
+                    },
+                    InstrKind::DirectFieldAccess { val, index } => {
+                        let frame = stack.last().unwrap();
+                        let bytes = frame.get_val(val, &self.read()).as_bytes_without_driver();
+                        let strukt = match func.type_of_val(val) {
+                            Type::Struct(strukt) => strukt,
+                            _ => panic!("Can't directly get field of non-struct"),
+                        };
+                        let layout = self.read().layout_struct(strukt);
+                        let size = self.read().size_of(&strukt.field_tys[index]);
+                        let offset = layout.field_offsets[index];
+                        Value::from_bytes(&bytes[offset..][..size])
+                    },
+                    InstrKind::IndirectFieldAccess { val, index } => {
+                        let addr = frame.get_val(val, &self.read()).as_allocation();
+                        let base_ty = &func.type_of_val(val).deref().unwrap().ty;
+                        let strukt = match base_ty {
+                            Type::Struct(strukt) => strukt,
+                            _ => panic!("Can't directly get field of non-struct"),
+                        };
+                        let offset = self.read().layout_struct(strukt).field_offsets[index];
+                        Value::from_allocation(addr + offset)
+                    },
+                    InstrKind::InternalFieldAccess { val, field } => {
+                        let val = frame.get_val(val, &self.read()).as_internal();
+                        match (val, field) {
+                            (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {
+                                use internal_fields::StringLiteral::*;
+                                match field {
+                                    length => {
+                                        Value::from_usize(lit.as_bytes().len())
+                                    },
+                                    data => Value::from_cstr(lit),
+                                }
+                            },
+                            pair => unimplemented!("unimplemented internal field access: {:?}", pair),
+                        }
+                    },
+                    InstrKind::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),
+                },
+                ProgramCounter::Terminator(block) => {
+                    let val = match func.blocks[block].terminator.as_ref().unwrap().clone() {
+                        TerminatorKind::Ret(instr) => {
+                            let val = frame.get_val(instr, &self.read()).clone();
+                            Some(val)
                         },
-                        LegacyIntrinsic::GetNumArgs => {
-                            Value::from_usize(INTERP.read().unwrap().command_line_args.len())
+                        TerminatorKind::Jump(ref target) => {
+                            let frame = stack.last_mut().unwrap();
+                            frame.jump_to(&target, &d);
+                            None
                         },
-                        LegacyIntrinsic::GetArg => {
-                            assert_eq!(arguments.len(), 1);
-                            let index = frame.get_val(arguments[0], &self.read()).as_usize();
-                            let command_line_args = &INTERP.read().unwrap().command_line_args;
-                            Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
+                        TerminatorKind::CondBr { condition, ref true_target, ref false_target } => {
+                            let condition = frame.get_val(condition, &d).as_bool();
+                            let target = if condition { true_target } else { false_target };
+                            let frame = stack.last_mut().unwrap();
+                            frame.jump_to(&target, &d);
+                            None
                         },
-                        LegacyIntrinsic::Import => {
-                            assert_eq!(arguments.len(), 1);
-                            let val = frame.get_val(arguments[0], &self.read());
-                            let ptr = val.as_raw_ptr();
+                        TerminatorKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
+                            // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
+                            let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
+                            let interp = INTERP.read().unwrap();
+                            let target = if let Some(table) = interp.switch_cache.get(&block) {
+                                table.get(scrutinee.as_ref()).cloned()
+                            } else {
+                                drop(interp);
+                                let mut table = HashMap::new();
+                                for case in cases.clone() {
+                                    let val = Value::from_const(&case.value, &self.read());
+                                    let val = val.as_bytes_without_driver();
+                                    table.insert(val.as_ref().to_owned().into_boxed_slice(), case.target);
+                                }
+                                INTERP.write().unwrap().switch_cache.entry(block).or_insert(table)
+                                    .get(scrutinee.as_ref()).cloned()
+                            }.unwrap_or(catch_all_target.clone());
 
-                            let str = unsafe { CStr::from_ptr(ptr as _) };
-                            let path = str.to_str().unwrap();
-                            let (file, _) = d.lookup_file(next_instr).unwrap();
-                            let base_path = d.src_map.files[file].location.as_path();
-                            let path = base_path
-                                .map(|base| base.parent().unwrap().join(path))
-                                .unwrap_or_else(|| path.into());
+                            let frame = stack.last_mut().unwrap();
+                            frame.jump_to(&target, &d);
+                            None
+                        },
+                        TerminatorKind::Call(ref call) => {
+                            drop(stack);
                             drop(d);
-                            let file = self.read().src_map.add_file_on_disk(path).unwrap();
-                            self.write().parse_file(file).unwrap();
-
-                            let added_module = *self.read().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
-                            Value::from_mod(added_module)
-                        },
-                        _ => panic!("Call to unimplemented intrinsic {:?}", intr),
-                    }
-                },
-                InstrKind::Intrinsic { ref arguments, intr } => {
-                    let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                    let intr = d.ast.intrinsics[intr].clone();
-                    drop(d);
-
-                    intr.kind.call(self, arguments)
-                },
-                InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
-                InstrKind::Truncate(instr, ref ty) => {
-                    let frame = stack.last().unwrap();
-                    let bytes = frame.get_val(instr, &self.read()).as_bytes_without_driver();
-                    let new_size = self.read().size_of(ty);
-                    Value::from_bytes(&bytes[0..new_size])
-                },
-                InstrKind::SignExtend(val, ref dest_ty) => {
-                    let frame = stack.last().unwrap();
-                    let src_ty = func.type_of_val(val);
-                    let val = frame.get_val(val, &self.read());
-                    match (src_ty, dest_ty) {
-                        (
-                            &Type::Int { is_signed: src_is_signed, .. },
-                            &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                        ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
-                        (_, _) => panic!("Invalid operand types to sign extension")
-                    }
-                },
-                InstrKind::ZeroExtend(val, ref dest_ty) => {
-                    let frame = stack.last().unwrap();
-                    let src_ty = func.type_of_val(val);
-                    let val = frame.get_val(val, &self.read());
-                    match (src_ty, dest_ty) {
-                        (
-                            &Type::Int { is_signed: src_is_signed, .. },
-                            &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                        ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
-                        (_, _) => panic!("Invalid operand types to zero extension")
-                    }
-                },
-                InstrKind::FloatCast(instr, ref ty) => {
-                    let frame = stack.last().unwrap();
-                    let val = frame.get_val(instr, &self.read());
-                    match (val.as_bytes_without_driver().len(), self.read().size_of(ty)) {
-                        (x, y) if x == y => val.clone(),
-                        (4, 8) => Value::from_f64(val.as_f32() as f64),
-                        (8, 4) => Value::from_f32(val.as_f64() as f32),
-                        (4, _) | (8, _) => panic!("Unexpected destination float cast type size"),
-                        (_, 4) | (_, 8) => panic!("Unexpected source float cast type size"),
-                        (_, _) => panic!("Unexpected float cast type sizes"),
-                    }
-                },
-                InstrKind::FloatToInt(op, ref dest_ty) => {
-                    let frame = stack.last().unwrap();
-                    let val = frame.get_val(op, &self.read());
-                    let src_ty = func.type_of_val(op);
-                    let src_size = self.read().size_of(src_ty);
-
-                    match dest_ty {
-                        &Type::Int { width, is_signed } => {
-                            let big_int = if is_signed {
-                                let int = match src_size * 8 {
-                                    32 => val.as_f32() as i64,
-                                    64 => val.as_f64() as i64,
-                                    _ => panic!("Invalid float size"),
-                                };
-                                BigInt::from(int)
-                            } else {
-                                let int = match src_size * 8 {
-                                    32 => val.as_f32() as u64,
-                                    64 => val.as_f64() as u64,
-                                    _ => panic!("Invalid float size"),
-                                };
-                                BigInt::from(int)
+                            let Err(err) = self.execute_call(call, pc, stack_cell) else {
+                                panic!("terminator call returned normally");
                             };
-                            Value::from_big_int(big_int, width, is_signed, self.read().arch)
+                            return Err(err)
                         },
-                        _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
-                    }
-                }
-                InstrKind::IntToFloat(op, ref dest_ty) => {
-                    let frame = stack.last().unwrap();
-                    let val = frame.get_val(op, &self.read());
-                    let src_ty = func.type_of_val(op);
-                    let dest_size = self.read().size_of(dest_ty);
-                    match src_ty {
-                        &Type::Int { is_signed, .. } => {
-                            let big_int = val.as_big_int(is_signed);
-                            if is_signed {
-                                let int: i64 = big_int.try_into().unwrap();
-                                match dest_size * 8 {
-                                    32 => Value::from_f32(int as _),
-                                    64 => Value::from_f64(int as _),
-                                    _ => panic!("Invalid destination size in int to float cast"),
-                                }
-                            } else {
-                                let int: u64 = big_int.try_into().unwrap();
-                                match dest_size * 8 {
-                                    32 => Value::from_f32(int as _),
-                                    64 => Value::from_f64(int as _),
-                                    _ => panic!("Invalid destination size in int to float cast"),
-                                }
-                            }
-                        },
-                        _ => panic!("Invalid source type in int to float cast: {:?}", src_ty),
-                    }
-                }
-                InstrKind::Load(location) => {
-                    let frame = stack.last().unwrap();
-                    let ty = func.type_of_instr(frame.pc);
-                    let ty = frame.canonicalize_type(ty);
-                    let size = self.read().size_of(&ty);
-                    let frame = stack.last_mut().unwrap();
-                    frame.get_val(location, &self.read()).load(size)
-                },
-                InstrKind::Store { location, value } => {
-                    let val = frame.get_val(value, &self.read()).clone();
-                    let frame = stack.last_mut().unwrap();
-                    let result = frame.get_val_mut(location, &self.read());
-                    result.store(val);
-                    Value::Nothing
-                },
-                InstrKind::AddressOfStatic(statik) => {
-                    if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
-                        panic!("Can't access static at compile time!");
-                    }
-                    let static_value = Value::from_const(&self.read().mir.statics[statik].val.clone(), &self.read());
-                    let mut interp = INTERP.write().unwrap();
-                    let statik = interp.statics.entry(statik)
-                        .or_insert(static_value)
-                        .as_bytes_without_driver();
-                    Value::UnownedPointer(UnownedPointer { allocation: &*statik, offset: 0 })
-                },
-                InstrKind::Pointer { value, is_mut } => {
-                    let ty = frame.get_val(value, &self.read()).as_ty().ptr_with_mut(is_mut);
-                    Value::from_new_internal(ty, &d)
-                },
-                InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
-                    let param_tys = param_tys.iter()
-                        .map(|&ty| frame.get_val(ty, &self.read()).as_ty())
-                        .collect();
-                    let ret_ty = frame.get_val(ret_ty, &self.read()).as_ty();
-                    let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
-                    Value::from_new_internal(ty, &d)
-                }
-                InstrKind::Struct { ref fields, id } => {
-                    let mut field_tys = Vec::new();
-                    for &field in fields {
-                        field_tys.push(frame.get_val(field, &self.read()).as_ty());
-                    }
-                    let strukt = StructType {
-                        field_tys,
-                        identity: id,
                     };
-                    Value::from_new_internal(Type::Struct(strukt), &self.read())
+                    return Ok(val);
                 },
-                InstrKind::Enum { ref variants, id } => {
-                    if !self.read().mir.enums.pin().contains_key(&id) {
-                        let mut payload_tys = Vec::new();
-                        for &variant in variants {
-                            payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
-                        }
-                        let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
-                        self.read().mir.enums.pin().insert(
-                            id,
-                            layout,
-                        );
-                    }
-                    let payload_tys = self.read().mir.enums.pin().get(&id).unwrap().payload_tys.to_vec();
-                    Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
-                }
-                InstrKind::StructLit { ref fields, id } => {
-                    let frame = stack.last().unwrap();
-                    let field_tys: Vec<_> = fields.iter()
-                        .map(|&field_val| {
-                            let ty = func.type_of_val(field_val);
-                            frame.canonicalize_type(ty)
-                        })
-                        .collect();
-                    let fields: Vec<_> = fields.iter()
-                        .map(|&instr| frame.get_val(instr, &self.read()).clone())
-                        .collect();
-                    let strukt = StructType {
-                        field_tys,
-                        identity: id,
-                    };
-                    self.read().eval_struct_lit(&strukt, fields.into_iter())
-                },
-                InstrKind::Ret(instr) => {
-                    let val = frame.get_val(instr, &self.read()).clone();
-                    return Ok(Some(val));
-                },
-                InstrKind::Jump(target) => {
-                    let frame = stack.last_mut().unwrap();
-                    frame.jump_to(&target, &d);
-                    return Ok(None);
-                },
-                InstrKind::CondBr { condition, true_target, false_target } => {
-                    let condition = frame.get_val(condition, &d).as_bool();
-                    let target = if condition { true_target } else { false_target };
-                    let frame = stack.last_mut().unwrap();
-                    frame.jump_to(&target, &d);
-                    return Ok(None);
-                },
-                InstrKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
-                    // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
-                    let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
-                    let interp = INTERP.read().unwrap();
-                    let target = if let Some(table) = interp.switch_cache.get(&next_instr) {
-                        table.get(scrutinee.as_ref()).cloned()
-                    } else {
-                        drop(interp);
-                        let mut table = HashMap::new();
-                        for case in cases.clone() {
-                            let val = Value::from_const(&case.value, &self.read());
-                            let val = val.as_bytes_without_driver();
-                            table.insert(val.as_ref().to_owned().into_boxed_slice(), case.target);
-                        }
-                        INTERP.write().unwrap().switch_cache.entry(next_instr).or_insert(table)
-                            .get(scrutinee.as_ref()).cloned()
-                    }.unwrap_or(catch_all_target.clone());
-
-                    let frame = stack.last_mut().unwrap();
-                    frame.jump_to(&target, &d);
-                    return Ok(None);
-                },
-                InstrKind::Variant { enuum, index, payload } => {
-                    let payload = frame.get_val(payload, &self.read()).clone();
-                    Value::from_variant(&self.read(), enuum, index, payload)
-                },
-                InstrKind::PayloadAccess { val, variant_index: _ } => {
-                    let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                    let enum_val = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
-                    enum_val.payload
-                },
-                InstrKind::DiscriminantAccess { val } => {
-                    let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                    let enuum = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
-                    Value::from_u32(enuum.discriminant)
-                },
-                InstrKind::DirectFieldAccess { val, index } => {
-                    let frame = stack.last().unwrap();
-                    let bytes = frame.get_val(val, &self.read()).as_bytes_without_driver();
-                    let strukt = match func.type_of_val(val) {
-                        Type::Struct(strukt) => strukt,
-                        _ => panic!("Can't directly get field of non-struct"),
-                    };
-                    let layout = self.read().layout_struct(strukt);
-                    let size = self.read().size_of(&strukt.field_tys[index]);
-                    let offset = layout.field_offsets[index];
-                    Value::from_bytes(&bytes[offset..][..size])
-                },
-                InstrKind::IndirectFieldAccess { val, index } => {
-                    let addr = frame.get_val(val, &self.read()).as_allocation();
-                    let base_ty = &func.type_of_val(val).deref().unwrap().ty;
-                    let strukt = match base_ty {
-                        Type::Struct(strukt) => strukt,
-                        _ => panic!("Can't directly get field of non-struct"),
-                    };
-                    let offset = self.read().layout_struct(strukt).field_offsets[index];
-                    Value::from_allocation(addr + offset)
-                },
-                InstrKind::InternalFieldAccess { val, field } => {
-                    let val = frame.get_val(val, &self.read()).as_internal();
-                    match (val, field) {
-                        (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {
-                            use internal_fields::StringLiteral::*;
-                            match field {
-                                length => {
-                                    Value::from_usize(lit.as_bytes().len())
-                                },
-                                data => Value::from_cstr(lit),
-                            }
-                        },
-                        pair => unimplemented!("unimplemented internal field access: {:?}", pair),
-                    }
-                },
-                InstrKind::Invalid => panic!("Must not have invalid instruction in an interpreted function!"),
             }
         };
 
         let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
-        let instr = frame.pc;
+        frame.pc = match frame.pc {
+            ProgramCounter::Instr(instr) => {
+                let d = self.read();
+                let func = function_by_ref(&d.mir, &frame.func_ref);
+                let instr_result = func.instrs[instr].value;
+                let next_pc = if let Some(next_instr) = func.instr_nodes[instr].next {
+                    ProgramCounter::Instr(next_instr)
+                } else {
+                    let block = func.instr_nodes[instr].block.unwrap();
+                    ProgramCounter::Terminator(block)
+                };
+                *frame.get_val_mut(instr_result, &self.read()) = val;
+                next_pc
+            },
+            ProgramCounter::Terminator(_) => panic!("can't get next instruction after a terminator"),
+        };
+        Ok(None)
+    }
+
+    fn execute_call(&mut self, call: &CallKind, pc: ProgramCounter, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Value> {
+        let stack = stack_cell.borrow();
+        let frame = stack.last().unwrap();
         let d = self.read();
         let func = function_by_ref(&d.mir, &frame.func_ref);
-        let next_instr = func.instr_nodes[instr].next.unwrap();
-        let instr_result = func.instrs[instr].value;
-        *frame.get_val_mut(instr_result, &self.read()) = val;
-        drop(d);
-        frame.pc = next_instr;
-        Ok(None)
+        let val = match *call {
+            CallKind::Call { ref arguments, ref generic_arguments, func } => {
+                let mut copied_args = Vec::new();
+                copied_args.reserve_exact(arguments.len());
+                for &arg in arguments {
+                    copied_args.push(frame.get_val(arg, &self.read()).clone());
+                }
+                let generic_arguments = generic_arguments.iter()
+                    .map(|arg| frame.canonicalize_type(arg))
+                    .collect();
+                // Stop immutably borrowing the stack, so it can be borrowed again in call()
+                drop(stack);
+                drop(d);
+                self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
+            },
+            CallKind::ExternCall { ref arguments, func: callee } => {
+                let mut copied_args = Vec::new();
+                copied_args.reserve_exact(arguments.len());
+                let mut arg_tys = Vec::new();
+                arg_tys.reserve_exact(arguments.len());
+                for &arg in arguments {
+                    copied_args.push(frame.get_val(arg, &self.read()).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
+                    arg_tys.push(func.type_of_val(arg).clone());
+                }
+                drop(stack);
+                drop(d);
+                self.read_only();
+                self.extern_call(callee, copied_args, arg_tys)
+            },
+            CallKind::Intrinsic { ref arguments, intr } => {
+                let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
+                let intr = d.ast.intrinsics[intr].clone();
+                drop(d);
+
+                intr.kind.call(self, arguments)
+            },
+            CallKind::LegacyIntrinsic { ref arguments, intr, .. } => {
+                match intr {
+                    LegacyIntrinsic::Mult => bin_op!(self, func, stack, arguments, convert, Int | Float, {*}),
+                    LegacyIntrinsic::Div => bin_op!(self, func, stack, arguments, convert, Int | Float, {/}),
+                    LegacyIntrinsic::Mod => bin_op!(self, func, stack, arguments, convert, Int | Float, {%}),
+                    LegacyIntrinsic::Add => bin_op!(self, func, stack, arguments, convert, Int | Float, {+}),
+                    LegacyIntrinsic::Sub => bin_op!(self, func, stack, arguments, convert, Int | Float, {-}),
+                    LegacyIntrinsic::Less => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<}),
+                    LegacyIntrinsic::LessOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {<=}),
+                    LegacyIntrinsic::Greater => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>}),
+                    LegacyIntrinsic::GreaterOrEq => bin_op!(self, func, stack, arguments, bool_convert, Int | Float, {>=}),
+                    LegacyIntrinsic::Eq => {
+                        let ty = func.type_of_val(arguments[0]);
+                        match ty {
+                            Type::Enum(_) => {
+                                assert_eq!(arguments.len(), 2);
+                                let frame = stack.last().unwrap();
+                                let a = frame.get_val(arguments[0], &self.read());
+                                let b = frame.get_val(arguments[1], &self.read());
+                                let a = a.as_big_int(false);
+                                let b = b.as_big_int(false);
+                                Value::from_bool(a == b)
+                            }
+                            _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {==}),
+                        }
+                    },
+                    LegacyIntrinsic::NotEq => {
+                        let ty = func.type_of_val(arguments[0]);
+                        match ty {
+                            Type::Enum(_) => {
+                                assert_eq!(arguments.len(), 2);
+                                let frame = stack.last().unwrap();
+                                let a = frame.get_val(arguments[0], &self.read());
+                                let b = frame.get_val(arguments[1], &self.read());
+                                let a = a.as_big_int(false);
+                                let b = b.as_big_int(false);
+                                Value::from_bool(a != b)
+                            }
+                            _ => bin_op!(self, func, stack, arguments, bool_convert, Int | Float | Bool, {!=}),
+                        }
+                    },
+                    LegacyIntrinsic::BitwiseAnd => bin_op!(self, func, stack, arguments, convert, Int | Bool, {&}),
+                    LegacyIntrinsic::BitwiseOr => bin_op!(self, func, stack, arguments, convert, Int | Bool, {|}),
+                    LegacyIntrinsic::BitwiseXor => bin_op!(self, func, stack, arguments, convert, Int | Bool, {^}),
+                    LegacyIntrinsic::LeftShift => bin_op!(self, func, stack, arguments, convert, Int, {<<}),
+                    LegacyIntrinsic::RightShift => bin_op!(self, func, stack, arguments, convert, Int, {>>}),
+                    LegacyIntrinsic::LogicalNot => panic!("Unexpected logical not intrinsic, should've been replaced by instruction"),
+                    LegacyIntrinsic::Neg => {
+                        assert_eq!(arguments.len(), 1);
+                        let frame = stack.last().unwrap();
+                        let arg = arguments[0];
+                        let ty = func.type_of_val(arg);
+                        let arg = frame.get_val(arg, &self.read());
+                        match *ty {
+                            Type::Int { width, is_signed } => {
+                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.read().arch)
+                            },
+                            Type::Float(width) => match width {
+                                FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
+                                FloatWidth::W64 => Value::from_f64(-arg.as_f64()),
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments"),
+                        }
+                    },
+                    LegacyIntrinsic::BitwiseNot => {
+                        assert_eq!(arguments.len(), 1);
+                        let arg = arguments[0];
+                        let ty = func.type_of_val(arg);
+                        let arg = frame.get_val(arg, &self.read());
+                        match ty {
+                            &Type::Int { width, .. } => {
+                                match width {
+                                    IntWidth::Pointer | IntWidth::W64 => {
+                                        assert_eq!(self.read().arch.pointer_size(), 64);
+                                        Value::from_u64(!arg.as_u64())
+                                    },
+                                    IntWidth::W32 => Value::from_u32(!arg.as_u32()),
+                                    IntWidth::W16 => Value::from_u16(!arg.as_u16()),
+                                    IntWidth::W8  => Value::from_u8(!arg.as_u8()),
+                                }
+                            },
+                            _ => panic!("Unexpected type for intrinsic arguments")
+                        }
+                    },
+                    LegacyIntrinsic::Pos => {
+                        assert_eq!(arguments.len(), 1);
+                        frame.get_val(arguments[0], &self.read()).clone()
+                    },
+                    LegacyIntrinsic::Panic => {
+                        assert!(arguments.len() <= 1);
+                        if INTERP.read().unwrap().mode != InterpMode::TestCompiler {
+                            let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
+                            let range = if let ProgramCounter::Instr(instr) = pc {
+                                func.source_ranges.get(&instr).copied()
+                            } else {
+                                None
+                            }.unwrap_or_default();
+                            self.read().diag.report_error(panic_message, range, "panic occured here");
+                        }
+                        return Err(EvalError);
+                    },
+                    LegacyIntrinsic::Print => {
+                        let frame = stack.last().unwrap();
+                        assert_eq!(arguments.len(), 1);
+                        let id = arguments[0];
+                        let val = frame.get_val(id, &self.read());
+                        let ty = func.type_of_val(id);
+                        match ty {
+                            Type::Pointer(_) => unsafe {
+                                let mut ptr = val.as_raw_ptr();
+                                while *ptr != 0 {
+                                    print!("{}", *ptr as char);
+                                    ptr = ptr.offset(1);
+                                }
+                            },
+                            Type::Int { .. } => print!("{}", val.as_u8() as char),
+                            _ => panic!("Unexpected type passed to `print`: {:?}", ty),
+                        }
+                        std::io::stdout().flush().unwrap();
+                        Value::Nothing
+                    },
+                    LegacyIntrinsic::PrintType => {
+                        let frame = stack.last().unwrap();
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.canonicalize_type(&ty);
+                        print!("{:?}", ty);
+                        Value::Nothing
+                    },
+                    LegacyIntrinsic::AlignOf => {
+                        let frame = stack.last().unwrap();
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.canonicalize_type(&ty);
+                        Value::from_usize(self.read().align_of(&ty))
+                    },
+                    LegacyIntrinsic::StrideOf => {
+                        let frame = stack.last().unwrap();
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.canonicalize_type(&ty);
+                        Value::from_usize(self.read().stride_of(&ty))
+                    },
+                    LegacyIntrinsic::SizeOf => {
+                        let frame = stack.last().unwrap();
+                        assert_eq!(arguments.len(), 1);
+                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.canonicalize_type(&ty);
+
+                        Value::from_usize(self.read().size_of(&ty))
+                    },
+                    LegacyIntrinsic::OffsetOf => {
+                        assert_eq!(arguments.len(), 2);
+                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &self.read()).as_raw_ptr() as *const _) };
+                        let field_name = self.read().interner.read().unwrap().get(field_name.to_str().unwrap());
+                        let mut offset = None;
+                        if let Some(field_name) = field_name {
+                            match ty {
+                                Type::Struct(strukt) => {
+                                    let layout = self.read().layout_struct(&strukt);
+                                    for (index, field) in self.read().ast.structs[strukt.identity].fields.iter().enumerate() {
+                                        if field_name == field.name {
+                                            offset = Some(layout.field_offsets[index]);
+                                            break;
+                                        }
+                                    }
+                                }
+                                _ => panic!("Can't get field offset on a non-struct type"),
+                            }
+                        }
+                        let offset = offset.expect("No such field name in call to offset_of");
+                        Value::from_usize(offset)
+                    },
+                    LegacyIntrinsic::GetNumArgs => {
+                        Value::from_usize(INTERP.read().unwrap().command_line_args.len())
+                    },
+                    LegacyIntrinsic::GetArg => {
+                        assert_eq!(arguments.len(), 1);
+                        let index = frame.get_val(arguments[0], &self.read()).as_usize();
+                        let command_line_args = &INTERP.read().unwrap().command_line_args;
+                        Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
+                    },
+                    LegacyIntrinsic::Import => {
+                        assert_eq!(arguments.len(), 1);
+                        let val = frame.get_val(arguments[0], &self.read());
+                        let ptr = val.as_raw_ptr();
+
+                        let str = unsafe { CStr::from_ptr(ptr as _) };
+                        let path = str.to_str().unwrap();
+                        let ProgramCounter::Instr(instr) = pc else {
+                            panic!("internal compiler error: import instruction in terminator position?");
+                        };
+                        let (file, _) = d.lookup_file(instr).unwrap();
+                        let base_path = d.src_map.files[file].location.as_path();
+                        let path = base_path
+                            .map(|base| base.parent().unwrap().join(path))
+                            .unwrap_or_else(|| path.into());
+                        drop(d);
+                        let file = self.read().src_map.add_file_on_disk(path).unwrap();
+                        self.write().parse_file(file).unwrap();
+
+                        let added_module = *self.read().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
+                        Value::from_mod(added_module)
+                    },
+                    _ => panic!("Call to unimplemented intrinsic {:?}", intr),
+                }
+            },
+        };
+
+        Ok(val)
     }
 }
 

@@ -9,20 +9,54 @@
 //!
 //! Operands are visited in field declaration order.
 //!
-//! For `InstrKind` only, also generates instruction-level convenience methods built on the visitors
-//! (`referenced_values`, `replace_value`, `register_edges`, etc.).
+//! Only the methods that make sense for a type are generated, as configured in `DERIVING_TYPES`:
+//! - `visit_values`/`visit_values_mut` are generated for every type.
+//! - `visit_blocks`/`visit_blocks_mut` are generated only for types that can contain a `BlockId`. This is checked
+//!   against the type's fields in both directions, so the table can't go stale.
+//! - Value helpers (`referenced_values`, `references_value`, `replace_value`) are generated for whole instructions
+//!   (`InstrKind`, `TerminatorKind`).
+//! - Block helpers (`replace_block`, `register_edges`) are generated only for `TerminatorKind`, the only kind of
+//!   instruction that refers to blocks.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, GenericArgument, Member, PathArguments, Type};
 
+struct DerivingType {
+    name: &'static str,
+    /// Whether the type can (transitively) contain a `BlockId`, and so gets block visitors.
+    has_blocks: bool,
+    /// Whether the type is a whole instruction, and so gets the value helpers.
+    value_helpers: bool,
+    /// Whether the type gets the block helpers. Requires `has_blocks`.
+    block_helpers: bool,
+}
+
 /// Every type that derives `InstrOperands`. Fields of these types delegate to the type's generated methods. Deriving
 /// `InstrOperands` on a type not in this list is a compile error, so that a new type can't be silently skipped when it
 /// appears as a field of another.
-const DERIVING_TYPES: &[&str] = &[INSTR_KIND, "JumpTarget", "SwitchCase"];
+const DERIVING_TYPES: &[DerivingType] = &[
+    DerivingType { name: "InstrKind", has_blocks: false, value_helpers: true, block_helpers: false },
+    DerivingType { name: "TerminatorKind", has_blocks: true, value_helpers: true, block_helpers: true },
+    DerivingType { name: "CallKind", has_blocks: false, value_helpers: false, block_helpers: false },
+    DerivingType { name: "JumpTarget", has_blocks: true, value_helpers: false, block_helpers: false },
+    DerivingType { name: "SwitchCase", has_blocks: true, value_helpers: false, block_helpers: false },
+];
 
-/// The type that additionally gets the instruction-level helper methods (see `instr_kind_helpers`).
-const INSTR_KIND: &str = "InstrKind";
+fn deriving_type(ty: &Type) -> Option<&'static DerivingType> {
+    DERIVING_TYPES.iter().find(|known| is_named(ty, known.name))
+}
+
+/// Whether a field of type `ty` can contain a `BlockId`, according to `DERIVING_TYPES`.
+fn field_has_blocks(ty: &Type) -> bool {
+    if is_named(ty, "BlockId") {
+        return true;
+    }
+    if let Some((elem, _)) = container_element(ty) {
+        return field_has_blocks(elem);
+    }
+    deriving_type(ty).is_some_and(|known| known.has_blocks)
+}
 
 #[derive(Clone, Copy)]
 enum Visit {
@@ -104,7 +138,10 @@ fn visit_field(ty: &Type, binding: &TokenStream, visit: Visit, depth: usize) -> 
             quote!(for #item in #binding.iter() { #body })
         });
     }
-    if DERIVING_TYPES.iter().any(|name| is_named(ty, name)) {
+    if let Some(known) = deriving_type(ty) {
+        if matches!(visit, Visit::Blocks | Visit::BlocksMut) && !known.has_blocks {
+            return None;
+        }
         let method = visit.method();
         return Some(quote!(#binding.#method(&mut *f);));
     }
@@ -173,26 +210,58 @@ pub fn derive(input: DeriveInput) -> TokenStream {
         return syn::Error::new_spanned(&input.ident, "InstrOperands cannot be derived for unions").to_compile_error();
     }
     let name = &input.ident;
-    if !DERIVING_TYPES.iter().any(|known| name == known) {
+    let Some(known) = DERIVING_TYPES.iter().find(|known| name == known.name) else {
         let message = format!(
             "`{name}` is not in `DERIVING_TYPES` in dusk-proc-macros/src/instr_operands.rs; add it there so that fields of \
              type `{name}` are visited",
         );
         return syn::Error::new_spanned(name, message).to_compile_error();
+    };
+
+    let mut fields: Vec<&syn::Field> = Vec::new();
+    match &input.data {
+        Data::Struct(data) => fields.extend(data.fields.iter()),
+        Data::Enum(data) => fields.extend(data.variants.iter().flat_map(|variant| variant.fields.iter())),
+        Data::Union(_) => unreachable!(),
     }
+    let block_field = fields.iter().find(|field| field_has_blocks(&field.ty));
+    match (known.has_blocks, block_field) {
+        (false, Some(field)) => {
+            let message = format!(
+                "this field can contain a `BlockId`, but `{name}` has `has_blocks: false` in `DERIVING_TYPES` in \
+                 dusk-proc-macros/src/instr_operands.rs",
+            );
+            return syn::Error::new_spanned(&field.ty, message).to_compile_error();
+        },
+        (true, None) => {
+            let message = format!(
+                "`{name}` has `has_blocks: true` in `DERIVING_TYPES` in dusk-proc-macros/src/instr_operands.rs, but none \
+                 of its fields can contain a `BlockId`",
+            );
+            return syn::Error::new_spanned(name, message).to_compile_error();
+        },
+        _ => {},
+    }
+
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    let methods = [Visit::Values, Visit::ValuesMut, Visit::Blocks, Visit::BlocksMut].map(|visit| visit_method(&input, visit));
-    let helpers = if name == INSTR_KIND { instr_kind_helpers() } else { TokenStream::new() };
+    let mut visits = vec![Visit::Values, Visit::ValuesMut];
+    if known.has_blocks {
+        visits.extend([Visit::Blocks, Visit::BlocksMut]);
+    }
+    let methods = visits.into_iter().map(|visit| visit_method(&input, visit));
+    let value_helpers = if known.value_helpers { value_helpers() } else { TokenStream::new() };
+    let block_helpers = if known.block_helpers { block_helpers() } else { TokenStream::new() };
     quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             #(#methods)*
-            #helpers
+            #value_helpers
+            #block_helpers
         }
     }
 }
 
-/// Instruction-level convenience methods built on the visitors. Only generated for `InstrKind`.
-fn instr_kind_helpers() -> TokenStream {
+/// Value-related convenience methods for whole instructions, built on the value visitors.
+fn value_helpers() -> TokenStream {
     quote! {
         /// All values referenced by `self`, in field order.
         pub fn referenced_values(&self) -> Vec<ValueId> {
@@ -210,7 +279,12 @@ fn instr_kind_helpers() -> TokenStream {
         pub fn replace_value(&mut self, old: ValueId, new: ValueId) {
             self.visit_values_mut(&mut |value| if *value == old { *value = new; });
         }
+    }
+}
 
+/// Block-related convenience methods for terminators, built on the block visitors.
+fn block_helpers() -> TokenStream {
+    quote! {
         pub fn replace_block(&mut self, old: BlockId, new: BlockId) {
             self.visit_blocks_mut(&mut |block| if *block == old { *block = new; });
         }

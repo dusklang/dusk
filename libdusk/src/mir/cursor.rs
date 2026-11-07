@@ -1,6 +1,6 @@
 use crate::index_vec::*;
 
-use crate::mir::{Block, BlockId, Function, FunctionBuilder, FunctionCore, InstrId, InstrNode};
+use crate::mir::{Block, BlockId, Function, FunctionBuilder, FunctionCore, InstrId, InstrNode, TerminatorKind};
 
 // This pattern is heavily inspired by Cranelift
 #[derive(Copy, Clone)]
@@ -84,11 +84,9 @@ pub trait Cursor<'func> {
         }
     }
 
-    fn terminator(&self) -> Option<InstrId> {
-        let mut cursor = self.make_cursor();
+    fn terminator<'a>(&'a self) -> Option<&'a TerminatorKind> where 'func: 'a {
         let block = self.cur_block()?;
-        cursor.goto_bottom(block);
-        cursor.cur_instr()
+        self.blocks()[block].terminator.as_ref()
     }
 
     fn cur_instr(&self) -> Option<InstrId> {
@@ -135,6 +133,7 @@ pub trait Cursor<'func> {
 pub trait CursorMut<'func>: Cursor<'func> {
     fn remove_block(&mut self);
     fn remove_instr(&mut self);
+    fn terminator_mut<'a>(&'a mut self) -> Option<&'a mut TerminatorKind> where 'func: 'a;
     fn make_cursor_mut<'a>(&'a mut self) -> FuncCursorMut<'a> where 'func: 'a;
 }
 
@@ -221,6 +220,11 @@ impl<'func> CursorMut<'func> for FuncCursorMut<'func> {
         } else {
             CursorPosition::Before(block_id)
         };
+    }
+
+    fn terminator_mut<'a>(&'a mut self) -> Option<&'a mut TerminatorKind> where 'func: 'a {
+        let block = self.cur_block()?;
+        self.core.blocks[block].terminator.as_mut()
     }
 
     fn make_cursor_mut<'a>(&'a mut self) -> FuncCursorMut<'a> where 'func: 'a {
