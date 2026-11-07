@@ -29,7 +29,7 @@ use dusk_proc_macros::*;
 
 // TODO: build AST directly in a Segment inside of ast::Builder. Then, when done with the ast::Builder, explicitly commit its segment into something
 // like a ConcurrentIndexVec<SegmentId, Segment>. It should be possible to lookup any AST data structure you want via something like
-// `driver.ast.exprs(expr)`, where expr is an ExprId, where ExprId would then consist of (SegmentId, LocalExprId).
+// `driver.mutable_state.ast.exprs(expr)`, where expr is an ExprId, where ExprId would then consist of (SegmentId, LocalExprId).
 
 define_index_type!(pub struct SegmentId = u32;);
 define_index_type!(pub struct ExprId = u32;);
@@ -645,12 +645,12 @@ impl Driver {
     pub fn create_decls_for_generic_param_list(&mut self, b: &Builder, list: &GenericParamList) -> Range<DeclId> {
         assert_eq!(list.names.len(), list.ids.end - list.ids.start);
         assert_eq!(list.names.len(), list.ranges.len());
-        self.ast.decls.reserve(list.names.len());
-        let first_generic_param = self.ast.decls.next_idx();
+        self.mutable_state.ast.decls.reserve(list.names.len());
+        let first_generic_param = self.mutable_state.ast.decls.next_idx();
         for ((param, &name), &range) in range_iter(list.ids.clone()).zip(&list.names).zip(&list.ranges) {
             self.add_decl(b, Decl::GenericParam(param), name, Some(VOID_TYPE), range);
         }
-        let last_generic_param = self.ast.decls.next_idx();
+        let last_generic_param = self.mutable_state.ast.decls.next_idx();
         first_generic_param..last_generic_param
     }
 }
@@ -817,53 +817,53 @@ impl Driver {
         self.add_const_ty(b, Type::Void);
         self.add_const_ty(b, Type::Ty);
         self.add_const_ty(b, Type::Error);
-        assert_eq!(self.ast.exprs.len(), 5);
+        assert_eq!(self.mutable_state.ast.exprs.len(), 5);
 
-        self.add_decl(b, Decl::ReturnValue, self.ast.known_idents.return_value, None, SourceRange::default());
+        self.add_decl(b, Decl::ReturnValue, self.mutable_state.ast.known_idents.return_value, None, SourceRange::default());
 
         self.register_internal_fields(b);
         self.add_prelude(b);
     }
 
     pub fn debug_mark_expr(&self, expr: ExprId) {
-        self.ast.debug_marked_exprs.pin().insert(expr);
+        self.mutable_state.ast.debug_marked_exprs.pin().insert(expr);
     }
 
     #[allow(unused)]
     pub fn expr_is_debug_marked(&self, expr: ExprId) -> bool {
-        self.ast.debug_marked_exprs.pin().contains(&expr)
+        self.mutable_state.ast.debug_marked_exprs.pin().contains(&expr)
     }
 
     fn add_item(&mut self, b: &Builder, item: Item, range: SourceRange) -> ItemId {
         // TODO: I used to require callers to explicitly pass in the generic ctx id, but it seems fine to just take it
         // from the top of the stack. Is there some major downside to this approach that I have since forgotten?
         let generic_ctx = b.generic_ctx_stack.peek().unwrap_or_default();
-        let item_id = self.ast.items.push(item);
-        self.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
-        self.ast.source_ranges.push_at(item_id, range);
+        let item_id = self.mutable_state.ast.items.push(item);
+        self.mutable_state.ast.item_generic_ctxs.push_at(item_id, generic_ctx);
+        self.mutable_state.ast.source_ranges.push_at(item_id, range);
 
         item_id
     }
 
     fn add_expr(&mut self, b: &Builder, expr: Expr, range: SourceRange) -> ExprId {
-        let expr_id = self.ast.exprs.push(expr);
-        let type_var_id = self.ast.type_vars.next_idx();
-        self.ast.expr_to_type_vars.push_at(expr_id, type_var_id);
+        let expr_id = self.mutable_state.ast.exprs.push(expr);
+        let type_var_id = self.mutable_state.ast.type_vars.next_idx();
+        self.mutable_state.ast.expr_to_type_vars.push_at(expr_id, type_var_id);
 
         let item_id = self.add_item(b, Item::Expr(expr_id), range);
-        self.ast.expr_to_items.push_at(expr_id, item_id);
+        self.mutable_state.ast.expr_to_items.push_at(expr_id, item_id);
 
         expr_id
     }
 
     pub fn add_decl_with_self_parameter(&mut self, b: &Builder, decl: Decl, name: Sym, explicit_ty: Option<ExprId>, range: SourceRange, self_parameter: Option<SelfParameter>) -> DeclId {
-        let decl_id = self.ast.decls.push(decl);
-        self.ast.explicit_tys.push_at(decl_id, explicit_ty);
-        self.ast.names.push_at(decl_id, name);
-        self.ast.decl_self_parameters.push_at(decl_id, self_parameter);
+        let decl_id = self.mutable_state.ast.decls.push(decl);
+        self.mutable_state.ast.explicit_tys.push_at(decl_id, explicit_ty);
+        self.mutable_state.ast.names.push_at(decl_id, name);
+        self.mutable_state.ast.decl_self_parameters.push_at(decl_id, self_parameter);
 
         let item_id = self.add_item(b, Item::Decl(decl_id), range);
-        self.ast.decl_to_items.push_at(decl_id, item_id);
+        self.mutable_state.ast.decl_to_items.push_at(decl_id, item_id);
 
         decl_id
     }
@@ -873,9 +873,9 @@ impl Driver {
     }
 
     pub fn add_attr(&mut self, b: &Builder, attr: Attribute, range: SourceRange) -> AttrId {
-        let attr_id = self.ast.attrs.push(attr);
+        let attr_id = self.mutable_state.ast.attrs.push(attr);
         let item_id = self.add_item(b, Item::Attr(attr_id), range);
-        self.ast.attr_to_items.push_at(attr_id, item_id);
+        self.mutable_state.ast.attr_to_items.push_at(attr_id, item_id);
 
         attr_id
     }
@@ -896,7 +896,7 @@ impl Driver {
         self.add_expr(b, Expr::BoolLit { lit }, range)
     }
     pub fn cast(&mut self, b: &Builder, expr: ExprId, ty: ExprId, range: SourceRange) -> ExprId {
-        let cast_id = self.ast.cast_counter.next_idx();
+        let cast_id = self.mutable_state.ast.cast_counter.next_idx();
         self.add_expr(b, Expr::Cast { expr, ty, cast_id }, range)
     }
     pub fn stored_decl(&mut self, b: &mut Builder, name: Sym, generic_params: GenericParamList, explicit_ty: Option<ExprId>, is_mut: bool, root_expr: ExprId, range: SourceRange) -> DeclId {
@@ -989,7 +989,7 @@ impl Driver {
         VariantDecl { decl, name, enuum, payload_ty }
     }
     pub fn reserve_struct(&mut self, b: &Builder) -> (ExprId, StructId) {
-        let strukt = self.ast.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
+        let strukt = self.mutable_state.ast.structs.push(Struct { fields: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
         let expr = self.add_expr(b, Expr::Struct(strukt), Default::default());
         (expr, strukt)
     }
@@ -998,12 +998,12 @@ impl Driver {
             instance_decls: fields.iter().enumerate().map(|(i, field)| InstanceDecl { decl: field.decl, field_info: Some(FieldInfo { struct_id: strukt, field_index: i }) }).collect(),
             ..Default::default()
         };
-        let namespace = self.ast.new_namespaces.push(namespace);
-        self.ast.structs[strukt] = Struct { fields, namespace };
+        let namespace = self.mutable_state.ast.new_namespaces.push(namespace);
+        self.mutable_state.ast.structs[strukt] = Struct { fields, namespace };
         ef!(expr.range) = range;
     }
     pub fn reserve_enum(&mut self, b: &Builder) -> (ExprId, EnumId) {
-        let enuum = self.ast.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
+        let enuum = self.mutable_state.ast.enums.push(Enum { variants: Vec::new(), namespace: NewNamespaceId::new(u32::MAX) });
         let expr = self.add_expr(b, Expr::Enum(enuum), Default::default());
         (expr, enuum)
     }
@@ -1018,19 +1018,19 @@ impl Driver {
                 ).collect(),
             ..Default::default()
         };
-        let namespace = self.ast.new_namespaces.push(namespace);
-        self.ast.enums[enuum] = Enum { variants, namespace };
+        let namespace = self.mutable_state.ast.new_namespaces.push(namespace);
+        self.mutable_state.ast.enums[enuum] = Enum { variants, namespace };
         ef!(expr.range) = range;
     }
     pub fn struct_lit(&mut self, b: &Builder, ty: ExprId, fields: Vec<FieldAssignment>, range: SourceRange) -> ExprId {
-        let id = self.ast.struct_lits.next_idx();
+        let id = self.mutable_state.ast.struct_lits.next_idx();
         self.add_expr(b, Expr::StructLit { ty, fields, id }, range)
     }
     pub fn begin_extend_block(&mut self, b: &Builder, extendee: ExprId, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ExtendBlockId>, ExprId) {
-        let id = self.ast.extend_blocks.push(ExtendBlock::new(extendee));
+        let id = self.mutable_state.ast.extend_blocks.push(ExtendBlock::new(extendee));
         let expr = self.add_expr(b, Expr::ExtendBlock { extendee, id }, range);
         let parent = b.cur_namespace(self);
-        let namespace = self.ast.extend_block_ns.push(ExtendBlockNs { parent: Some(parent) });
+        let namespace = self.mutable_state.ast.extend_block_ns.push(ExtendBlockNs { parent: Some(parent) });
         let entry = b.push_to_scope_stack(id, ScopeState::ExtendBlock { namespace, id, extendee });
         (entry, expr)
     }
@@ -1057,7 +1057,7 @@ impl Driver {
     }
     pub fn create_condition_namespace(&mut self, b: &Builder) -> ConditionNsId {
         let parent = b.cur_namespace(self);
-        self.ast.condition_ns.push(ConditionNs { func: DeclId::new(u32::MAX), parent: Some(parent) })
+        self.mutable_state.ast.condition_ns.push(ConditionNs { func: DeclId::new(u32::MAX), parent: Some(parent) })
     }
     pub fn enter_condition_namespace(&self, b: &Builder, ns: ConditionNsId, condition_kind: ConditionKind) -> AutoPopStackEntry<ScopeState, ConditionNsId> {
         // This condition kind is just a placeholder which will be reset by each attribute. It is done this way so I can share a single
@@ -1066,19 +1066,19 @@ impl Driver {
     }
     pub fn begin_generic_context(&mut self, b: &Builder, generic_params: Range<DeclId>) -> AutoPopStackEntry<ScopeState, GenericContextNsId> {
         let parent = b.cur_namespace(self);
-        let ns = self.ast.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
+        let ns = self.mutable_state.ast.generic_context_ns.push(GenericContextNs { generic_params, parent: Some(parent) });
         b.push_to_scope_stack(ns, ScopeState::GenericContext(ns))
     }
     pub fn begin_module(&mut self, b: &Builder, extern_mod: Option<ExternModId>, range: SourceRange) -> (AutoPopStackEntry<ScopeState, ModScopeNsId>, ExprId) {
         let parent = b.cur_namespace(self);
-        let id = self.ast.new_namespaces.push(NewNamespace::default());
-        let namespace = self.ast.mod_ns.push(
+        let id = self.mutable_state.ast.new_namespaces.push(NewNamespace::default());
+        let namespace = self.mutable_state.ast.mod_ns.push(
             ModScopeNs {
                 scope: id, parent: Some(parent)
             }
         );
         let entry = b.push_to_scope_stack(namespace, ScopeState::Mod { id, namespace, extern_mod });
-        let extern_library_path = extern_mod.map(|mawd| self.ast.extern_mods[mawd].library_path);
+        let extern_library_path = extern_mod.map(|mawd| self.mutable_state.ast.extern_mods[mawd].library_path);
         let expr = self.add_expr(b, Expr::Mod { id, extern_library_path }, range);
         (entry, expr)
     }
@@ -1087,8 +1087,8 @@ impl Driver {
         let id = self.add_decl_with_self_parameter(b, Decl::Static(ExprId::new(u32::MAX)), name, Some(return_ty), proto_range, self_parameter);
 
         assert_eq!(param_names.len(), param_tys.len());
-        self.ast.decls.reserve(param_tys.len());
-        let first_param = self.ast.decls.next_idx();
+        self.mutable_state.ast.decls.reserve(param_tys.len());
+        let first_param = self.mutable_state.ast.decls.next_idx();
         param_tys.iter()
             .enumerate()
             .zip(&param_names)
@@ -1096,7 +1096,7 @@ impl Driver {
             .for_each(|(((index, ty), &name), &range)| {
                 self.add_decl(b, Decl::Parameter { index }, name, Some(*ty), range);
             });
-        let last_param = self.ast.decls.next_idx();
+        let last_param = self.mutable_state.ast.decls.next_idx();
         let params = first_param..last_param;
 
         // `end_fn_decl` will attach the real scope to this decl; we don't have it yet
@@ -1116,9 +1116,9 @@ impl Driver {
             },
             ScopeState::ExtendBlock { id: extend_block_id, .. } => {
                 if self_parameter.is_some() {
-                    self.ast.extend_blocks[extend_block_id].instance_methods.push(id);
+                    self.mutable_state.ast.extend_blocks[extend_block_id].instance_methods.push(id);
                 } else {
-                    self.ast.extend_blocks[extend_block_id].static_methods.push(id);
+                    self.mutable_state.ast.extend_blocks[extend_block_id].static_methods.push(id);
                 }
             },
             ScopeState::Condition { .. } | ScopeState::GenericContext(_) => panic!("Function decls are not supported in this position"),
@@ -1138,7 +1138,7 @@ impl Driver {
     pub fn fn_prototype(&mut self, b: &Builder, name: Sym, param_list: ParamList, _param_ranges: SmallVec<[SourceRange; 2]>, return_ty: ExprId, range: SourceRange) -> DeclId {
         let extern_func = match b.scope_stack.peek().unwrap() {
             ScopeState::Mod { extern_mod: Some(extern_mod), .. } => {
-                let funcs = &mut self.ast.extern_mods[extern_mod].imported_functions;
+                let funcs = &mut self.mutable_state.ast.extern_mods[extern_mod].imported_functions;
                 let index = funcs.len();
                 let interner = self.interner.read().unwrap();
                 let name = interner.resolve(name).unwrap();
@@ -1174,11 +1174,11 @@ impl Driver {
             },
             None => b.cur_namespace(self),
         };
-        let GenericCtx::DeclRef { id, .. } = self.ast.generic_ctxs[generic_ctx.id()] else {
+        let GenericCtx::DeclRef { id, .. } = self.mutable_state.ast.generic_ctxs[generic_ctx.id()] else {
             panic!("Invalid generic context passed in");
         };
         let expr = self.add_expr(b, Expr::DeclRef { id, explicit_generic_args }, range);
-        self.ast.decl_refs[id] = DeclRef {
+        self.mutable_state.ast.decl_refs[id] = DeclRef {
             name,
             namespace,
             expr,
@@ -1244,27 +1244,27 @@ impl Driver {
     pub fn begin_new_file(&mut self, b: &Builder, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();
         // Use all of prelude
-        global_scope.blanket_uses.push(Namespace::Mod(*self.ast.prelude_namespace.get().unwrap()));
-        let global_scope = self.ast.new_namespaces.push(global_scope);
-        let global_namespace = self.ast.mod_ns.push(
+        global_scope.blanket_uses.push(Namespace::Mod(*self.mutable_state.ast.prelude_namespace.get().unwrap()));
+        let global_scope = self.mutable_state.ast.new_namespaces.push(global_scope);
+        let global_namespace = self.mutable_state.ast.mod_ns.push(
             ModScopeNs {
                 scope: global_scope,
                 parent: None
             }
         );
-        self.ast.global_scopes.pin().insert(file, global_scope);
+        self.mutable_state.ast.global_scopes.pin().insert(file, global_scope);
         b.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 
     fn scoped_item(&mut self, b: &Builder, item: ScopedItem) {
         if let ScopeState::Imper { id, .. } = b.scope_stack.peek().unwrap() {
-            self.ast.imper_scopes[id].items.push(item);
+            self.mutable_state.ast.imper_scopes[id].items.push(item);
         }
     }
 
     pub fn imper_scoped_decl(&mut self, b: &Builder, decl: ImperScopedDecl) {
         if let Some(ScopeState::Imper { namespace, .. }) = b.scope_stack.peek() {
-            self.ast.imper_ns[namespace].decls.push(decl);
+            self.mutable_state.ast.imper_ns[namespace].decls.push(decl);
         } else {
             panic!("tried to add imperative-scoped declaration in a non-imperative scope");
         }
@@ -1272,7 +1272,7 @@ impl Driver {
 
     pub fn mod_scoped_decl(&mut self, b: &Builder, decl: StaticDecl) {
         let id = b.find_nearest_mod_scope().expect("tried to add module-scoped declaration where there is no module scope");
-        self.ast.new_namespaces[id].static_decls.push(decl);
+        self.mutable_state.ast.new_namespaces[id].static_decls.push(decl);
     }
 
     pub fn stmt(&mut self, b: &Builder, expr: ExprId, has_semicolon: bool) {
@@ -1294,13 +1294,13 @@ impl Driver {
     pub fn begin_imper_scope(&mut self, b: &mut Builder) -> AutoPopStackEntry<ScopeState, ImperScopeId> {
         let parent = b.cur_namespace(self);
 
-        let id = self.ast.imper_scopes.push(
+        let id = self.mutable_state.ast.imper_scopes.push(
             ImperScope {
                 items: Default::default(),
                 terminal_expr: VOID_EXPR,
             }
         );
-        let namespace = self.ast.imper_ns.push(
+        let namespace = self.mutable_state.ast.imper_ns.push(
             ImperScopeNs {
                 decls: Vec::new(),
                 parent: Some(parent),
@@ -1328,7 +1328,7 @@ impl Driver {
             func.imper_scope_stack += 1;
 
             if is_first_scope {
-                let name = self.ast.names[func.id];
+                let name = self.mutable_state.ast.names[func.id];
                 let id = func.id;
 
                 let params = func.params.clone();
@@ -1348,7 +1348,7 @@ impl Driver {
                     self.imper_scoped_decl(
                         b,
                         ImperScopedDecl {
-                            name: self.ast.names[id],
+                            name: self.mutable_state.ast.names[id],
                             id,
                         }
                     );
@@ -1359,7 +1359,7 @@ impl Driver {
                     self.imper_scoped_decl(
                         b,
                         ImperScopedDecl {
-                            name: self.ast.names[id],
+                            name: self.mutable_state.ast.names[id],
                             id,
                         }
                     );
@@ -1373,7 +1373,7 @@ impl Driver {
         if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = b.scope_stack.peek() {
             if has_terminal_expr {
                 let terminal_expr = stmt_buffer.expect("must pass terminal expression via Builder::stmt()");
-                self.ast.imper_scopes[id].terminal_expr = terminal_expr.expr;
+                self.mutable_state.ast.imper_scopes[id].terminal_expr = terminal_expr.expr;
             }
         } else {
             panic!("tried to end imperative scope, but the top scope in the stack is not an imperative scope");
@@ -1446,9 +1446,9 @@ impl Builder {
         None
     }
     pub fn begin_decl_ref_generic_ctx(&self, d: &mut Driver) -> AutoPopStackEntry<GenericCtxId> {
-        let id = d.ast.decl_refs.push(
+        let id = d.mutable_state.ast.decl_refs.push(
             DeclRef {
-                name: d.ast.known_idents.invalid_declref,
+                name: d.mutable_state.ast.known_idents.invalid_declref,
                 namespace: Namespace::Invalid,
                 expr: ERROR_EXPR,
             }
@@ -1457,7 +1457,7 @@ impl Builder {
     }
     fn push_generic_ctx(&self, d: &mut Driver, ctx: impl FnOnce(GenericCtxId) -> GenericCtx) -> AutoPopStackEntry<GenericCtxId> {
         let parent = self.generic_ctx_stack.peek().unwrap_or_default();
-        let generic_ctx = d.ast.generic_ctxs.push(ctx(parent));
+        let generic_ctx = d.mutable_state.ast.generic_ctxs.push(ctx(parent));
         self.generic_ctx_stack.push(generic_ctx, generic_ctx)
     }
     pub fn begin_decl_generic_ctx(&self, d: &mut Driver, generic_param_list: GenericParamList) -> AutoPopStackEntry<GenericCtxId> {
@@ -1477,7 +1477,7 @@ impl Builder {
         self.scope_stack.peek_mut(|state| {
             if let Some(ScopeState::Imper { id, stmt_buffer, .. }) = state
                 && let Some(stmt) = *stmt_buffer {
-                    d.ast.imper_scopes[*id].items.push(ScopedItem::Expr { expr: stmt.expr, has_semicolon: stmt.has_semicolon });
+                    d.mutable_state.ast.imper_scopes[*id].items.push(ScopedItem::Expr { expr: stmt.expr, has_semicolon: stmt.has_semicolon });
                     *stmt_buffer = None;
                 }
         });
@@ -1485,7 +1485,7 @@ impl Builder {
     fn cur_namespace(&self, d: &Driver) -> Namespace {
         match self.scope_stack.peek().unwrap() {
             ScopeState::Imper { namespace, .. } => {
-                let end_offset = d.ast.imper_ns[namespace].decls.len();
+                let end_offset = d.mutable_state.ast.imper_ns[namespace].decls.len();
                 Namespace::Imper { scope: namespace, end_offset }
             },
             ScopeState::Mod { namespace, .. } => Namespace::Mod(namespace),

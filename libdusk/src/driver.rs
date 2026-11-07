@@ -38,9 +38,15 @@ pub struct Driver {
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
+    pub mutable_state: DriverMutableState,
+}
+
+#[derive(Default)]
+pub struct DriverMutableState {
     pub tir_builder: tir::Builder,
     pub ast: Ast,
 }
+
 pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
 #[derive(Default, Copy, Clone)]
@@ -65,15 +71,18 @@ impl Driver {
             src_map: Arc::new(src_map),
             interner,
             types: Default::default(),
-            tir_builder: tir::Builder::default(),
             diag: Default::default(),
             internal_field_decls: Default::default(),
             no_core,
             mode,
-            ast,
             mir: Default::default(),
+
+            mutable_state: DriverMutableState {
+                tir_builder: tir::Builder::default(),
+                ast,
+            },
         };
-        val.ast.generic_ctxs.push(GenericCtx::Blank);
+        val.mutable_state.ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
