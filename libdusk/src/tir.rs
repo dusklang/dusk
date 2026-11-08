@@ -7,7 +7,7 @@ use string_interner::DefaultSymbol as Sym;
 
 use crate::pattern_matching::SwitchScrutineeValueId;
 use crate::source_info::SourceRange;
-use crate::ast::{self, AttrId, Attribute, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
+use crate::ast::{self, Attribute, CastId, DeclId, DeclRefId, ExprId, ExtendBlockId, FieldAssignment, GenericParamId, GlobalAttrId, ImperScopeId, ItemId, Namespace, NewNamespaceId, ParamList, Pattern, PatternMatchingContextId, RETURN_VALUE_DECL, ScopedItem, StructId, StructLitId};
 use crate::internal_types::{internal_fields, internal_field_decls, InternalField, InternalFieldDecls, InternalNamespace};
 use crate::ty::Type;
 use crate::ty::StructType;
@@ -713,8 +713,8 @@ impl Driver {
         }
     }
 
-    fn build_tir_attr(&self, ms: &DriverMutableState, unit: &mut UnitItems, level: u32, id: AttrId) {
-        match af!(@ms, id.ast) {
+    fn build_tir_attr(&self, ms: &DriverMutableState, unit: &mut UnitItems, level: u32, id: GlobalAttrId) {
+        match *self.get_ast(id) {
             Attribute::CompilerTest { ref arguments, .. } => {
                 let Some(&target_decl) = ms.ast.attr_targets.get(&id) else {
                     return;
@@ -850,9 +850,9 @@ impl Driver {
 
                     if let Some(attrs) = ms.ast.decl_attributes.get(&decl_id) {
                         for &attr in attrs {
-                            let attr_item = ms.ast.attr_to_items[attr];
-                            match af!(@ms, attr.ast) {
-                                Attribute::CompilerTest { ref arguments, .. } => {
+                            let attr_item = self.get_item(attr);
+                            match self.get_ast(attr) {
+                                Attribute::CompilerTest { arguments, .. } => {
                                     for &argument in arguments {
                                         ms.tir_builder.graph.add_type1_dep(attr_item, ef!(@ms, argument.item));
                                     }
@@ -1027,7 +1027,7 @@ impl Driver {
                             // Handle @compiler_test attributes
                             if let Some(attrs) = ms.ast.decl_attributes.get(&decl_id) {
                                 for &attr in attrs {
-                                    let attr_item = ms.ast.attr_to_items[attr];
+                                    let attr_item = self.get_item(attr);
                                     ms.tir_builder.graph.add_type3_dep(id, attr_item);
                                     for &param_ty in param_tys {
                                         add_eval_dep!(attr_item, param_ty);

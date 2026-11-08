@@ -23,7 +23,6 @@ use libdusk::target::{Arch, OperatingSystem};
 use libdusk::driver::{CompilerMode, DRIVER, Driver};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
-use libdusk::ast;
 
 use libdusk::dvm;
 
@@ -112,8 +111,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
     let driver = Arc::new(Driver::new(src_map, arch, os, no_core, mode));
     *DRIVER.write().unwrap() = driver.clone();
-    let mut builder = ast::Builder::default();
-    driver.initialize_ast(&mut builder);
+    driver.initialize_ast();
 
     if matches!(task, DuskTask::TestCompiler { .. }) {
         let Ok(src_root) = env::var("DUSK_SRC_ROOT") else {

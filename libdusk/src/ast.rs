@@ -1,4 +1,4 @@
-use std::any;
+use std::{any, mem};
 use std::ffi::CString;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -56,7 +56,7 @@ define_index_type!(pub struct ExtendBlockId = u32;);
 define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
 define_index_type!(pub struct IntrinsicId = u32;);
-define_index_type!(pub struct AttrId = u32;);
+define_ast_index_type!(pub struct AttrId = u32;);
 define_index_type!(pub struct AstContextId = u32;);
 
 #[derive(Debug, Clone)]
@@ -281,7 +281,7 @@ pub enum Expr {
 pub enum Item {
     Expr(ExprId),
     Decl(DeclId),
-    Attr(AttrId),
+    Attr(GlobalAttrId),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -302,8 +302,8 @@ impl From<DeclId> for Item {
     }
 }
 
-impl From<AttrId> for Item {
-    fn from(attr: AttrId) -> Self {
+impl From<GlobalAttrId> for Item {
+    fn from(attr: GlobalAttrId) -> Self {
         Item::Attr(attr)
     }
 }
@@ -564,8 +564,16 @@ pub struct SelfParameter {
     pub self_ty: ExprId,
 }
 
+#[derive(Default, Debug)]
 pub struct AstContext {
+    pub attrs: IndexVec<AttrId, Attribute>,
+    pub attr_to_items: IndexVec<AttrId, ItemId>,
+}
 
+#[derive(Copy, Clone)]
+pub struct GlobalAstId<LocalId: Idx> {
+    pub ctx: AstContextId,
+    pub id: LocalId,
 }
 
 #[derive(Default)]
@@ -579,6 +587,8 @@ pub struct Ast {
     pub debug_marked_exprs: papaya::HashSet<ExprId>,
     pub type_vars: ConcurrentIndexCounter<TypeVarId>,
 
+    pub attrs: ConcurrentIndexVec<GlobalAttrId, GlobalAstId<AttrId>>,
+
     pub ctxs: ConcurrentIndexVec<AstContextId, OnceLock<AstContext>>,
 }
 
@@ -589,13 +599,11 @@ pub struct MutableAst {
     pub source_ranges: IndexVec<ItemId, SourceRange>,
     pub decl_refs: IndexVec<DeclRefId, DeclRef>,
     pub decls: IndexVec<DeclId, Decl>,
-    pub decl_attributes: HashMap<DeclId, Vec<AttrId>>,
+    pub decl_attributes: HashMap<DeclId, Vec<GlobalAttrId>>, // TODO: use local AttrIds here, once DeclId becomes local
     pub decl_self_parameters: IndexVec<DeclId, Option<SelfParameter>>,
-    pub attrs: IndexVec<AttrId, Attribute>,
-    pub attr_targets: HashMap<AttrId, DeclId>,
+    pub attr_targets: HashMap<GlobalAttrId, DeclId>,         // TODO: use local AttrIds here, once DeclId becomes local
     pub expr_to_items: IndexVec<ExprId, ItemId>,
     pub decl_to_items: IndexVec<DeclId, ItemId>,
-    pub attr_to_items: IndexVec<AttrId, ItemId>,
     pub names: IndexVec<DeclId, Sym>,
     pub explicit_tys: IndexVec<DeclId, Option<ExprId>>,
     pub intrinsics: IndexVec<IntrinsicId, IntrinsicInfo>,
@@ -625,14 +633,31 @@ pub struct MutableAst {
 struct Segment {
 }
 
-#[derive(Default)]
-pub struct Builder {
+pub struct Builder<'ast> {
     fn_decl_stack: Vec<FnDeclState>,
     scope_stack: AutoPopStack<ScopeState>,
     generic_ctx_stack: AutoPopStack<GenericCtxId>,
     imper_roots: IndexVec<ImperRootId, ImperRoot>,
+
+    ctx: AstContext,
+    ctx_id: AstContextId,
+    ast: &'ast Ast,
 }
 
+impl Builder<'_> {
+    fn make_global_ref<LocalId: Idx>(&self, local_id: LocalId) -> GlobalAstId<LocalId> {
+        GlobalAstId {
+            ctx: self.ctx_id,
+            id: local_id
+        }
+    }
+}
+
+impl Drop for Builder<'_> {
+    fn drop(&mut self) {
+        self.ast.ctxs[self.ctx_id].set(mem::take(&mut self.ctx)).unwrap();
+    }
+}
 
 define_index_type!(pub struct ImperRootId = u32;);
 
@@ -821,19 +846,34 @@ pub enum ConditionKind {
 }
 
 impl Driver {
-    pub fn initialize_ast(&self, b: &mut Builder) {
-        self.add_expr(b, Expr::Void, SourceRange::default());
-        self.add_expr(b, Expr::Error, SourceRange::default());
-        self.add_const_ty(b, Type::Void);
-        self.add_const_ty(b, Type::Ty);
-        self.add_const_ty(b, Type::Error);
+    pub fn new_ast_builder(&self) -> Builder<'_> {
+        let ctx_id = self.ast.ctxs.reserve_next_idx();
+        Builder {
+            fn_decl_stack: Default::default(),
+            scope_stack: Default::default(),
+            generic_ctx_stack: Default::default(),
+            imper_roots: Default::default(),
+
+            ctx: Default::default(),
+            ctx_id,
+            ast: &self.ast,
+        }
+    }
+
+    pub fn initialize_ast(&self) {
+        let mut b = self.new_ast_builder();
+        self.add_expr(&mut b, Expr::Void, SourceRange::default());
+        self.add_expr(&mut b, Expr::Error, SourceRange::default());
+        self.add_const_ty(&mut b, Type::Void);
+        self.add_const_ty(&mut b, Type::Ty);
+        self.add_const_ty(&mut b, Type::Error);
         assert_eq!(self.mutable_state.try_read().unwrap().ast.exprs.len(), 5);
 
         let return_value = self.ast.known_idents.return_value;
-        self.add_decl(b, Decl::ReturnValue, return_value, None, SourceRange::default());
+        self.add_decl(&mut b, Decl::ReturnValue, return_value, None, SourceRange::default());
 
-        self.register_internal_fields(b);
-        self.add_prelude(b);
+        self.register_internal_fields(&mut b);
+        self.add_prelude(&mut b);
     }
 
     pub fn debug_mark_expr(&self, expr: ExprId) {
@@ -883,12 +923,14 @@ impl Driver {
         self.add_decl_with_self_parameter(b, decl, name, explicit_ty, range, None)
     }
 
-    pub fn add_attr(&self, b: &Builder, attr: Attribute, range: SourceRange) -> AttrId {
-        let attr_id = self.mutable_state.try_write().unwrap().ast.attrs.push(attr);
-        let item_id = self.add_item(b, Item::Attr(attr_id), range);
-        self.mutable_state.try_write().unwrap().ast.attr_to_items.push_at(attr_id, item_id);
+    pub fn add_attr(&self, b: &mut Builder, attr: Attribute, range: SourceRange) -> GlobalAttrId { // TODO: make this return local AttrId
+        let attr_id = b.ctx.attrs.push(attr);
+        let global_attr_id = self.ast.attrs.push(b.make_global_ref(attr_id));
 
-        attr_id
+        let item_id = self.add_item(b, Item::Attr(global_attr_id), range);
+        b.ctx.attr_to_items.push_at(attr_id, item_id);
+
+        global_attr_id
     }
 
     pub fn int_lit(&self, b: &Builder, lit: u64, range: SourceRange) -> ExprId {
@@ -1426,7 +1468,7 @@ impl Driver {
     }
 }
 
-impl Builder {
+impl Builder<'_> {
     pub fn is_in_imper_scope(&self) -> bool {
         for scope in self.scope_stack.stack.lock().unwrap().borrow().iter().rev() {
             if matches!(scope, ScopeState::Imper { .. }) {
@@ -1601,5 +1643,74 @@ impl Builder {
             writeln!(w, "{:?}", scope)?;
         }
         Ok(())
+    }
+}
+
+pub trait AstHolder {
+    fn get_ast(&self) -> &Ast;
+    fn get_ctx(&self, id: AstContextId) -> &AstContext;
+}
+
+impl AstHolder for Ast {
+    fn get_ast(&self) -> &Ast { self }
+    fn get_ctx(&self, id: AstContextId) -> &AstContext {
+        &self.ctxs[id].get().unwrap()
+    }
+}
+
+impl AstHolder for Builder<'_> {
+    fn get_ast(&self) -> &Ast { self.ast }
+    fn get_ctx(&self, id: AstContextId) -> &AstContext {
+        if self.ctx_id == id {
+            &self.ctx
+        } else {
+            self.ast.get_ctx(id)
+        }
+    }
+}
+
+pub trait AstIndex: Idx {
+    type AstData;
+
+    fn get_ast(self, ast: &impl AstHolder) -> &Self::AstData;
+}
+
+pub trait AstItem: Idx {
+    fn get_item(self, ast: &impl AstHolder) -> ItemId;
+}
+
+impl AstIndex for GlobalAttrId {
+    type AstData = Attribute;
+
+    fn get_ast(self, ast: &impl AstHolder) -> &Self::AstData {
+        let id = ast.get_ast().attrs[self];
+        &ast.get_ctx(id.ctx).attrs[id.id]
+    }
+}
+
+impl AstItem for GlobalAttrId {
+    fn get_item(self, ast: &impl AstHolder) -> ItemId {
+        let id = ast.get_ast().attrs[self];
+        ast.get_ctx(id.ctx).attr_to_items[id.id]
+    }
+}
+
+impl Driver {
+    pub fn get_ast<I: AstIndex>(&self, index: I) -> &I::AstData {
+        index.get_ast(&self.ast)
+    }
+
+    pub fn get_item<I: AstItem>(&self, index: I) -> ItemId {
+        index.get_item(&self.ast)
+    }
+}
+
+impl Builder<'_> {
+    pub fn get_ast<I: AstIndex>(&self, index: I) -> &I::AstData {
+        index.get_ast(self)
+    }
+
+    pub fn get_item<I: AstItem>(&self, index: I) -> ItemId {
+        index.get_item(self)
     }
 }

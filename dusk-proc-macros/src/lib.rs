@@ -109,6 +109,8 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
 // * The bare form is a place expression (good for copying out `Copy` values, calling `&self` methods, or matching
 //   with by-reference bindings); `&` yields a shared reference; `&mut` yields a mutable reference, so assignment is
 //   spelled `*ef!(&mut id.range) = range;`.
+// * `af!` takes a `GlobalAttrId` and differs from the above: attribute data isn't in `DriverMutableState`, so the `@STATE`
+//   form is unsupported, `.ast` takes no lock, and `&mut` only works on `.range`.
 // ---------------------------------------------------------------------------------------------------------------------
 
 struct Parser {
@@ -318,13 +320,26 @@ pub fn df(input: TokenStream) -> TokenStream {
 pub fn af(input: TokenStream) -> TokenStream {
     let input = parse_input(input);
     let field = input.field.clone();
-    emit_field_access(input, |ms, attr| {
-        match field.as_str() {
-            "range" => quote! { #ms.ast.source_ranges[#ms.ast.attr_to_items[#attr]] },
-            "ast" => quote! { #ms.ast.attrs[#attr] },
-            name => panic!("Unrecognized attribute field name {}", name),
-        }
-    })
+    let attr = input.base.clone();
+    // Attribute data lives in the per-context store on `Driver::ast` rather than in `DriverMutableState`, so it can only
+    // be reached through a driver.
+    let Source::Driver(d) = &input.source else {
+        panic!("`af!` doesn't support the `@state` form, because attributes aren't stored in `DriverMutableState`");
+    };
+    let d = d.clone();
+    match field.as_str() {
+        // No lock needed: `Driver::get_ast` reads directly from `Driver::ast`.
+        "ast" => match input.access {
+            Access::Value => quote! { (*(#d).get_ast(#attr)) }.into(),
+            Access::Shared => quote! { (#d).get_ast(#attr) }.into(),
+            Access::Mut => panic!("`af!` doesn't support `&mut` on `.ast`, because attributes are immutable once added"),
+        },
+        "range" => {
+            let item = quote! { (#d).get_item(#attr) };
+            emit_field_access(input, |ms, _| quote! { #ms.ast.source_ranges[#item] })
+        },
+        name => panic!("Unrecognized attribute field name {}", name),
+    }
 }
 
 #[proc_macro_derive(DuskBridge, attributes(module, name, variant))]
@@ -395,7 +410,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(b, konst);
                     d.add_decl_to_path(b, #bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.mutable_state.try_read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
+                    d.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -420,9 +435,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.mutable_state.try_read().unwrap().ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.mutable_state.try_read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {

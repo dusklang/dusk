@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::{assert_matches, mem};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use libdusk::ast::{self, Expr, Item};
+use libdusk::ast::{Expr, Item};
 use libdusk::error::DiagnosticKind;
 use libdusk::new_code::NewCode;
 use libdusk::type_provider::{RealTypeProvider, TypeProvider, MockStateCommand, MockTypeProvider};
@@ -457,8 +457,7 @@ impl Server {
             let driver = Arc::new(Driver::new(src_map, Arch::default(), OperatingSystem::default(), false, CompilerMode::Dls));
             *DRIVER.write().unwrap() = driver.clone();
 
-            let mut builder = ast::Builder::default();
-            driver.initialize_ast(&mut builder);
+            driver.initialize_ast();
 
             let fatal_parse_error = driver.parse_added_files().is_err();
             salf.flush_diagnostics(&driver, &path_ref);

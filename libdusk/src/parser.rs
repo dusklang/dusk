@@ -5,7 +5,7 @@ use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
 
-use crate::ast::{self, AttrId, Attribute, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
+use crate::ast::{self, Attribute, CompilerTestCondition, ConditionNsId, DeclId, ERROR_EXPR, ERROR_TYPE, ExprId, ExternMod, FieldAssignment, GlobalAttrId, Ident, ImperScopeId, ImperScopedDecl, Item, LegacyIntrinsic, ParamList, Pattern, PatternKind, PatternMatchingContextId, SelfParameter, SelfParameterKind, SwitchCase, VOID_TYPE};
 use crate::pattern_matching::{PatternMatchingContext, SwitchScrutineeValue, SwitchScrutineeValueId, ORIGINAL_SCRUTINEE_VALUE};
 use crate::ty::Type;
 use crate::source_info::{self, SourceFileId, SourceRange};
@@ -239,7 +239,7 @@ impl Driver {
             return Ok(());
         }
 
-        let mut b = ast::Builder::default();
+        let mut b = self.new_ast_builder();
         let toks = self.lex(file).map_err(|_| ParseError::UnableToLex)?;
         let _new_file = self.begin_new_file(&b, file);
         let mut p = Parser { toks, cur: 0, list_stack: Default::default(), list_counter: 0 };
@@ -865,7 +865,7 @@ impl Driver {
         Ok(self.switch_expr(b, scrutinee, pattern_matching_context, cases, range))
     }
 
-    fn parse_attribute(&self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<AttrId> {
+    fn parse_attribute(&self, b: &mut ast::Builder, p: &mut Parser, condition_ns: &mut Option<ConditionNsId>) -> ParseResult<GlobalAttrId> { // TODO: make this return local attr ID
         let at_range = self.eat_tok(p, TokenKind::AtSign)?;
 
         let attr_ident = self.eat_ident(p)?;
@@ -1327,14 +1327,14 @@ impl Driver {
                 match df!(decl.ast) {
                     ast::Decl::Function { ref param_tys, .. } => {
                         for &attr in &attributes {
-                            if let Attribute::CompilerTest { ref arguments, .. } = af!(attr.ast) && param_tys.len() != arguments.len() {
+                            if let Attribute::CompilerTest { ref arguments, .. } = *b.get_ast(attr) && param_tys.len() != arguments.len() {
                                 self.diag.report_error_no_range_msg(format!("number of arguments to @compiler_test attribute ({}) does not match number of function parameters ({})", arguments.len(), param_tys.len()), af!(attr.range));
                             }
                         }
                     },
                     _ => {
                         for &attr in &attributes {
-                            match af!(attr.ast) {
+                            match b.get_ast(attr) {
                                 Attribute::Comptime => self.diag.push(
                                     Error::new("unexpected @comptime attribute")
                                         .adding_primary_range(af!(attr.range), "can only be applied to function declarations")
@@ -1348,7 +1348,7 @@ impl Driver {
                         }
                     }
                 }
-                if let Some(&attr) = attributes.iter().find(|&&attr| matches!(af!(attr.ast), Attribute::Comptime))
+                if let Some(&attr) = attributes.iter().find(|&&attr| matches!(b.get_ast(attr), Attribute::Comptime))
                     && !matches!(df!(decl.ast), ast::Decl::Function { .. }) {
                         self.diag.push(
                             Error::new("unexpected @comptime attribute")

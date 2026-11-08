@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
 macro_rules! define_index_type {
     (
@@ -60,6 +61,25 @@ macro_rules! define_index_type {
 
             fn sub(self, other: Self) -> usize {
                 (self.0 - other.0).try_into().unwrap()
+            }
+        }
+    };
+}
+
+macro_rules! define_ast_index_type {
+    (
+        $(#[$attrs:meta])*
+        $v:vis struct $type:ident = $raw:ident;
+    ) => {
+        define_index_type! {
+            $(#[$attrs])*
+            $v struct $type = $raw;
+        }
+
+        ::paste::paste! {
+            define_index_type! {
+                $(#[$attrs])*
+                $v struct [<Global $type>] = $raw;
             }
         }
     };
@@ -350,6 +370,12 @@ impl<I: Idx, T> Default for ConcurrentIndexVec<I, T> {
             raw: Default::default(),
             _marker: PhantomData,
         }
+    }
+}
+
+impl<I: Idx, T> ConcurrentIndexVec<I, OnceLock<T>> {
+    pub fn reserve_next_idx(&self) -> I {
+        self.push(OnceLock::new())
     }
 }
 

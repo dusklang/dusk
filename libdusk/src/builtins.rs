@@ -37,7 +37,7 @@ impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn add_usize_constant(&self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
         let name = self.interner.write().unwrap().get_or_intern(name);
-        let builder = ast::Builder::default();
+        let builder = self.new_ast_builder();
         let konst = self.add_const_expr(&builder, Const::Int { lit: BigInt::from(value), ty: Type::usize() });
         let ty = self.add_const_ty(&builder, Type::usize());
         let decl_id = self.add_decl(&builder, Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
@@ -50,7 +50,7 @@ impl Driver {
         // TODO: should group functions from the same library into the same ExternMod, and then also de-duplicate functions within the same ExternMod
         // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
         let name = self.interner.write().unwrap().get_or_intern(&func_builder.name);
-        let builder = ast::Builder::default();
+        let builder = self.new_ast_builder();
         let ret_ty = self.add_const_ty(&builder, func_builder.ret_ty);
         let mut param_tys = SmallVec::new();
         for param in func_builder.params {
@@ -78,7 +78,7 @@ impl Driver {
     #[path="compiler.ModuleBuilder"]
     fn add_objc_class_ref(&self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
         let name = self.interner.write().unwrap().get_or_intern(class_name);
-        let builder = ast::Builder::default();
+        let builder = self.new_ast_builder();
         let library_path = self.add_const_expr(&builder, Const::StrLit(CString::new(lib_name).unwrap()));
         let extern_mod = crate::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
         let extern_mod = self.mutable_state.try_write().unwrap().ast.extern_mods.push(extern_mod);

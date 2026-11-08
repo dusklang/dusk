@@ -801,7 +801,7 @@ impl Driver {
                 let mut compiler_test_cases = Vec::new();
                 if let Some(attrs) = self.mutable_state.try_read().unwrap().ast.decl_attributes.get(&id).cloned() {
                     for attr in attrs {
-                        match self.mutable_state.try_read().unwrap().ast.attrs[attr] {
+                        match *self.get_ast(attr) {
                             Attribute::Comptime => is_comptime = true,
                             Attribute::CompilerTest { condition, ref arguments, .. } => {
                                 let arguments = arguments.clone();
