@@ -36,16 +36,16 @@ pub trait DuskBridge: 'static {
     fn to_dusk_type(d: &Driver) -> Type {
         let id = any::TypeId::of::<Self>();
 
-        d.mutable_state.ast.bridged_types.pin().get(&id).expect("bridged type not found").clone()
+        d.mutable_state.read().unwrap().ast.bridged_types.pin().get(&id).expect("bridged type not found").clone()
     }
-    fn register(b: &mut ast::Builder, d: &mut Driver);
+    fn register(b: &mut ast::Builder, d: &Driver);
     fn bridge_from_dusk(value: &Value, d: &Driver) -> Self;
     fn bridge_to_dusk(self, d: &Driver) -> Value;
 }
 
 impl DuskBridge for () {
-    fn register(_b: &mut ast::Builder, d: &mut Driver) {
-        d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::Void);
+    fn register(_b: &mut ast::Builder, d: &Driver) {
+        d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::Void);
     }
 
     fn bridge_from_dusk(_value: &Value, _d: &Driver) -> Self {
@@ -58,8 +58,8 @@ impl DuskBridge for () {
 }
 
 impl DuskBridge for &'static str {
-    fn register(_b: &mut ast::Builder, d: &mut Driver) {
-        d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::i8().ptr());
+    fn register(_b: &mut ast::Builder, d: &Driver) {
+        d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::i8().ptr());
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -72,8 +72,8 @@ impl DuskBridge for &'static str {
 }
 
 impl DuskBridge for Module {
-    fn register(_b: &mut ast::Builder, d: &mut Driver) {
-        d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::Mod);
+    fn register(_b: &mut ast::Builder, d: &Driver) {
+        d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), Type::Mod);
     }
 
     fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -89,8 +89,8 @@ macro_rules! bridge_ints {
     ($($int_name: ident),*) => {
         $(
             impl DuskBridge for $int_name {
-                fn register(_b: &mut ast::Builder, d: &mut Driver) {
-                    d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<$int_name>(), Type::$int_name());
+                fn register(_b: &mut ast::Builder, d: &Driver) {
+                    d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<$int_name>(), Type::$int_name());
                 }
 
                 fn bridge_from_dusk(value: &Value, _d: &Driver) -> Self {
@@ -109,7 +109,7 @@ bridge_ints!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
 
 macro_rules! declare_internal_types {
     ($register_name:ident : $($name:ty),*) => {
-        pub fn $register_name(b: &mut ast::Builder, d: &mut Driver) {
+        pub fn $register_name(b: &mut ast::Builder, d: &Driver) {
             $(
                 <$name>::register(b, d);
             )*

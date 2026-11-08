@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{assert_matches, mem};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -18,7 +19,7 @@ use lsp_types::{ServerCapabilities, CompletionOptions, WorkspaceServerCapabiliti
 use url::Url;
 
 use libdusk::source_info::{SourceFileId, SourceRange, SourceMap};
-use libdusk::driver::{CompilerMode, DRIVER, Driver, DriverRwRef};
+use libdusk::driver::{CompilerMode, DRIVER, Driver};
 use libdusk::dvm;
 use dusk_proc_macros::ef;
 use libdusk::target::{Arch, OperatingSystem};
@@ -238,26 +239,25 @@ impl Server {
     fn hover_resolve(&self, params: HoverParams) -> Option<Hover> {
         let url = &params.text_document_position_params.text_document.uri;
         let (driver, tp) = self.analyze_file(url);
-        let pos = lsp_pos_to_dusk_pos(&driver.read(), url, params.text_document_position_params.position);
+        let pos = lsp_pos_to_dusk_pos(&driver, url, params.text_document_position_params.position);
         // TODO: this is preposterously stupid
         let mut hovered_item = None;
-        for (id, range) in driver.read().mutable_state.ast.source_ranges.iter_enumerated() {
+        for (id, range) in driver.mutable_state.read().unwrap().ast.source_ranges.iter_enumerated() {
             if range.contains(pos) {
                 hovered_item = Some(id);
                 break;
             }
         }
         hovered_item.map(|item| {
-            let range = driver.read().mutable_state.ast.source_ranges[item];
-            let range = dusk_range_to_lsp_range(&driver.read(), range).map(|(_, range)| range);
-            let message = match driver.read().mutable_state.ast.items[item] {
+            let range = driver.mutable_state.read().unwrap().ast.source_ranges[item];
+            let range = dusk_range_to_lsp_range(&driver, range).map(|(_, range)| range);
+            let message = match driver.mutable_state.read().unwrap().ast.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
-                    let d = driver.read();
-                    match ef!(d, expr.ast) {
+                    match ef!(driver, expr.ast) {
                         Expr::DeclRef { id, .. } => {
-                            let name = d.mutable_state.ast.decl_refs[id].name;
-                            let interner = d.interner.read().unwrap();
+                            let name = driver.mutable_state.read().unwrap().ast.decl_refs[id].name;
+                            let interner = driver.interner.read().unwrap();
                             let name = interner.resolve(name).unwrap();
                             let mut ty = None;
                             if let Some(tp) = &tp
@@ -275,15 +275,14 @@ impl Server {
                                 message.push_str("unknown type");
                             }
                         },
-                        _ => message.push_str(&format!("unhandled expression {:?}", ef!(d, expr.ast))),
+                        _ => message.push_str(&format!("unhandled expression {:?}", ef!(driver, expr.ast))),
                     }
                     message
                 },
                 Item::Decl(decl) => {
                     let mut message = String::new();
-                    let d = driver.read();
-                    let name = d.mutable_state.ast.names[decl];
-                    let interner = d.interner.read().unwrap();
+                    let name = driver.mutable_state.read().unwrap().ast.names[decl];
+                    let interner = driver.interner.read().unwrap();
                     let name = interner.resolve(name).unwrap();
                     let mut ty = None;
                     if let Some(tp) = &tp {
@@ -433,7 +432,7 @@ impl Server {
         self.open_files.borrow_mut().get_mut(path).unwrap()
             .flushed_diagnostics.extend(new_diagnostics);
     }
-    fn analyze_file(&self, path: &Uri) -> (DriverRwRef<'_>, Option<RealTypeProvider>) {
+    fn analyze_file(&self, path: &Uri) -> (Arc<Driver>, Option<RealTypeProvider>) {
         // I *think* this is safe...
         let salf = AssertUnwindSafe(self);
         let mut file_id = None;
@@ -455,31 +454,27 @@ impl Server {
 
             let file = src_map.add_file_in_memory(Url::parse(path_ref.as_str()).unwrap(), src).unwrap();
             **file_id_ref = Some(file);
-            let mut driver = DriverRwRef::new(&DRIVER);
-            *driver.write() = Driver::new(src_map, Arch::default(), OperatingSystem::default(), false, CompilerMode::Dls);
+            let driver = Arc::new(Driver::new(src_map, Arch::default(), OperatingSystem::default(), false, CompilerMode::Dls));
+            *DRIVER.write().unwrap() = driver.clone();
 
             let mut builder = ast::Builder::default();
-            driver.write().initialize_ast(&mut builder);
+            driver.initialize_ast(&mut builder);
 
-            let fatal_parse_error = driver.write().parse_added_files().is_err();
-            salf.flush_diagnostics(&driver.read(), &path_ref);
-
-
+            let fatal_parse_error = driver.parse_added_files().is_err();
+            salf.flush_diagnostics(&driver, &path_ref);
 
             (!fatal_parse_error).then(|| {
-                salf.flush_diagnostics(&driver.read(), &path_ref);
+                salf.flush_diagnostics(&driver, &path_ref);
 
-                driver.write().initialize_tir();
+                driver.initialize_tir();
 
-                let tp = RefCell::new(driver.read().make_real_type_provider());
+                let tp = RefCell::new(driver.make_real_type_provider());
                 let mut tp_ref = tp.borrow_mut();
                 let mut suhmm_tp = None;
                 let mut new_code = NewCode::placeholder();
                 let mut last_typecheck_succeeded = true;
                 loop {
-                    let mut driver_write = driver.write();
-                    if let Ok(Some(units)) = driver_write.build_more_tir(last_typecheck_succeeded) {
-                        drop(driver_write);
+                    if let Ok(Some(units)) = driver.build_more_tir(last_typecheck_succeeded) {
                         for command in &units.commands {
                             match command {
                                 MockStateCommand::Mock => {
@@ -502,42 +497,43 @@ impl Server {
                         };
                         // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
                         // added. Therefore, we take a snapshot before typechecking.
-                        let before = driver.read().take_snapshot();
+                        let before = driver.take_snapshot();
                         last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
                         if !last_typecheck_succeeded && !units.is_suhmm {
                             break;
                         }
-                        new_code = driver.read().get_new_code_since(before);
+                        new_code = driver.get_new_code_since(before);
 
-                        salf.flush_diagnostics(&driver.read(), &path_ref);
+                        salf.flush_diagnostics(&driver, &path_ref);
                     } else {
                         break;
                     }
                 }
 
                 drop(tp_ref);
-                salf.flush_diagnostics(&driver.read(), &path_ref);
-                if !driver.read().diag.has_failed() {
+                salf.flush_diagnostics(&driver, &path_ref);
+                if !driver.diag.has_failed() {
                     driver.build_mir(&*tp.borrow());
-                    salf.flush_diagnostics(&driver.read(), &path_ref);
+                    salf.flush_diagnostics(&driver, &path_ref);
                 }
                 tp.into_inner()
             })
         });
-        let driver = DriverRwRef::new(&DRIVER);
+        let driver = DRIVER.read().unwrap().clone();
+
         let mut tp = None;
         match unwind_result {
             Ok(type_provider) => tp = type_provider,
             Err(reason) => {
-                let range = driver.read().src_map.get_file_range(file_id.unwrap());
+                let range = driver.src_map.get_file_range(file_id.unwrap());
                 let mut error_msg = String::from("compiler crashed");
                 if reason.is::<String>() {
                     error_msg.push_str(&format!(": {}", reason.downcast::<String>().unwrap()));
                 } else if reason.is::<&'static str>() {
                     error_msg.push_str(&format!(": {}", reason.downcast::<&'static str>().unwrap()));
                 }
-                driver.read().diag.report_error_no_range_msg(error_msg, range);
-                self.flush_diagnostics(&driver.read(), path)
+                driver.diag.report_error_no_range_msg(error_msg, range);
+                self.flush_diagnostics(&driver, path)
             }
         }
         for (url, file) in self.open_files.borrow_mut().iter_mut() {

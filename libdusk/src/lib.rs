@@ -32,7 +32,6 @@ mod pattern_matching;
 mod into_bytes;
 mod backend;
 mod bundler;
-mod rw_ref;
 mod builtins;
 mod autopop;
 mod tbd_parser;

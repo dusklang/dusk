@@ -1,6 +1,7 @@
 use std::mem;
 use std::collections::{HashMap, HashSet};
 use std::cmp::max;
+use std::ops::DerefMut;
 
 use bitflags::bitflags;
 
@@ -170,17 +171,20 @@ struct Component {
 }
 
 impl Driver {
-    pub fn initialize_graph(&mut self) {
-        let mut deps = [
-            &mut self.mutable_state.tir_builder.graph.dependees,
-            &mut self.mutable_state.tir_builder.graph.t2_dependees,
-            &mut self.mutable_state.tir_builder.graph.dependers
+    pub fn initialize_graph(&self) {
+        let mut ms = self.mutable_state.write().unwrap();
+        let ms = ms.deref_mut();
+        let graph = &mut ms.tir_builder.graph;
+        let deps = [
+            &mut graph.dependees,
+            &mut graph.t2_dependees,
+            &mut graph.dependers
         ];
-        for dep in &mut deps {
-            dep.resize_with(self.mutable_state.ast.items.len(), Vec::new);
+        for dep in deps {
+            dep.resize_with(ms.ast.items.len(), Vec::new);
         }
 
-        self.mutable_state.tir_builder.graph.item_to_components.resize_with(self.mutable_state.ast.items.len(), || CompId::new(u32::MAX));
+        graph.item_to_components.resize_with(ms.ast.items.len(), || CompId::new(u32::MAX));
     }
 }
 

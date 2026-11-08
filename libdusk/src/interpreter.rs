@@ -26,7 +26,7 @@ use crate::mir::{BlockId, CallKind, CompilerTestCase, Const, ExternFunction, Fun
 use crate::ty::{EnumType, FloatWidth, FunctionType, IntWidth, LegacyInternalType, QualType, StructType, Type};
 use crate::internal_types::{DuskBridge, InternalField, internal_fields};
 
-use crate::driver::{DRIVER, Driver, DriverRwRef};
+use crate::driver::{DRIVER, Driver};
 use crate::mir::{FunctionRef, function_by_ref};
 #[cfg(target_arch="x86_64")]
 use crate::backend::x64::*;
@@ -566,7 +566,7 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, SignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
-            assert_eq!($salf.read().arch.pointer_size(), 64);
+            assert_eq!($salf.arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
                 (W8, true) => bin_op!(@out $final_val, $func, $conv, i8, $lhs, $rhs, {$sign}),
@@ -580,7 +580,7 @@ macro_rules! bin_op {
     (@kontinue $salf:ident, $func:ident, $ty:ident, $lhs:ident, $rhs:ident, $conv:ident, UnsignedInt, {$sign:tt}, $final_val:ident) => {
         if let Type::Int { width, is_signed } = $ty {
             // We assume in the match below that pointer-sized ints are 64 bits
-            assert_eq!($salf.read().arch.pointer_size(), 64);
+            assert_eq!($salf.arch.pointer_size(), 64);
             use IntWidth::*;
             match (width, is_signed) {
                 (W8, false) => bin_op!(@out $final_val, $func, $conv, u8, $lhs, $rhs, {$sign}),
@@ -613,7 +613,7 @@ macro_rules! bin_op {
         let ($lhs, $rhs) = ($args[0], $args[1]);
         let $ty = $func.type_of_val($lhs);
         assert_eq!($ty, $func.type_of_val($rhs));
-        let ($lhs, $rhs) = (frame.get_val($lhs, &*$salf.read()), frame.get_val($rhs, &*$salf.read()));
+        let ($lhs, $rhs) = (frame.get_val($lhs, &*$salf), frame.get_val($rhs, &*$salf));
         let mut $final_val = None;
     };
     (@out $final_val:ident, $func:ident, no_convert, $ty:ident, $lhs:ident, $rhs:ident, {$sign:tt}) => {
@@ -631,9 +631,8 @@ macro_rules! bin_op {
 extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return_value_addr: *mut ()) {
     let func_id = FuncId::new(func);
 
-    let mut driver = DriverRwRef::new(&DRIVER);
-
-    let func_ty = driver.read().mir.functions[func_id].get().unwrap().ty.clone();
+    let driver = DRIVER.read().unwrap().clone();
+    let func_ty = driver.mir.functions[func_id].get().unwrap().ty.clone();
     let return_ty = func_ty.return_ty.as_ref().clone();
     let mut arguments = Vec::with_capacity(func_ty.param_tys.len());
     macro_rules! get_param {
@@ -649,7 +648,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
             Type::Int { width: IntWidth::W16, .. } => Value::from_u16(get_param!(i)),
             Type::Int { width: IntWidth::W32, .. } => Value::from_u32(get_param!(i)),
             Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
-                assert_eq!(driver.read().arch.pointer_size(), 64);
+                assert_eq!(driver.arch.pointer_size(), 64);
                 Value::from_u64(get_param!(i))
             },
             _ => todo!("parameter type {:?}", ty),
@@ -684,7 +683,7 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         Type::Int { width: IntWidth::W16, .. } => set_ret_val!(return_value.as_u16()),
         Type::Int { width: IntWidth::W32, .. } => set_ret_val!(return_value.as_u32()),
         Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } | Type::Pointer(_) => {
-            assert_eq!(driver.read().arch.pointer_size(), 64);
+            assert_eq!(driver.arch.pointer_size(), 64);
             set_ret_val!(return_value.as_u64());
         },
         _ => todo!("parameter type {:?}", return_ty),
@@ -746,7 +745,7 @@ impl Driver {
                 Const::StructLit { fields, id: strukt.identity }
             },
             Type::Enum(enuum) => {
-                let enum_val = &self.mutable_state.ast.enums[enuum.identity];
+                let enum_val = &self.mutable_state.read().unwrap().ast.enums[enuum.identity];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
                 assert!(valid, "In order to output value of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
                 Const::Variant { enuum: enuum.identity, index: val.as_enum(&enuum, self).discriminant as usize, payload_tys: enuum.payload_tys.clone() }
@@ -813,23 +812,21 @@ impl Driver {
     }
 }
 
-impl DriverRwRef<'_> {
+impl Driver {
     pub fn set_command_line_arguments(&self, args: &[OsString]) {
         INTERP.write().unwrap().command_line_args = args.iter().map(|arg| {
             CString::new(arg.to_string_lossy().as_bytes()).unwrap()
         }).collect();
     }
     pub fn call(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
-        self.unlock();
-
         let response = dvm::send_message(MessageKind::Call(Call::Direct(DirectCall { func_ref, arguments, generic_arguments }))).unwrap();
         let dvm::Response::Direct(result) = response else {
             panic!("incorrect response type");
         };
         result
     }
-    pub fn call_direct(&mut self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
-        let frame = self.read().new_stack_frame(func_ref, arguments, generic_arguments);
+    pub fn call_direct(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
+        let frame = self.new_stack_frame(func_ref, arguments, generic_arguments);
         INTERP_STACK.with(|stack| {
             stack.borrow_mut().push(frame);
             loop {
@@ -848,8 +845,6 @@ impl DriverRwRef<'_> {
         })
     }
     pub fn compiler_test_call(&self, test_case: &CompilerTestCase) -> bool {
-        self.unlock();
-
         let response = dvm::send_message(
             MessageKind::Call(
                 Call::CompilerTest(test_case.clone())
@@ -860,9 +855,9 @@ impl DriverRwRef<'_> {
         };
         passed
     }
-    pub fn compiler_test_call_direct(&mut self, test_case: &CompilerTestCase) -> bool {
+    pub fn compiler_test_call_direct(&self, test_case: &CompilerTestCase) -> bool {
         assert_matches!(INTERP.read().unwrap().mode, InterpMode::TestCompiler, "can't call @compiler_test function when not in test-compiler mode");
-        let argument_values = test_case.arguments.iter().map(|arg| Value::from_const(arg, &self.read())).collect();
+        let argument_values = test_case.arguments.iter().map(|arg| Value::from_const(arg, &self)).collect();
         let test_passed = matches!(
             (self.call_direct(FunctionRef::Id(test_case.func), argument_values, vec![]), test_case.condition),
             (Ok(_), CompilerTestCondition::Success) | (Err(_), CompilerTestCondition::Failure)
@@ -1021,7 +1016,7 @@ unsafe fn free_dyn_lib(dyn_lib: *mut c_void) {
     unsafe { libc::dlclose(dyn_lib); }
 }
 
-impl DriverRwRef<'_> {
+impl Driver {
     #[cfg(windows)]
     #[cfg(target_arch="x86_64")]
     fn generate_thunk(&self, func: &ExternFunction, func_address: i64, arg_tys: &[Type]) -> region::Allocation {
@@ -1069,7 +1064,7 @@ impl DriverRwRef<'_> {
                     }
                 },
                 Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
-                    assert_eq!(self.read().arch.pointer_size(), 64);
+                    assert_eq!(self.arch.pointer_size(), 64);
                     // Read i'th argument as 64-bit value
                     let registers = [Reg64::Rcx, Reg64::Rdx, Reg64::R8, Reg64::R9, Reg64::Rax];
                     thunk.load64(registers[min(i, 4)], Reg64::Rax);
@@ -1097,7 +1092,7 @@ impl DriverRwRef<'_> {
             Type::Int { width: IntWidth::W16, .. } => thunk.store16(Reg64::Rcx, Reg16::Ax),
             Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
-                assert_eq!(self.read().arch.pointer_size(), 64);
+                assert_eq!(self.arch.pointer_size(), 64);
                 thunk.store64(Reg64::Rcx, Reg64::Rax);
             },
             _ => todo!("return type {:?}", func.ty.return_ty),
@@ -1144,7 +1139,7 @@ impl DriverRwRef<'_> {
                     thunk.load32(registers[i], Reg64::Rax);
                 },
                 Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
-                    assert_eq!(self.read().arch.pointer_size(), 64);
+                    assert_eq!(self.arch.pointer_size(), 64);
                     // Read i'th argument as 64-bit value
                     let registers = [Reg64::Rdi, Reg64::Rsi, Reg64::Rdx, Reg64::Rcx, Reg64::R8, Reg64::R9];
                     thunk.load64(registers[i], Reg64::Rax);
@@ -1166,7 +1161,7 @@ impl DriverRwRef<'_> {
             Type::Int { width: IntWidth::W16, .. } => thunk.store16(Reg64::Rcx, Reg16::Ax),
             Type::Int { width: IntWidth::W32, .. } => thunk.store32(Reg64::Rcx, Reg32::Eax),
             Type::Pointer(_) | Type::Int { width: IntWidth::W64 | IntWidth::Pointer, .. } => {
-                assert_eq!(self.read().arch.pointer_size(), 64);
+                assert_eq!(self.arch.pointer_size(), 64);
                 thunk.store64(Reg64::Rcx, Reg64::Rax);
             },
             Type::Void => {},
@@ -1230,7 +1225,7 @@ impl DriverRwRef<'_> {
                     };
                     match width {
                         IntWidth::Pointer | IntWidth::W64 => {
-                            assert_eq!(self.read().arch.pointer_size(), 64);
+                            assert_eq!(self.arch.pointer_size(), 64);
                             thunk.ldr64(reg, Reg::R9, 0);
                         },
                         IntWidth::W32 => thunk.ldr32(reg, Reg::R9, 0),
@@ -1243,7 +1238,7 @@ impl DriverRwRef<'_> {
                     }
                 },
                 Type::Pointer(_) => {
-                    assert_eq!(self.read().arch.pointer_size(), 64);
+                    assert_eq!(self.arch.pointer_size(), 64);
                     let reg = if i < func.ty.param_tys.len() {
                         // TODO: pass additional non-variadic arguments on the stack
                         assert!(next_gpr < 8);
@@ -1275,7 +1270,7 @@ impl DriverRwRef<'_> {
                 thunk.ldr64(Reg::R8, Reg::SP, needed_stack_space - 32);
                 match width {
                     IntWidth::Pointer | IntWidth::W64 => {
-                        assert_eq!(self.read().arch.pointer_size(), 64);
+                        assert_eq!(self.arch.pointer_size(), 64);
                         thunk.str64(Reg::R0, Reg::R8, 0);
                     },
                     IntWidth::W32 => thunk.str32(Reg::R0, Reg::R8, 0),
@@ -1286,7 +1281,7 @@ impl DriverRwRef<'_> {
             Type::Pointer(_) => {
                 // x8 = addr of return value;
                 thunk.ldr64(Reg::R8, Reg::SP, needed_stack_space - 32);
-                assert_eq!(self.read().arch.pointer_size(), 64);
+                assert_eq!(self.arch.pointer_size(), 64);
                 thunk.str64(Reg::R0, Reg::R8, 0);
             },
             Type::Void => {},
@@ -1310,7 +1305,7 @@ impl DriverRwRef<'_> {
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        let d = self.read();
+        let d = self;
         let extern_mods = d.mir.extern_mods.pin();
         let library = extern_mods.get(&func_ref.extern_mod).unwrap();
         let func = &library.imported_functions[func_ref.index];
@@ -1332,7 +1327,7 @@ impl DriverRwRef<'_> {
             type Thunk = fn(*const *mut u8, *mut u8);
             let thunk: Thunk = mem::transmute(thunk_ptr);
             let mut return_val_storage = SmallVec::new();
-            return_val_storage.resize(self.read().size_of(&func.ty.return_ty), 0);
+            return_val_storage.resize(self.size_of(&func.ty.return_ty), 0);
             thunk(indirect_args.as_ptr(), return_val_storage.as_mut_ptr());
 
             free_dyn_lib(dyn_lib);
@@ -1366,26 +1361,26 @@ impl Driver {
 #[derive(Debug)]
 pub struct EvalError;
 
-impl DriverRwRef<'_> {
+impl Driver {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
     // NOTE FOR CORRECTNESS: If you return an Err() result, you MUST first report an error! Otherwise
     // compilation could end up "succeeding", even though compile-time code execution failed.
-    fn execute_next(&mut self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>> {
+    fn execute_next(&self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>> {
         let val = {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last().unwrap();
             let pc = frame.pc;
-            let d = self.read();
+            let d = self;
             let func = function_by_ref(&d.mir, &frame.func_ref);
             match pc {
                 ProgramCounter::Instr(next_instr) => match func.instrs[next_instr].kind.clone() {
-                    InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self.read()),
+                    InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self),
                     InstrKind::Alloca(ty) => {
-                        let storage = vec![0; self.read().size_of(&ty)];
+                        let storage = vec![0; self.size_of(&ty)];
                         Value::OwnedPointer(storage.into_boxed_slice())
                     },
                     InstrKind::LogicalNot(val) => {
-                        let val = frame.get_val(val, &self.read()).as_bool();
+                        let val = frame.get_val(val, &self).as_bool();
                         Value::from_bool(!val)
                     },
                     InstrKind::FunctionRef { ref generic_arguments, func } => {
@@ -1393,7 +1388,7 @@ impl DriverRwRef<'_> {
                     },
                     #[cfg(target_os = "macos")]
                     InstrKind::ObjcClassRef { extern_mod, index } => {
-                        let d = self.read();
+                        let d = self;
                         let extern_mods = d.mir.extern_mods.pin();
                         let library = extern_mods.get(&extern_mod).unwrap();
                         let mut interp = INTERP.write().unwrap();
@@ -1404,7 +1399,7 @@ impl DriverRwRef<'_> {
                                 panic!("unable to load library {:?}", library.library_path);
                             }
                             let mut objc_classes = Vec::new();
-                            for class_name in &self.read().mutable_state.ast.extern_mods[extern_mod].objc_class_references {
+                            for class_name in &self.mutable_state.read().unwrap().ast.extern_mods[extern_mod].objc_class_references {
                                 let class_name = CString::new(class_name.clone()).unwrap();
                                 let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
                                 objc_classes.push(class_ptr as *const c_void);
@@ -1425,44 +1420,43 @@ impl DriverRwRef<'_> {
                     },
                     InstrKind::Call(ref call) => {
                         drop(stack);
-                        drop(d);
                         self.execute_call(call, pc, stack_cell)?
                     },
-                    InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self.read()).clone(),
+                    InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self).clone(),
                     InstrKind::Truncate(instr, ref ty) => {
                         let frame = stack.last().unwrap();
-                        let bytes = frame.get_val(instr, &self.read()).as_bytes_without_driver();
-                        let new_size = self.read().size_of(ty);
+                        let bytes = frame.get_val(instr, &self).as_bytes_without_driver();
+                        let new_size = self.size_of(ty);
                         Value::from_bytes(&bytes[0..new_size])
                     },
                     InstrKind::SignExtend(val, ref dest_ty) => {
                         let frame = stack.last().unwrap();
                         let src_ty = func.type_of_val(val);
-                        let val = frame.get_val(val, &self.read());
+                        let val = frame.get_val(val, &self);
                         match (src_ty, dest_ty) {
                             (
                                 &Type::Int { is_signed: src_is_signed, .. },
                                 &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
+                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
                             (_, _) => panic!("Invalid operand types to sign extension")
                         }
                     },
                     InstrKind::ZeroExtend(val, ref dest_ty) => {
                         let frame = stack.last().unwrap();
                         let src_ty = func.type_of_val(val);
-                        let val = frame.get_val(val, &self.read());
+                        let val = frame.get_val(val, &self);
                         match (src_ty, dest_ty) {
                             (
                                 &Type::Int { is_signed: src_is_signed, .. },
                                 &Type::Int { width: dest_width, is_signed: dest_is_signed }
-                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.read().arch),
+                            ) => Value::from_big_int(val.as_big_int(src_is_signed), dest_width, dest_is_signed, self.arch),
                             (_, _) => panic!("Invalid operand types to zero extension")
                         }
                     },
                     InstrKind::FloatCast(instr, ref ty) => {
                         let frame = stack.last().unwrap();
-                        let val = frame.get_val(instr, &self.read());
-                        match (val.as_bytes_without_driver().len(), self.read().size_of(ty)) {
+                        let val = frame.get_val(instr, &self);
+                        match (val.as_bytes_without_driver().len(), self.size_of(ty)) {
                             (x, y) if x == y => val.clone(),
                             (4, 8) => Value::from_f64(val.as_f32() as f64),
                             (8, 4) => Value::from_f32(val.as_f64() as f32),
@@ -1473,9 +1467,9 @@ impl DriverRwRef<'_> {
                     },
                     InstrKind::FloatToInt(op, ref dest_ty) => {
                         let frame = stack.last().unwrap();
-                        let val = frame.get_val(op, &self.read());
+                        let val = frame.get_val(op, &self);
                         let src_ty = func.type_of_val(op);
-                        let src_size = self.read().size_of(src_ty);
+                        let src_size = self.size_of(src_ty);
 
                         match dest_ty {
                             &Type::Int { width, is_signed } => {
@@ -1494,16 +1488,16 @@ impl DriverRwRef<'_> {
                                     };
                                     BigInt::from(int)
                                 };
-                                Value::from_big_int(big_int, width, is_signed, self.read().arch)
+                                Value::from_big_int(big_int, width, is_signed, self.arch)
                             },
                             _ => panic!("Invalid destination type in float to int cast: {:?}", dest_ty),
                         }
                     }
                     InstrKind::IntToFloat(op, ref dest_ty) => {
                         let frame = stack.last().unwrap();
-                        let val = frame.get_val(op, &self.read());
+                        let val = frame.get_val(op, &self);
                         let src_ty = func.type_of_val(op);
-                        let dest_size = self.read().size_of(dest_ty);
+                        let dest_size = self.size_of(dest_ty);
                         match src_ty {
                             &Type::Int { is_signed, .. } => {
                                 let big_int = val.as_big_int(is_signed);
@@ -1530,14 +1524,14 @@ impl DriverRwRef<'_> {
                         let frame = stack.last().unwrap();
                         let ty = func.type_of_instr(next_instr);
                         let ty = frame.canonicalize_type(ty);
-                        let size = self.read().size_of(&ty);
+                        let size = self.size_of(&ty);
                         let frame = stack.last_mut().unwrap();
-                        frame.get_val(location, &self.read()).load(size)
+                        frame.get_val(location, &self).load(size)
                     },
                     InstrKind::Store { location, value } => {
-                        let val = frame.get_val(value, &self.read()).clone();
+                        let val = frame.get_val(value, &self).clone();
                         let frame = stack.last_mut().unwrap();
-                        let result = frame.get_val_mut(location, &self.read());
+                        let result = frame.get_val_mut(location, &self);
                         result.store(val);
                         Value::Nothing
                     },
@@ -1545,7 +1539,7 @@ impl DriverRwRef<'_> {
                         if let InterpMode::CompileTime = INTERP.read().unwrap().mode {
                             panic!("Can't access static at compile time!");
                         }
-                        let static_value = Value::from_const(&self.read().mir.statics[statik].val.clone(), &self.read());
+                        let static_value = Value::from_const(&self.mir.statics[statik].val.clone(), &self);
                         let mut interp = INTERP.write().unwrap();
                         let statik = interp.statics.entry(statik)
                             .or_insert(static_value)
@@ -1553,42 +1547,42 @@ impl DriverRwRef<'_> {
                         Value::UnownedPointer(UnownedPointer { allocation: &*statik, offset: 0 })
                     },
                     InstrKind::Pointer { value, is_mut } => {
-                        let ty = frame.get_val(value, &self.read()).as_ty().ptr_with_mut(is_mut);
+                        let ty = frame.get_val(value, &self).as_ty().ptr_with_mut(is_mut);
                         Value::from_new_internal(ty, &d)
                     },
                     InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                         let param_tys = param_tys.iter()
-                            .map(|&ty| frame.get_val(ty, &self.read()).as_ty())
+                            .map(|&ty| frame.get_val(ty, &self).as_ty())
                             .collect();
-                        let ret_ty = frame.get_val(ret_ty, &self.read()).as_ty();
+                        let ret_ty = frame.get_val(ret_ty, &self).as_ty();
                         let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
                         Value::from_new_internal(ty, &d)
                     }
                     InstrKind::Struct { ref fields, id } => {
                         let mut field_tys = Vec::new();
                         for &field in fields {
-                            field_tys.push(frame.get_val(field, &self.read()).as_ty());
+                            field_tys.push(frame.get_val(field, &self).as_ty());
                         }
                         let strukt = StructType {
                             field_tys,
                             identity: id,
                         };
-                        Value::from_new_internal(Type::Struct(strukt), &self.read())
+                        Value::from_new_internal(Type::Struct(strukt), &self)
                     },
                     InstrKind::Enum { ref variants, id } => {
-                        if !self.read().mir.enums.pin().contains_key(&id) {
+                        if !self.mir.enums.pin().contains_key(&id) {
                             let mut payload_tys = Vec::new();
                             for &variant in variants {
-                                payload_tys.push(frame.get_val(variant, &self.read()).as_ty());
+                                payload_tys.push(frame.get_val(variant, &self).as_ty());
                             }
-                            let layout = self.read().layout_enum(&EnumType { payload_tys, identity: id });
-                            self.read().mir.enums.pin().insert(
+                            let layout = self.layout_enum(&EnumType { payload_tys, identity: id });
+                            self.mir.enums.pin().insert(
                                 id,
                                 layout,
                             );
                         }
-                        let payload_tys = self.read().mir.enums.pin().get(&id).unwrap().payload_tys.to_vec();
-                        Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self.read())
+                        let payload_tys = self.mir.enums.pin().get(&id).unwrap().payload_tys.to_vec();
+                        Value::from_new_internal(Type::Enum(EnumType { identity: id, payload_tys }), &self)
                     }
                     InstrKind::StructLit { ref fields, id } => {
                         let frame = stack.last().unwrap();
@@ -1599,52 +1593,52 @@ impl DriverRwRef<'_> {
                             })
                             .collect();
                         let fields: Vec<_> = fields.iter()
-                            .map(|&instr| frame.get_val(instr, &self.read()).clone())
+                            .map(|&instr| frame.get_val(instr, &self).clone())
                             .collect();
                         let strukt = StructType {
                             field_tys,
                             identity: id,
                         };
-                        self.read().eval_struct_lit(&strukt, fields.into_iter())
+                        self.eval_struct_lit(&strukt, fields.into_iter())
                     },
                     InstrKind::Variant { enuum, index, payload } => {
-                        let payload = frame.get_val(payload, &self.read()).clone();
-                        Value::from_variant(&self.read(), enuum, index, payload)
+                        let payload = frame.get_val(payload, &self).clone();
+                        Value::from_variant(&self, enuum, index, payload)
                     },
                     InstrKind::PayloadAccess { val, variant_index: _ } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enum_val = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
+                        let enum_val = frame.get_val(val, &self).as_enum(enum_ty, &d);
                         enum_val.payload
                     },
                     InstrKind::DiscriminantAccess { val } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enuum = frame.get_val(val, &self.read()).as_enum(enum_ty, &d);
+                        let enuum = frame.get_val(val, &self).as_enum(enum_ty, &d);
                         Value::from_u32(enuum.discriminant)
                     },
                     InstrKind::DirectFieldAccess { val, index } => {
                         let frame = stack.last().unwrap();
-                        let bytes = frame.get_val(val, &self.read()).as_bytes_without_driver();
+                        let bytes = frame.get_val(val, &self).as_bytes_without_driver();
                         let strukt = match func.type_of_val(val) {
                             Type::Struct(strukt) => strukt,
                             _ => panic!("Can't directly get field of non-struct"),
                         };
-                        let layout = self.read().layout_struct(strukt);
-                        let size = self.read().size_of(&strukt.field_tys[index]);
+                        let layout = self.layout_struct(strukt);
+                        let size = self.size_of(&strukt.field_tys[index]);
                         let offset = layout.field_offsets[index];
                         Value::from_bytes(&bytes[offset..][..size])
                     },
                     InstrKind::IndirectFieldAccess { val, index } => {
-                        let addr = frame.get_val(val, &self.read()).as_allocation();
+                        let addr = frame.get_val(val, &self).as_allocation();
                         let base_ty = &func.type_of_val(val).deref().unwrap().ty;
                         let strukt = match base_ty {
                             Type::Struct(strukt) => strukt,
                             _ => panic!("Can't directly get field of non-struct"),
                         };
-                        let offset = self.read().layout_struct(strukt).field_offsets[index];
+                        let offset = self.layout_struct(strukt).field_offsets[index];
                         Value::from_allocation(addr + offset)
                     },
                     InstrKind::InternalFieldAccess { val, field } => {
-                        let val = frame.get_val(val, &self.read()).as_internal();
+                        let val = frame.get_val(val, &self).as_internal();
                         match (val, field) {
                             (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {
                                 use internal_fields::StringLiteral::*;
@@ -1663,7 +1657,7 @@ impl DriverRwRef<'_> {
                 ProgramCounter::Terminator(block) => {
                     let val = match func.blocks[block].terminator.as_ref().unwrap().clone() {
                         TerminatorKind::Ret(instr) => {
-                            let val = frame.get_val(instr, &self.read()).clone();
+                            let val = frame.get_val(instr, &self).clone();
                             Some(val)
                         },
                         TerminatorKind::Jump(ref target) => {
@@ -1680,7 +1674,7 @@ impl DriverRwRef<'_> {
                         },
                         TerminatorKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
                             // TODO: this is a very crude (and possibly slow) way of supporting arbitrary integer scrutinees
-                            let scrutinee = frame.get_val(scrutinee, &self.read()).as_bytes_without_driver().clone();
+                            let scrutinee = frame.get_val(scrutinee, &self).as_bytes_without_driver().clone();
                             let interp = INTERP.read().unwrap();
                             let target = if let Some(table) = interp.switch_cache.get(&block) {
                                 table.get(scrutinee.as_ref()).cloned()
@@ -1688,7 +1682,7 @@ impl DriverRwRef<'_> {
                                 drop(interp);
                                 let mut table = HashMap::new();
                                 for case in cases.clone() {
-                                    let val = Value::from_const(&case.value, &self.read());
+                                    let val = Value::from_const(&case.value, &self);
                                     let val = val.as_bytes_without_driver();
                                     table.insert(val.as_ref().to_owned().into_boxed_slice(), case.target);
                                 }
@@ -1702,7 +1696,6 @@ impl DriverRwRef<'_> {
                         },
                         TerminatorKind::Call(ref call) => {
                             drop(stack);
-                            drop(d);
                             let Err(err) = self.execute_call(call, pc, stack_cell) else {
                                 panic!("terminator call returned normally");
                             };
@@ -1718,7 +1711,7 @@ impl DriverRwRef<'_> {
         let frame = stack.last_mut().unwrap();
         frame.pc = match frame.pc {
             ProgramCounter::Instr(instr) => {
-                let d = self.read();
+                let d = self;
                 let func = function_by_ref(&d.mir, &frame.func_ref);
                 let instr_result = func.instrs[instr].value;
                 let next_pc = if let Some(next_instr) = func.instr_nodes[instr].next {
@@ -1727,7 +1720,7 @@ impl DriverRwRef<'_> {
                     let block = func.instr_nodes[instr].block.unwrap();
                     ProgramCounter::Terminator(block)
                 };
-                *frame.get_val_mut(instr_result, &self.read()) = val;
+                *frame.get_val_mut(instr_result, &self) = val;
                 next_pc
             },
             ProgramCounter::Terminator(_) => panic!("can't get next instruction after a terminator"),
@@ -1735,24 +1728,23 @@ impl DriverRwRef<'_> {
         Ok(None)
     }
 
-    fn execute_call(&mut self, call: &CallKind, pc: ProgramCounter, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Value> {
+    fn execute_call(&self, call: &CallKind, pc: ProgramCounter, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Value> {
         let stack = stack_cell.borrow();
         let frame = stack.last().unwrap();
-        let d = self.read();
+        let d = self;
         let func = function_by_ref(&d.mir, &frame.func_ref);
         let val = match *call {
             CallKind::Call { ref arguments, ref generic_arguments, func } => {
                 let mut copied_args = Vec::new();
                 copied_args.reserve_exact(arguments.len());
                 for &arg in arguments {
-                    copied_args.push(frame.get_val(arg, &self.read()).clone());
+                    copied_args.push(frame.get_val(arg, &self).clone());
                 }
                 let generic_arguments = generic_arguments.iter()
                     .map(|arg| frame.canonicalize_type(arg))
                     .collect();
                 // Stop immutably borrowing the stack, so it can be borrowed again in call()
                 drop(stack);
-                drop(d);
                 self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
             },
             CallKind::ExternCall { ref arguments, func: callee } => {
@@ -1761,18 +1753,15 @@ impl DriverRwRef<'_> {
                 let mut arg_tys = Vec::new();
                 arg_tys.reserve_exact(arguments.len());
                 for &arg in arguments {
-                    copied_args.push(frame.get_val(arg, &self.read()).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
+                    copied_args.push(frame.get_val(arg, &self).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
                     arg_tys.push(func.type_of_val(arg).clone());
                 }
                 drop(stack);
-                drop(d);
-                self.read_only();
                 self.extern_call(callee, copied_args, arg_tys)
             },
             CallKind::Intrinsic { ref arguments, intr } => {
                 let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                let intr = d.mutable_state.ast.intrinsics[intr].clone();
-                drop(d);
+                let intr = d.mutable_state.read().unwrap().ast.intrinsics[intr].clone();
 
                 intr.kind.call(self, arguments)
             },
@@ -1793,8 +1782,8 @@ impl DriverRwRef<'_> {
                             Type::Enum(_) => {
                                 assert_eq!(arguments.len(), 2);
                                 let frame = stack.last().unwrap();
-                                let a = frame.get_val(arguments[0], &self.read());
-                                let b = frame.get_val(arguments[1], &self.read());
+                                let a = frame.get_val(arguments[0], &self);
+                                let b = frame.get_val(arguments[1], &self);
                                 let a = a.as_big_int(false);
                                 let b = b.as_big_int(false);
                                 Value::from_bool(a == b)
@@ -1808,8 +1797,8 @@ impl DriverRwRef<'_> {
                             Type::Enum(_) => {
                                 assert_eq!(arguments.len(), 2);
                                 let frame = stack.last().unwrap();
-                                let a = frame.get_val(arguments[0], &self.read());
-                                let b = frame.get_val(arguments[1], &self.read());
+                                let a = frame.get_val(arguments[0], &self);
+                                let b = frame.get_val(arguments[1], &self);
                                 let a = a.as_big_int(false);
                                 let b = b.as_big_int(false);
                                 Value::from_bool(a != b)
@@ -1828,10 +1817,10 @@ impl DriverRwRef<'_> {
                         let frame = stack.last().unwrap();
                         let arg = arguments[0];
                         let ty = func.type_of_val(arg);
-                        let arg = frame.get_val(arg, &self.read());
+                        let arg = frame.get_val(arg, &self);
                         match *ty {
                             Type::Int { width, is_signed } => {
-                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.read().arch)
+                                Value::from_big_int(-arg.as_big_int(is_signed), width, is_signed, self.arch)
                             },
                             Type::Float(width) => match width {
                                 FloatWidth::W32 => Value::from_f32(-arg.as_f32()),
@@ -1844,12 +1833,12 @@ impl DriverRwRef<'_> {
                         assert_eq!(arguments.len(), 1);
                         let arg = arguments[0];
                         let ty = func.type_of_val(arg);
-                        let arg = frame.get_val(arg, &self.read());
+                        let arg = frame.get_val(arg, &self);
                         match ty {
                             &Type::Int { width, .. } => {
                                 match width {
                                     IntWidth::Pointer | IntWidth::W64 => {
-                                        assert_eq!(self.read().arch.pointer_size(), 64);
+                                        assert_eq!(self.arch.pointer_size(), 64);
                                         Value::from_u64(!arg.as_u64())
                                     },
                                     IntWidth::W32 => Value::from_u32(!arg.as_u32()),
@@ -1862,18 +1851,18 @@ impl DriverRwRef<'_> {
                     },
                     LegacyIntrinsic::Pos => {
                         assert_eq!(arguments.len(), 1);
-                        frame.get_val(arguments[0], &self.read()).clone()
+                        frame.get_val(arguments[0], &self).clone()
                     },
                     LegacyIntrinsic::Panic => {
                         assert!(arguments.len() <= 1);
                         if INTERP.read().unwrap().mode != InterpMode::TestCompiler {
-                            let panic_message = self.read().panic_message(&stack, arguments.first().copied()).to_string();
+                            let panic_message = self.panic_message(&stack, arguments.first().copied()).to_string();
                             let range = if let ProgramCounter::Instr(instr) = pc {
                                 func.source_ranges.get(&instr).copied()
                             } else {
                                 None
                             }.unwrap_or_default();
-                            self.read().diag.report_error(panic_message, range, "panic occured here");
+                            self.diag.report_error(panic_message, range, "panic occured here");
                         }
                         return Err(EvalError);
                     },
@@ -1881,7 +1870,7 @@ impl DriverRwRef<'_> {
                         let frame = stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
                         let id = arguments[0];
-                        let val = frame.get_val(id, &self.read());
+                        let val = frame.get_val(id, &self);
                         let ty = func.type_of_val(id);
                         match ty {
                             Type::Pointer(_) => unsafe {
@@ -1900,7 +1889,7 @@ impl DriverRwRef<'_> {
                     LegacyIntrinsic::PrintType => {
                         let frame = stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.get_val(arguments[0], &self).as_ty();
                         let ty = frame.canonicalize_type(&ty);
                         print!("{:?}", ty);
                         Value::Nothing
@@ -1908,36 +1897,36 @@ impl DriverRwRef<'_> {
                     LegacyIntrinsic::AlignOf => {
                         let frame = stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.get_val(arguments[0], &self).as_ty();
                         let ty = frame.canonicalize_type(&ty);
-                        Value::from_usize(self.read().align_of(&ty))
+                        Value::from_usize(self.align_of(&ty))
                     },
                     LegacyIntrinsic::StrideOf => {
                         let frame = stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.get_val(arguments[0], &self).as_ty();
                         let ty = frame.canonicalize_type(&ty);
-                        Value::from_usize(self.read().stride_of(&ty))
+                        Value::from_usize(self.stride_of(&ty))
                     },
                     LegacyIntrinsic::SizeOf => {
                         let frame = stack.last().unwrap();
                         assert_eq!(arguments.len(), 1);
-                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
+                        let ty = frame.get_val(arguments[0], &self).as_ty();
                         let ty = frame.canonicalize_type(&ty);
 
-                        Value::from_usize(self.read().size_of(&ty))
+                        Value::from_usize(self.size_of(&ty))
                     },
                     LegacyIntrinsic::OffsetOf => {
                         assert_eq!(arguments.len(), 2);
-                        let ty = frame.get_val(arguments[0], &self.read()).as_ty();
-                        let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &self.read()).as_raw_ptr() as *const _) };
-                        let field_name = self.read().interner.read().unwrap().get(field_name.to_str().unwrap());
+                        let ty = frame.get_val(arguments[0], &self).as_ty();
+                        let field_name = unsafe { CStr::from_ptr(frame.get_val(arguments[1], &self).as_raw_ptr() as *const _) };
+                        let field_name = self.interner.read().unwrap().get(field_name.to_str().unwrap());
                         let mut offset = None;
                         if let Some(field_name) = field_name {
                             match ty {
                                 Type::Struct(strukt) => {
-                                    let layout = self.read().layout_struct(&strukt);
-                                    for (index, field) in self.read().mutable_state.ast.structs[strukt.identity].fields.iter().enumerate() {
+                                    let layout = self.layout_struct(&strukt);
+                                    for (index, field) in self.mutable_state.read().unwrap().ast.structs[strukt.identity].fields.iter().enumerate() {
                                         if field_name == field.name {
                                             offset = Some(layout.field_offsets[index]);
                                             break;
@@ -1955,13 +1944,13 @@ impl DriverRwRef<'_> {
                     },
                     LegacyIntrinsic::GetArg => {
                         assert_eq!(arguments.len(), 1);
-                        let index = frame.get_val(arguments[0], &self.read()).as_usize();
+                        let index = frame.get_val(arguments[0], &self).as_usize();
                         let command_line_args = &INTERP.read().unwrap().command_line_args;
                         Value::from_internal(InternalValue::StrLit(command_line_args[index].clone()))
                     },
                     LegacyIntrinsic::Import => {
                         assert_eq!(arguments.len(), 1);
-                        let val = frame.get_val(arguments[0], &self.read());
+                        let val = frame.get_val(arguments[0], &self);
                         let ptr = val.as_raw_ptr();
 
                         let str = unsafe { CStr::from_ptr(ptr as _) };
@@ -1974,11 +1963,10 @@ impl DriverRwRef<'_> {
                         let path = base_path
                             .map(|base| base.parent().unwrap().join(path))
                             .unwrap_or_else(|| path.into());
-                        drop(d);
-                        let file = self.read().src_map.add_file_on_disk(path).unwrap();
-                        self.write().parse_file(file).unwrap();
+                        let file = self.src_map.add_file_on_disk(path).unwrap();
+                        self.parse_file(file).unwrap();
 
-                        let added_module = *self.read().mutable_state.ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
+                        let added_module = *self.mutable_state.read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
                         Value::from_mod(added_module)
                     },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),

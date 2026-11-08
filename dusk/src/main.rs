@@ -15,11 +15,12 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use libdusk::new_code::NewCode;
 use libdusk::ty::Type;
 use libdusk::target::{Arch, OperatingSystem};
-use libdusk::driver::{CompilerMode, DRIVER, Driver, DriverRwRef};
+use libdusk::driver::{CompilerMode, DRIVER, Driver};
 use libdusk::source_info::SourceMap;
 use libdusk::error::DiagnosticKind;
 use libdusk::ast;
@@ -103,20 +104,21 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     dvm::launch_coordinator_thread();
     let src_map = SourceMap::new();
     let loaded_file = input.map(|input| (input, src_map.add_file_on_disk(input).is_ok()));
-    let mut driver = DriverRwRef::new(&DRIVER);
     let mode = match task {
         DuskTask::Compile { .. } => CompilerMode::Compile,
         DuskTask::Run { .. } => CompilerMode::Run,
         DuskTask::TestCompiler { .. } => CompilerMode::TestCompiler,
     };
-    *driver.write() = Driver::new(src_map, arch, os, no_core, mode);
+
+    let driver = Arc::new(Driver::new(src_map, arch, os, no_core, mode));
+    *DRIVER.write().unwrap() = driver.clone();
     let mut builder = ast::Builder::default();
-    driver.write().initialize_ast(&mut builder);
+    driver.initialize_ast(&mut builder);
 
     if matches!(task, DuskTask::TestCompiler { .. }) {
         let Ok(src_root) = env::var("DUSK_SRC_ROOT") else {
-            driver.read().diag.report_error_no_range("no DUSK_SRC_ROOT environment variable found");
-            flush_diagnostics(&driver.read());
+            driver.diag.report_error_no_range("no DUSK_SRC_ROOT environment variable found");
+            flush_diagnostics(&driver);
             return ExitCode::FAILURE;
         };
 
@@ -124,10 +126,10 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
         test_dir_path.extend(["tests", "integration"]);
 
         let Ok(test_dir) = fs::read_dir(&test_dir_path) else {
-            driver.read().diag.report_error_no_range(
+            driver.diag.report_error_no_range(
                 format!("unable to read test directory \"{}\"", test_dir_path.as_os_str().to_string_lossy())
             );
-            flush_diagnostics(&driver.read());
+            flush_diagnostics(&driver);
             return ExitCode::FAILURE;
         };
 
@@ -136,9 +138,9 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
             let test_path = test_entry.path();
             if let Some(extension) = test_path.extension() && extension.eq_ignore_ascii_case("dusk") {
-                let success = driver.read().src_map.add_file_on_disk(&test_path).is_ok();
+                let success = driver.src_map.add_file_on_disk(&test_path).is_ok();
                 if !success {
-                    driver.read().diag.report_error_no_range(
+                    driver.diag.report_error_no_range(
                         format!("unable to load test file \"{}\"", test_path.as_os_str().to_string_lossy())
                     );
                 }
@@ -147,16 +149,16 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     }
 
     if let Some((input, did_load_file)) = loaded_file && !did_load_file {
-        driver.read().diag.report_error_no_range(
+        driver.diag.report_error_no_range(
             format!("unable to load input file \"{}\"", input.as_os_str().to_string_lossy())
         );
     }
 
     macro_rules! begin_phase {
         ($phase:ident) => {{
-            flush_diagnostics(&driver.read());
+            flush_diagnostics(&driver);
             if (stop_phase as u8) < (StopPhase::$phase as u8) {
-                return match driver.read().diag.check_for_failure() {
+                return match driver.diag.check_for_failure() {
                     true  => ExitCode::FAILURE,
                     false => ExitCode::SUCCESS
                 }
@@ -165,29 +167,26 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     }
 
     begin_phase!(Parse);
-    let fatal_parse_error = driver.write().parse_added_files().is_err();
+    let fatal_parse_error = driver.parse_added_files().is_err();
     if fatal_parse_error {
-        flush_diagnostics(&driver.read());
+        flush_diagnostics(&driver);
         // TODO: still proceed with other phases after some forms of parse error. I had to add this in the short term
         // because after I improved the quality of the parser's error handling, some errors would prevent important data
         // from being properly initialized (e.g., the two-phase initialization of various AST data structures), leading to
         // failures later in the pipeline.
-        driver.read().diag.check_for_failure();
+        driver.diag.check_for_failure();
         return ExitCode::FAILURE;
     };
 
     begin_phase!(Typecheck);
-    driver.write().initialize_tir();
-    let tp = RefCell::new(driver.read().make_real_type_provider());
+    driver.initialize_tir();
+    let tp = RefCell::new(driver.make_real_type_provider());
     let mut tp_ref = tp.borrow_mut();
     let mut suhmm_tp = None;
     let mut new_code = NewCode::placeholder();
     let mut last_typecheck_succeeded = true;
     loop {
-        let mut driver_write = driver.write();
-        if let Ok(Some(units)) = driver_write.build_more_tir(last_typecheck_succeeded) {
-            drop(driver_write);
-
+        if let Ok(Some(units)) = driver.build_more_tir(last_typecheck_succeeded) {
             for command in &units.commands {
                 match command {
                     MockStateCommand::Mock => {
@@ -211,15 +210,15 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 
             // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
             // added. Therefore, we take a snapshot before typechecking.
-            let before = driver.read().take_snapshot();
+            let before = driver.take_snapshot();
             last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
             if !last_typecheck_succeeded && !units.is_suhmm {
                 break;
             }
 
 
-            new_code = driver.read().get_new_code_since(before);
-            // { flush_diagnostics(&driver.read()); }
+            new_code = driver.get_new_code_since(before);
+            // { flush_diagnostics(&driver); }
         } else {
             break;
         }
@@ -228,18 +227,18 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     drop(tp_ref);
     let tp = tp.into_inner();
 
-    flush_diagnostics(&driver.read());
-    if driver.read().diag.check_for_failure() { return ExitCode::FAILURE; }
+    flush_diagnostics(&driver);
+    if driver.diag.check_for_failure() { return ExitCode::FAILURE; }
 
     begin_phase!(Mir);
     driver.build_mir(&tp);
 
     if output_mir {
-        println!("{}", driver.read().display_mir());
+        println!("{}", driver.display_mir());
     }
 
-    flush_diagnostics(&driver.read());
-    if driver.read().diag.check_for_failure() { return ExitCode::FAILURE; }
+    flush_diagnostics(&driver);
+    if driver.diag.check_for_failure() { return ExitCode::FAILURE; }
 
     begin_phase!(Interp);
     match task {
@@ -248,24 +247,24 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 return ExitCode::FAILURE;
             };
 
-            let path = match driver.read().os {
+            let path = match driver.os {
                 OperatingSystem::Windows => "a.exe",
                 OperatingSystem::MacOS | OperatingSystem::Linux => "a.out",
                 OperatingSystem::Android => "a.apk",
             };
             _ = std::fs::remove_file(path);
             let file = File::create(path).unwrap();
-            #[cfg(unix)] if !matches!(driver.read().os, OperatingSystem::Windows) {
+            #[cfg(unix)] if !matches!(driver.os, OperatingSystem::Windows) {
                 let mut permissions = file.metadata().unwrap().permissions();
                 permissions.set_mode(0o755);
                 file.set_permissions(permissions).unwrap();
             }
             let mut w = BufWriter::new(file);
 
-            let mut linker = driver.read().create_linker();
-            let mut backend = driver.read().create_backend();
-            let mut bundler = driver.read().create_bundler();
-            bundler.write(&driver.read(), main, &mut *linker, &mut *backend, &mut w).unwrap();
+            let mut linker = driver.create_linker();
+            let mut backend = driver.create_backend();
+            let mut bundler = driver.create_bundler();
+            bundler.write(&driver, main, &mut *linker, &mut *backend, &mut w).unwrap();
         },
         DuskTask::Run { program_args, .. } => {
             let Some(main) = expect_main_func(&driver) else {
@@ -278,24 +277,20 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
             driver.set_command_line_arguments(program_args);
             let _ = driver.call(FunctionRef::Id(main), Vec::new(), Vec::new());
 
-            flush_diagnostics(&driver.read());
+            flush_diagnostics(&driver);
         },
         DuskTask::TestCompiler { .. } => {
             let mut num_passed = 0usize;
             let mut num_failed = 0usize;
-            let estimated_total = driver.read().mir.compiler_test_cases.count();
-            let d = driver.read();
-            let test_cases: Vec<_> = d.mir.compiler_test_cases.iter().map(|(_, test_case)| test_case.clone()).collect();
-            drop(d);
+            let estimated_total = driver.mir.compiler_test_cases.count();
+            let test_cases: Vec<_> = driver.mir.compiler_test_cases.iter().map(|(_, test_case)| test_case.clone()).collect();
             for (i, test_case) in test_cases.iter().enumerate() {
-                let d: std::cell::Ref<'_, Driver> = driver.read();
-                let func = d.mir.functions[test_case.func].get().unwrap();
+                let func = driver.mir.functions[test_case.func].get().unwrap();
                 print!("Running test {}/{}", i + 1, estimated_total);
-                if let Some(name_symbol) = func.name && let Some(name) = driver.read().interner.read().unwrap().resolve(name_symbol) {
+                if let Some(name_symbol) = func.name && let Some(name) = driver.interner.read().unwrap().resolve(name_symbol) {
                     print!(" ({})", name);
                 }
                 println!(":");
-                drop(d);
 
                 restart_interp(InterpMode::TestCompiler);
                 let passed = driver.compiler_test_call(test_case);
@@ -306,12 +301,12 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                     num_failed += 1;
                     println!("    FAILED");
                 }
-                flush_diagnostics(&driver.read());
+                flush_diagnostics(&driver);
             }
 
             println!();
 
-            let estimated_total = driver.read().mir.compiler_test_cases.count();
+            let estimated_total = driver.mir.compiler_test_cases.count();
             if num_passed < estimated_total {
                 let plural = if num_failed != 1 {
                     "s"
@@ -332,9 +327,9 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn get_main_func(driver: &DriverRwRef) -> Option<FuncId> {
-    let main_sym = driver.read().mutable_state.ast.known_idents.main;
-    driver.read().mir.functions.iter()
+fn get_main_func(driver: &Driver) -> Option<FuncId> {
+    let main_sym = driver.mutable_state.read().unwrap().ast.known_idents.main;
+    driver.mir.functions.iter()
         .position(|func| {
             let func = func.get().unwrap();
             match func.name {
@@ -344,15 +339,15 @@ fn get_main_func(driver: &DriverRwRef) -> Option<FuncId> {
         }).map(FuncId::from_usize)
 }
 
-fn expect_main_func(driver: &DriverRwRef) -> Option<FuncId> {
+fn expect_main_func(driver: &Driver) -> Option<FuncId> {
     if let Some(main) = get_main_func(driver) {
         Some(main)
     } else {
-        driver.read().diag.report_error_no_range(
+        driver.diag.report_error_no_range(
             "couldn't find main function with no parameters and a return type of `void`"
         );
-        flush_diagnostics(&driver.read());
-        driver.read().diag.check_for_failure();
+        flush_diagnostics(&driver);
+        driver.diag.check_for_failure();
         None
     }
 }

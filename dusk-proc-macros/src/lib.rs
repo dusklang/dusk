@@ -1,6 +1,6 @@
 extern crate proc_macro;
 
-use proc_macro::{TokenStream, TokenTree, Ident, Span, Punct, Spacing, Group, Delimiter};
+use proc_macro::{TokenStream, TokenTree};
 use proc_macro::token_stream::IntoIter as TokenIter;
 
 use quote::{quote, ToTokens};
@@ -89,6 +89,28 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
     }.into()
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// `ef!`, `df!` and `af!`: shorthand for looking up per-expression, per-declaration and per-attribute data in the AST.
+//
+// `Driver::mutable_state` lives behind a `RwLock`, so every lookup has to go through a lock guard. Grammar:
+//
+//     ef!([DRIVER ,] [& | &mut] ID.FIELD)
+//     ef!(@STATE , [& | &mut] ID.FIELD)
+//
+// * `DRIVER` (default `self`) is anything with a `mutable_state: RwLock<DriverMutableState>` field (via auto-deref).
+//   The macro takes the lock itself: a read lock for the bare and `&` forms, a write lock for `&mut`. The guard is a
+//   temporary, so it lives until the end of the enclosing statement (or, for `match`/`for`/`if let` scrutinees, until
+//   the end of that construct), and each expansion takes the lock exactly once, even for nested lookups like `.range`.
+// * `@STATE` uses an existing `DriverMutableState` instead of locking: a lock guard, `&DriverMutableState` or
+//   `&mut DriverMutableState`. Use this when the result must outlive the statement, e.g.
+//   `let ms = d.mutable_state.read().unwrap(); let expr = ef!(@ms, &id.ast);`. The lookup projects straight from
+//   `STATE`, so with `ms: &mut DriverMutableState` it only borrows the fields it touches (e.g. `ms.ast.decls`), and
+//   disjoint fields like `ms.tir_builder` stay usable while the result is alive.
+// * The bare form is a place expression (good for copying out `Copy` values, calling `&self` methods, or matching
+//   with by-reference bindings); `&` yields a shared reference; `&mut` yields a mutable reference, so assignment is
+//   spelled `*ef!(&mut id.range) = range;`.
+// ---------------------------------------------------------------------------------------------------------------------
+
 struct Parser {
     iter: Peekable<TokenIter>,
 }
@@ -124,9 +146,26 @@ impl Expression {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Access {
+    /// `ef!(id.field)`: a place expression, read-locked
+    Value,
+    /// `ef!(&id.field)`: a shared reference, read-locked
+    Shared,
+    /// `ef!(&mut id.field)`: a mutable reference, write-locked
+    Mut,
+}
+
+enum Source {
+    /// Something with a `mutable_state: RwLock<DriverMutableState>` field, which the macro will lock
+    Driver(proc_macro2::TokenStream),
+    /// Something that derefs to an already-accessible `DriverMutableState` (e.g. a lock guard)
+    State(proc_macro2::TokenStream),
+}
+
 impl Parser {
     fn parse_expression(&mut self) -> Expression {
-        let base = self.iter.next().unwrap();
+        let base = self.iter.next().expect("unexpected end of macro input");
         let mut expression = Expression::Simple(TokenStream::from(base));
         while let Some(tok) = self.iter.peek() {
             let dot = match tok {
@@ -147,223 +186,145 @@ impl Parser {
         expression
     }
 
-    fn try_parse_comma(&mut self) -> bool {
+    fn try_parse_punct(&mut self, c: char) -> bool {
         match self.iter.peek() {
-            Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => {
+            Some(TokenTree::Punct(punct)) if punct.as_char() == c => {
                 self.iter.next();
                 true
             },
             _ => false,
         }
     }
-}
 
-struct Builder {
-    stream: TokenStream,
-}
-
-impl Builder {
-    fn new() -> Self {
-        Builder { stream: TokenStream::new() }
+    fn try_parse_comma(&mut self) -> bool {
+        self.try_parse_punct(',')
     }
 
-    fn ident(mut self, ident: &str) -> Self {
-        self.stream.extend([
-            TokenTree::Ident(Ident::new(ident, Span::call_site())),
-        ]);
-        self
-    }
-
-    fn field(mut self, name: &str) -> Self {
-        self.stream.extend([
-            TokenTree::Punct(Punct::new('.', Spacing::Alone)),
-        ]);
-        self.ident(name)
-    }
-
-    fn brackets(mut self, index: impl Into<TokenStream>) -> Self {
-        self.stream.extend([
-            TokenTree::Group(
-                Group::new(
-                    Delimiter::Bracket,
-                    index.into(),
-                )
-            )
-        ]);
-        self
-    }
-
-    fn ast_code(mut self, driver: impl Into<TokenStream>) -> Self {
-        self.stream.extend(driver.into());
-        self
-            .field("mutable_state")
-            .field("ast")
-    }
-
-    fn expr_to_item(self, driver: impl Into<TokenStream>, expr_id: impl Into<TokenStream>) -> Self {
-        self.ast_code(driver)
-            .field("expr_to_items")
-            .brackets(expr_id.into())
-    }
-
-    fn decl_to_item(self, driver: impl Into<TokenStream>, decl_id: impl Into<TokenStream>) -> Self {
-        self.ast_code(driver)
-            .field("decl_to_items")
-            .brackets(decl_id.into())
-    }
-
-    fn attr_to_item(self, driver: impl Into<TokenStream>, attr_id: impl Into<TokenStream>) -> Self {
-        self.ast_code(driver)
-            .field("attr_to_items")
-            .brackets(attr_id.into())
-    }
-
-    fn source_range(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
-        self
-            .ast_code(driver)
-            .field("source_ranges")
-            .brackets(item_id)
-    }
-
-    fn generic_ctx_id(self, driver: impl Into<TokenStream>, item_id: impl Into<TokenStream>) -> Self {
-        self
-            .ast_code(driver)
-            .field("item_generic_ctxs")
-            .brackets(item_id)
-    }
-
-    fn generic_ctx_id_from_expr(self, driver: impl Into<TokenStream> + Clone, expr_id: impl Into<TokenStream>) -> Self {
-        self.generic_ctx_id(driver.clone(), Builder::new().expr_to_item(driver, expr_id))
+    /// Parses an optional `&` or `&mut` prefix
+    fn parse_access(&mut self) -> Access {
+        if !self.try_parse_punct('&') {
+            return Access::Value;
+        }
+        match self.iter.peek() {
+            Some(TokenTree::Ident(ident)) if ident.to_string() == "mut" => {
+                self.iter.next();
+                Access::Mut
+            },
+            _ => Access::Shared,
+        }
     }
 }
 
-impl From<Builder> for TokenStream {
-    fn from(b: Builder) -> TokenStream {
-        b.stream
-    }
+struct FieldAccess {
+    source: Source,
+    access: Access,
+    /// The id being looked up (e.g., the `ExprId`)
+    base: proc_macro2::TokenStream,
+    /// The name of the pseudo-field being accessed (e.g., `range`)
+    field: String,
 }
 
-fn parse_input(input: TokenStream) -> (TokenStream, Expression) {
+fn parse_input(input: TokenStream) -> FieldAccess {
     let mut parser = Parser { iter: input.into_iter().peekable() };
-    let mut driver = Builder::new().ident("self").stream;
+    let is_state = parser.try_parse_punct('@');
+    let mut access = parser.parse_access();
     let mut field = parser.parse_expression();
-    if parser.try_parse_comma() {
-        driver = field.simplify();
+    let source = if parser.try_parse_comma() {
+        assert!(access == Access::Value, "`&` and `&mut` belong on the field argument (e.g. `ef!(d, &expr.ast)`), not on the driver");
+        let source = field.simplify().into();
+        access = parser.parse_access();
         field = parser.parse_expression();
+        if is_state { Source::State(source) } else { Source::Driver(source) }
+    } else {
+        assert!(!is_state, "`@state` must be followed by a field argument, like `ef!(@state, expr.ast)`");
+        Source::Driver(quote! { self })
+    };
+    match field {
+        Expression::Dot { base, field, .. } => FieldAccess { source, access, base: base.into(), field: field.to_string() },
+        Expression::Simple(id) => panic!("Unexpected bare identifier '{}'. Must have field", id),
     }
-    (driver, field)
+}
+
+/// Emits the field access. `place` is handed the root to project from (a `DriverMutableState` place, or something that
+/// auto-derefs to one), plus the id being looked up, and returns a place expression rooted there.
+fn emit_field_access(
+    input: FieldAccess,
+    place: impl Fn(&proc_macro2::TokenStream, &proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+) -> TokenStream {
+    match input.source {
+        // `@state` form: project directly from the state expression, without reborrowing it as a whole first. That way
+        // the borrow checker sees only the fields actually touched (e.g. `ms.ast.decls`), so it doesn't conflict with
+        // borrows of disjoint fields like `ms.tir_builder` while the result is alive. (This only helps when the state
+        // is a `&mut DriverMutableState`/`&DriverMutableState`; projecting through a lock guard goes through
+        // `Deref`/`DerefMut`, which always borrows the whole guard.)
+        Source::State(s) => {
+            let place = place(&quote! { (#s) }, &input.base);
+            match input.access {
+                Access::Value => quote! { (#place) },
+                Access::Shared => quote! { (&#place) },
+                Access::Mut => quote! { (&mut #place) },
+            }
+        },
+        // Locking form: binding the guard's target in a `match` lets nested lookups (e.g.
+        // `source_ranges[expr_to_items[id]]`) share one lock acquisition, while keeping the guard temporary alive until
+        // the end of the enclosing statement.
+        Source::Driver(d) => {
+            let ms = proc_macro2::Ident::new("__dusk_mutable_state", proc_macro2::Span::mixed_site());
+            let place = place(&quote! { #ms }, &input.base);
+            match input.access {
+                Access::Value => quote! { (*match &*(#d).mutable_state.read().unwrap() { #ms => &#place }) },
+                Access::Shared => quote! { match &*(#d).mutable_state.read().unwrap() { #ms => &#place } },
+                Access::Mut => quote! { match &mut *(#d).mutable_state.write().unwrap() { #ms => &mut #place } },
+            }
+        },
+    }.into()
 }
 
 #[proc_macro]
 pub fn ef(input: TokenStream) -> TokenStream {
-    let (driver, field) = parse_input(input);
-    match field {
-        Expression::Dot { base, field, .. } => {
-            match field.to_string().as_str() {
-                "range" => {
-                    Builder::new()
-                        .source_range(
-                            driver.clone(),
-                            Builder::new().expr_to_item(driver, base)
-                        )
-                },
-                "generic_ctx" => {
-                    Builder::new()
-                        .ast_code(driver.clone())
-                        .field("generic_ctxs")
-                        .brackets(Builder::new().generic_ctx_id_from_expr(driver, base))
-                }
-                "generic_ctx_id" => {
-                    Builder::new()
-                        .generic_ctx_id_from_expr(
-                            driver,
-                            base,
-                        )
-                },
-                "ast" => {
-                    Builder::new()
-                        .ast_code(driver)
-                        .field("exprs")
-                        .brackets(base)
-                },
-                "item" => {
-                    Builder::new()
-                        .expr_to_item(driver, base)
-                }
-                name => panic!("Unrecognized expression field name {}", name),
-            }
-        },
-        Expression::Simple(expr_id) => panic!("Unexpected bare identifier '{}'. Must have field", expr_id),
-    }.stream
+    let input = parse_input(input);
+    let field = input.field.clone();
+    emit_field_access(input, |ms, expr| {
+        let item = quote! { #ms.ast.expr_to_items[#expr] };
+        let generic_ctx_id = quote! { #ms.ast.item_generic_ctxs[#item] };
+        match field.as_str() {
+            "range" => quote! { #ms.ast.source_ranges[#item] },
+            "generic_ctx" => quote! { #ms.ast.generic_ctxs[#generic_ctx_id] },
+            "generic_ctx_id" => generic_ctx_id,
+            "ast" => quote! { #ms.ast.exprs[#expr] },
+            "item" => item,
+            name => panic!("Unrecognized expression field name {}", name),
+        }
+    })
 }
 
 #[proc_macro]
 pub fn df(input: TokenStream) -> TokenStream {
-    let (driver, field) = parse_input(input);
-    match field {
-        Expression::Dot { base, field, .. } => {
-            match field.to_string().as_str() {
-                "range" => {
-                    Builder::new()
-                        .source_range(
-                            driver.clone(),
-                            Builder::new().decl_to_item(driver, base)
-                        )
-                        .stream
-                },
-                "generic_ctx_id" => {
-                    Builder::new()
-                        .generic_ctx_id(
-                            driver.clone(),
-                            Builder::new().decl_to_item(driver, base)
-                        )
-                        .stream
-                },
-                "ast" => {
-                    Builder::new()
-                        .ast_code(driver)
-                        .field("decls")
-                        .brackets(base)
-                        .stream
-                },
-                "item" => {
-                    Builder::new()
-                        .decl_to_item(driver, base)
-                        .stream
-                }
-                name => panic!("Unrecognized declaration field name {}", name),
-            }
-        },
-        Expression::Simple(decl_id) => panic!("Unexpected bare identifier '{}'. Must have field", decl_id),
-    }
+    let input = parse_input(input);
+    let field = input.field.clone();
+    emit_field_access(input, |ms, decl| {
+        let item = quote! { #ms.ast.decl_to_items[#decl] };
+        match field.as_str() {
+            "range" => quote! { #ms.ast.source_ranges[#item] },
+            "generic_ctx_id" => quote! { #ms.ast.item_generic_ctxs[#item] },
+            "ast" => quote! { #ms.ast.decls[#decl] },
+            "item" => item,
+            name => panic!("Unrecognized declaration field name {}", name),
+        }
+    })
 }
 
 #[proc_macro]
 pub fn af(input: TokenStream) -> TokenStream {
-    let (driver, field) = parse_input(input);
-    match field {
-        Expression::Dot { base, field, .. } => {
-            match field.to_string().as_str() {
-                "range" => {
-                    Builder::new()
-                        .source_range(
-                            driver.clone(),
-                            Builder::new().attr_to_item(driver, base)
-                        )
-                        .stream
-                },
-                "ast" => {
-                    Builder::new()
-                        .ast_code(driver)
-                        .field("attrs")
-                        .brackets(base)
-                        .stream
-                },
-                name => panic!("Unrecognized attribute field name {}", name),
-            }
-        },
-        Expression::Simple(decl_id) => panic!("Unexpected bare identifier '{}'. Must have field", decl_id),
-    }
+    let input = parse_input(input);
+    let field = input.field.clone();
+    emit_field_access(input, |ms, attr| {
+        match field.as_str() {
+            "range" => quote! { #ms.ast.source_ranges[#ms.ast.attr_to_items[#attr]] },
+            "ast" => quote! { #ms.ast.attrs[#attr] },
+            name => panic!("Unrecognized attribute field name {}", name),
+        }
+    })
 }
 
 #[proc_macro_derive(DuskBridge, attributes(module, name, variant))]
@@ -415,15 +376,15 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                let namespace = d.mutable_state.ast.new_namespaces.push(NewNamespace::default());
+                let namespace = d.mutable_state.write().unwrap().ast.new_namespaces.push(NewNamespace::default());
                 let internal_type = InternalType { name: String::from(#bridged_name), size: size_of::<#decl_name>(), namespace };
-                let type_id = d.mutable_state.ast.internal_types.push(internal_type);
+                let type_id = d.mutable_state.write().unwrap().ast.internal_types.push(internal_type);
                 let ty = Type::Internal(type_id);
             }
         };
         quote! {
             impl crate::internal_types::DuskBridge for #decl_name {
-                fn register(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
+                fn register(b: &mut crate::ast::Builder, d: &crate::driver::Driver) {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
                     use crate::index_vec::empty_range;
@@ -434,7 +395,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(b, konst);
                     d.add_decl_to_path(b, #bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
+                    d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -455,13 +416,13 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
 
             impl crate::internal_types::DuskBridge for &'static mut #decl_name {
-                fn register(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
+                fn register(b: &mut crate::ast::Builder, d: &crate::driver::Driver) {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.mutable_state.ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.mutable_state.read().unwrap().ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.mutable_state.ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -640,11 +601,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             Err(err) => return err.to_compile_error().into(),
                         };
 
-                        struct DriverReceiver {
-                            is_mut: bool,
-                        }
-
-                        let mut driver: Option<DriverReceiver> = None;
+                        let mut has_driver_receiver = false;
                         let mut has_self = false;
                         let mut param_index = 0usize;
 
@@ -655,12 +612,18 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         for input in &mut method.sig.inputs {
                             match input {
                                 FnArg::Receiver(receiver) => {
-                                    assert!(driver.is_none());
+                                    assert!(!has_driver_receiver);
                                     assert!(param_index == 0);
                                     assert!(receiver.lifetime().is_none());
                                     assert!(receiver.reference.is_some());
+                                    if let Some(mutability) = receiver.mutability {
+                                        return syn::Error::new(
+                                            mutability.span(),
+                                            "bridged methods must take `&self`: the driver is only ever shared, with mutable state behind `mutable_state`",
+                                        ).to_compile_error().into();
+                                    }
 
-                                    driver = Some(DriverReceiver { is_mut: receiver.mutability.is_some() });
+                                    has_driver_receiver = true;
                                 },
                                 FnArg::Typed(ty) => {
                                     if ty.attrs.iter().find(|attr| attr.path.is_ident("self")).is_some() {
@@ -710,7 +673,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                             param_tys.push(quote! { <#ty>::to_dusk_type(d) });
                                             param_val_decls.push(
                                                 quote! {
-                                                    let #param_val_variable_name = <#ty>::bridge_from_dusk(parameters[#param_index], &d.read());
+                                                    let #param_val_variable_name = <#ty>::bridge_from_dusk(parameters[#param_index], d);
                                                 }
                                             );
                                         },
@@ -747,7 +710,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                             },
                             (None, None) => (
                                 quote! { <#ret_ty>::to_dusk_type(d) },
-                                quote! { val.bridge_to_dusk(&d.read()) },
+                                quote! { val.bridge_to_dusk(d) },
                             ),
                         };
                         let name = method.sig.ident.to_string();
@@ -772,12 +735,8 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                         method.sig.ident = mangled_name.clone();
                         method.attrs.extend(new_attrs.attrs);
 
-                        let implementation = if let Some(driver) = driver {
-                            if driver.is_mut {
-                                quote! { d.write().#mangled_name }
-                            } else {
-                                quote! { d.read().#mangled_name }
-                            }
+                        let implementation = if has_driver_receiver {
+                            quote! { d.#mangled_name }
                         } else {
                             quote! { Driver::#mangled_name }
                         };
@@ -816,7 +775,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     kind: self::IntrinsicKind::#variant,
                                 };
                                 let ret_ty = d.add_const_ty(b, ret_ty);
-                                let intr_id = d.mutable_state.ast.intrinsics.push(info);
+                                let intr_id = d.mutable_state.write().unwrap().ast.intrinsics.push(info);
                                 d.add_decl_to_path(b, #name, #path, #decl, Some(ret_ty));
                             }
                         );
@@ -866,7 +825,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             /// Bridges `parameters` to Rust, calls the underlying Rust method, and bridges the result back to Dusk.
-            pub fn call(self, d: &mut crate::driver::DriverRwRef, parameters: Vec<&crate::interpreter::Value>) -> crate::interpreter::Value {
+            pub fn call(self, d: &crate::driver::Driver, parameters: Vec<&crate::interpreter::Value>) -> crate::interpreter::Value {
                 use crate::internal_types::DuskBridge;
                 match self {
                     #(#call_arms)*
@@ -874,7 +833,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        pub fn register_bridged_rust_methods(b: &mut crate::ast::Builder, d: &mut crate::driver::Driver) {
+        pub fn register_bridged_rust_methods(b: &mut crate::ast::Builder, d: &crate::driver::Driver) {
             use crate::internal_types::DuskBridge;
             use crate::{ast::*, ty::*, mir::*};
             use smallvec::smallvec;

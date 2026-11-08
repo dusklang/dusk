@@ -4,7 +4,7 @@ use std::thread::{self, ThreadId};
 use std::sync::{Mutex, LazyLock};
 use std::thread_local;
 
-use crate::driver::{DriverRwRef, DRIVER};
+use crate::driver::DRIVER;
 use crate::interpreter::{Value, Result as EvalResult};
 use crate::mir::{CompilerTestCase, FunctionRef};
 use crate::ty::Type;
@@ -80,8 +80,8 @@ impl DvmServerCoordinator {
         let (call_tx, call_rx) = mpsc::channel::<Call>();
         let (call_response_tx, call_response_rx) = mpsc::channel::<Response>();
         thread::spawn(move || {
-            let mut driver = DriverRwRef::new(&DRIVER);
             while let Ok(call) = call_rx.recv() {
+                let driver = DRIVER.read().unwrap().clone();
                 let res = match call {
                     Call::Direct(call) => {
                         let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
@@ -92,7 +92,6 @@ impl DvmServerCoordinator {
                         Response::CompilerTest { passed }
                     },
                 };
-                driver.unlock(); // prevent deadlock
                 _ = call_response_tx.send(res);
             }
         });

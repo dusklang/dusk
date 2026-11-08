@@ -195,7 +195,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_item(&self, item: ItemId) {
-        self.print_range(self.mutable_state.ast.source_ranges[item]);
+        self.print_range(self.mutable_state.read().unwrap().ast.source_ranges[item]);
     }
 
     #[allow(dead_code)]
@@ -205,7 +205,7 @@ impl Driver {
 
     #[allow(dead_code)]
     pub fn print_decl(&self, id: DeclId) {
-        self.print_item(self.mutable_state.ast.decl_to_items[id]);
+        self.print_item(self.mutable_state.read().unwrap().ast.decl_to_items[id]);
     }
 }
 

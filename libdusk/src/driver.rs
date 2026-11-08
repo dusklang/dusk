@@ -11,7 +11,6 @@ use crate::tir;
 use crate::error::DiagnosticReporter;
 use crate::mir::FunctionRef;
 use crate::type_provider::TypeProvider;
-use crate::rw_ref::RwRef;
 use crate::interpreter::EvalError;
 
 // TODO: finish making all fields on Driver either immutable, or mutable from multiple threads through a shared reference
@@ -38,7 +37,7 @@ pub struct Driver {
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
 
     // Mutable state
-    pub mutable_state: DriverMutableState,
+    pub mutable_state: RwLock<DriverMutableState>,
 }
 
 #[derive(Default)]
@@ -46,8 +45,6 @@ pub struct DriverMutableState {
     pub tir_builder: tir::Builder,
     pub ast: Ast,
 }
-
-pub type DriverRwRef<'l> = RwRef<'l, Driver>;
 
 #[derive(Default, Copy, Clone)]
 pub enum CompilerMode {
@@ -65,7 +62,7 @@ impl Driver {
             known_idents: KnownIdents::new(&interner),
             ..Default::default()
         };
-        let mut val = Self {
+        let val = Self {
             arch,
             os,
             src_map: Arc::new(src_map),
@@ -77,22 +74,24 @@ impl Driver {
             mode,
             mir: Default::default(),
 
-            mutable_state: DriverMutableState {
-                tir_builder: tir::Builder::default(),
-                ast,
-            },
+            mutable_state: RwLock::new(
+                DriverMutableState {
+                    tir_builder: tir::Builder::default(),
+                    ast,
+                }
+            ),
         };
-        val.mutable_state.ast.generic_ctxs.push(GenericCtx::Blank);
+        val.mutable_state.write().unwrap().ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }
-impl DriverRwRef<'_> {
+impl Driver {
     pub fn eval_expr(&self, expr: ExprId, tp: &dyn TypeProvider) -> Result<Const, EvalError> {
         let func = self.build_standalone_expr(expr, tp);
         let function_ref = FunctionRef::Ref(func);
         let val = self.call(function_ref, Vec::new(), Vec::new())?;
-        Ok(self.read().value_to_const(val, tp.ty(expr).clone()))
+        Ok(self.value_to_const(val, tp.ty(expr).clone()))
     }
 }
 
-pub static DRIVER: LazyLock<RwLock<Driver>> = LazyLock::new(|| RwLock::new(Driver::default()));
+pub static DRIVER: LazyLock<RwLock<Arc<Driver>>> = LazyLock::new(Default::default);

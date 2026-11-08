@@ -29,24 +29,24 @@ use dusk_proc_macros::{ef, df, dusk_bridge};
 #[dusk_bridge]
 impl Driver {
     #[path="compiler.ModuleBuilder"]
-    fn new(&mut self) -> ModuleBuilder {
-        let namespace = self.mutable_state.ast.new_namespaces.push(NewNamespace::default());
+    fn new(&self) -> ModuleBuilder {
+        let namespace = self.mutable_state.write().unwrap().ast.new_namespaces.push(NewNamespace::default());
         ModuleBuilder { namespace }
     }
 
     #[path="compiler.ModuleBuilder"]
-    fn add_usize_constant(&mut self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
+    fn add_usize_constant(&self, #[self] b: ModuleBuilder, name: &'static str, value: usize) {
         let name = self.interner.write().unwrap().get_or_intern(name);
         let builder = ast::Builder::default();
         let konst = self.add_const_expr(&builder, Const::Int { lit: BigInt::from(value), ty: Type::usize() });
         let ty = self.add_const_ty(&builder, Type::usize());
         let decl_id = self.add_decl(&builder, Decl::Const { assigned_expr: konst, generic_params: empty_range() }, name, Some(ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
-        self.mutable_state.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
+        self.mutable_state.write().unwrap().ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
 
     #[path="compiler.ModuleBuilder"]
-    fn add_extern_function(&mut self, #[self] b: ModuleBuilder, func_builder: ExternFunctionBuilder) {
+    fn add_extern_function(&self, #[self] b: ModuleBuilder, func_builder: ExternFunctionBuilder) {
         // TODO: should group functions from the same library into the same ExternMod, and then also de-duplicate functions within the same ExternMod
         // TODO: also, rename ExternMod, since it no longer corresponds to a lexical module in the source code
         let name = self.interner.write().unwrap().get_or_intern(&func_builder.name);
@@ -65,27 +65,27 @@ impl Driver {
             return_ty: ret_ty,
         };
         let extern_mod = crate::ast::ExternMod { library_path, imported_functions: vec![func], objc_class_references: Default::default() };
-        let extern_mod = self.mutable_state.ast.extern_mods.push(extern_mod);
+        let extern_mod = self.mutable_state.write().unwrap().ast.extern_mods.push(extern_mod);
         let extern_func_ref = ExternFunctionRef {
             extern_mod,
             index: 0,
         };
         let decl_id = self.add_decl(&builder, Decl::FunctionPrototype { param_list, extern_func: Some(extern_func_ref) }, name, Some(ret_ty), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
-        self.mutable_state.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
+        self.mutable_state.write().unwrap().ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
 
     #[path="compiler.ModuleBuilder"]
-    fn add_objc_class_ref(&mut self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
+    fn add_objc_class_ref(&self, #[self] b: ModuleBuilder, class_name: &'static str, lib_name: &'static str) {
         let name = self.interner.write().unwrap().get_or_intern(class_name);
         let builder = ast::Builder::default();
         let library_path = self.add_const_expr(&builder, Const::StrLit(CString::new(lib_name).unwrap()));
         let extern_mod = crate::ast::ExternMod { library_path, imported_functions: Default::default(), objc_class_references: vec![class_name.to_string()] };
-        let extern_mod = self.mutable_state.ast.extern_mods.push(extern_mod);
+        let extern_mod = self.mutable_state.write().unwrap().ast.extern_mods.push(extern_mod);
         let void_ptr = self.add_const_ty(&builder, Type::Void.ptr());
         let decl_id = self.add_decl(&builder, Decl::ObjcClassRef { extern_mod, index: 0 }, name, Some(void_ptr), SourceRange::default());
         let static_decl = StaticDecl { name, decl: decl_id };
-        self.mutable_state.ast.new_namespaces[b.namespace].static_decls.push(static_decl);
+        self.mutable_state.write().unwrap().ast.new_namespaces[b.namespace].static_decls.push(static_decl);
     }
 
     #[path="compiler.ModuleBuilder"]
@@ -150,17 +150,17 @@ impl Drop for EnumBuilder {
 }
 
 impl Driver {
-    pub fn add_prelude(&mut self, b: &mut ast::Builder) {
-        assert!(self.mutable_state.ast.prelude_namespace.get().is_none());
-        let prelude_scope = self.mutable_state.ast.new_namespaces.push(NewNamespace::default());
-        let prelude_namespace = self.mutable_state.ast.mod_ns.push(
+    pub fn add_prelude(&self, b: &mut ast::Builder) {
+        assert!(self.mutable_state.write().unwrap().ast.prelude_namespace.get().is_none());
+        let prelude_scope = self.mutable_state.write().unwrap().ast.new_namespaces.push(NewNamespace::default());
+        let prelude_namespace = self.mutable_state.write().unwrap().ast.mod_ns.push(
             ModScopeNs {
                 scope: prelude_scope,
                 parent: None
             }
         );
         let _prelude_scope = b.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
-        self.mutable_state.ast.prelude_namespace.set(prelude_namespace).unwrap();
+        self.mutable_state.write().unwrap().ast.prelude_namespace.set(prelude_namespace).unwrap();
 
         // Add intrinsics to prelude
 
@@ -304,7 +304,7 @@ impl Driver {
         register_bridged_rust_methods(b, self);
     }
 
-    fn add_constant_decl(&mut self, b: &ast::Builder, name: &str, value: Const) {
+    fn add_constant_decl(&self, b: &ast::Builder, name: &str, value: Const) {
         let expr = self.add_const_expr(b, value);
         let name = self.interner.write().unwrap().get_or_intern(name);
         let decl = self.add_decl(b, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, name, None, SourceRange::default());
@@ -317,30 +317,31 @@ impl Driver {
         );
     }
 
-    fn add_constant_type_decl(&mut self, b: &ast::Builder, name: &str, ty: Type) {
+    fn add_constant_type_decl(&self, b: &ast::Builder, name: &str, ty: Type) {
         self.add_constant_decl(b, name, Const::Ty(ty));
     }
 
-    pub fn add_decl_to_path(&mut self, b: &ast::Builder, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
+    pub fn add_decl_to_path(&self, b: &ast::Builder, name: &str, path: &str, decl: Decl, explicit_ty: Option<ExprId>) {
         let scope = self.find_or_build_relative_ns_path(b, path);
         let name = self.interner.write().unwrap().get_or_intern(name);
         if let Decl::MethodIntrinsic(id) = decl {
             let decl_id = self.add_decl(b, Decl::Intrinsic(id), name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };
-            self.mutable_state.ast.new_namespaces[scope].static_decls.push(static_decl);
+            self.mutable_state.write().unwrap().ast.new_namespaces[scope].static_decls.push(static_decl);
 
             let decl_id = self.add_decl(b, decl, name, explicit_ty, SourceRange::default());
-            self.mutable_state.ast.new_namespaces[scope].instance_decls.push(InstanceDecl { decl: decl_id, field_info: None });
+            self.mutable_state.write().unwrap().ast.new_namespaces[scope].instance_decls.push(InstanceDecl { decl: decl_id, field_info: None });
         } else {
             let decl_id = self.add_decl(b, decl, name, explicit_ty, SourceRange::default());
             let static_decl = StaticDecl { name, decl: decl_id };
-            self.mutable_state.ast.new_namespaces[scope].static_decls.push(static_decl);
+            self.mutable_state.write().unwrap().ast.new_namespaces[scope].static_decls.push(static_decl);
         }
     }
 
-    fn add_module_decl(&mut self, b: &ast::Builder, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
-        let scope = self.mutable_state.ast.new_namespaces.push(NewNamespace::default());
-        let namespace = self.mutable_state.ast.mod_ns.push(
+    fn add_module_decl(&self, b: &ast::Builder, name: &str) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
+        let mut ms = self.mutable_state.write().unwrap();
+        let scope = ms.ast.new_namespaces.push(NewNamespace::default());
+        let namespace = ms.ast.mod_ns.push(
             ModScopeNs {
                 scope,
 
@@ -350,6 +351,7 @@ impl Driver {
                 parent: None,
             }
         );
+        drop(ms);
         self.add_constant_decl(b, name, Const::Mod(scope));
         b.push_to_scope_stack(namespace, ScopeState::Mod { id: scope, namespace, extern_mod: None })
     }
@@ -365,15 +367,16 @@ impl Driver {
             assert!(!name.is_empty());
 
             let name = self.interner.write().unwrap().get_or_intern(name);
-            let matching_decls: Vec<&StaticDecl> = self.mutable_state.ast.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
+            let ms = self.mutable_state.read().unwrap();
+            let matching_decls: Vec<&StaticDecl> = ms.ast.new_namespaces[ns].static_decls.iter().filter(|decl| decl.name == name).collect();
 
             assert!(matching_decls.len() == 1);
             let decl = matching_decls[0];
             let Decl::Const { assigned_expr: expr, .. } = df!(decl.decl.ast) else { panic!("internal compiler error: expected const decl") };
-            let Expr::Const(konst) = &ef!(expr.ast) else { panic!("internal compiler error: expected const expr") };
+            let Expr::Const(konst) = ef!(@ms, &expr.ast) else { panic!("internal compiler error: expected const expr") };
             ns = match *konst {
                 Const::Mod(new_ns) => new_ns,
-                Const::Ty(Type::Internal(id)) => self.mutable_state.ast.internal_types[id].namespace,
+                Const::Ty(Type::Internal(id)) => self.mutable_state.read().unwrap().ast.internal_types[id].namespace,
                 _ => panic!("internal compiler error: expected const mod or type"),
             };
         }
@@ -389,7 +392,7 @@ impl Driver {
         b.variants.push(VariantBuilder { name, payload_ty });
     }
 
-    fn end_enum(&mut self, b: &ast::Builder, enum_b: EnumBuilder) -> EnumType {
+    fn end_enum(&self, b: &ast::Builder, enum_b: EnumBuilder) -> EnumType {
         let (expr, id) = self.reserve_enum(b);
         let enum_ty = EnumType {
             payload_tys: enum_b.variants.iter().map(|variant| variant.payload_ty.clone().unwrap_or(Type::Void)).collect(),
@@ -407,10 +410,10 @@ impl Driver {
         enum_ty
     }
 
-    fn add_virtual_file_module(&mut self, b: &ast::Builder, name: &str, src: &str) -> ParseResult<()>  {
+    fn add_virtual_file_module(&self, b: &ast::Builder, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
         self.parse_file(file)?;
-        let scope = *self.mutable_state.ast.global_scopes.pin().get(&file).expect("no global scope found for virtual file");
+        let scope = *self.mutable_state.read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for virtual file");
         self.add_constant_decl(b, name, Const::Mod(scope));
         Ok(())
     }

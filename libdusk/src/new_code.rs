@@ -29,9 +29,9 @@ macro_rules! generate_new_code {
         impl Driver {
             pub fn take_snapshot(&self) -> CodeSnapshot {
                 CodeSnapshot {
-                    exprs: self.mutable_state.ast.exprs.next_idx(),
-                    decls: self.mutable_state.ast.decls.next_idx(),
-                    items: self.mutable_state.ast.items.next_idx(),
+                    exprs: self.mutable_state.read().unwrap().ast.exprs.next_idx(),
+                    decls: self.mutable_state.read().unwrap().ast.decls.next_idx(),
+                    items: self.mutable_state.read().unwrap().ast.items.next_idx(),
                 }
             }
 
