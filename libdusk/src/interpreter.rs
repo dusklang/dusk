@@ -1378,7 +1378,7 @@ impl Driver {
                         Value::OwnedPointer(storage.into_boxed_slice())
                     },
                     InstrKind::LogicalNot(val) => {
-                        let val = frame.get_val(val, &self).as_bool();
+                        let val = frame.get_val(val, self).as_bool();
                         Value::from_bool(!val)
                     },
                     InstrKind::FunctionRef { ref generic_arguments, func } => {
@@ -1429,7 +1429,7 @@ impl Driver {
                     InstrKind::SignExtend(val, ref dest_ty) => {
                         let frame = stack.last().unwrap();
                         let src_ty = func.type_of_val(val);
-                        let val = frame.get_val(val, &self);
+                        let val = frame.get_val(val, self);
                         match (src_ty, dest_ty) {
                             (
                                 &Type::Int { is_signed: src_is_signed, .. },
@@ -1441,7 +1441,7 @@ impl Driver {
                     InstrKind::ZeroExtend(val, ref dest_ty) => {
                         let frame = stack.last().unwrap();
                         let src_ty = func.type_of_val(val);
-                        let val = frame.get_val(val, &self);
+                        let val = frame.get_val(val, self);
                         match (src_ty, dest_ty) {
                             (
                                 &Type::Int { is_signed: src_is_signed, .. },
@@ -1604,17 +1604,17 @@ impl Driver {
                     },
                     InstrKind::PayloadAccess { val, variant_index: _ } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enum_val = frame.get_val(val, &self).as_enum(enum_ty, self);
+                        let enum_val = frame.get_val(val, self).as_enum(enum_ty, self);
                         enum_val.payload
                     },
                     InstrKind::DiscriminantAccess { val } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enuum = frame.get_val(val, &self).as_enum(enum_ty, self);
+                        let enuum = frame.get_val(val, self).as_enum(enum_ty, self);
                         Value::from_u32(enuum.discriminant)
                     },
                     InstrKind::DirectFieldAccess { val, index } => {
                         let frame = stack.last().unwrap();
-                        let bytes = frame.get_val(val, &self).as_bytes_without_driver();
+                        let bytes = frame.get_val(val, self).as_bytes_without_driver();
                         let strukt = match func.type_of_val(val) {
                             Type::Struct(strukt) => strukt,
                             _ => panic!("Can't directly get field of non-struct"),
@@ -1625,7 +1625,7 @@ impl Driver {
                         Value::from_bytes(&bytes[offset..][..size])
                     },
                     InstrKind::IndirectFieldAccess { val, index } => {
-                        let addr = frame.get_val(val, &self).as_allocation();
+                        let addr = frame.get_val(val, self).as_allocation();
                         let base_ty = &func.type_of_val(val).deref().unwrap().ty;
                         let strukt = match base_ty {
                             Type::Struct(strukt) => strukt,
@@ -1635,7 +1635,7 @@ impl Driver {
                         Value::from_allocation(addr + offset)
                     },
                     InstrKind::InternalFieldAccess { val, field } => {
-                        let val = frame.get_val(val, &self).as_internal();
+                        let val = frame.get_val(val, self).as_internal();
                         match (val, field) {
                             (InternalValue::StrLit(lit), InternalField::StringLiteral(field)) => {
                                 use internal_fields::StringLiteral::*;

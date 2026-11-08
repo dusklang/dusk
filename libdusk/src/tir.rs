@@ -404,7 +404,7 @@ impl Driver {
         };
     }
     fn find_overloads_in_function_parameters(&self, ms: &DriverMutableState, name: &NameLookup, func: DeclId, overloads: &mut HashSet<FoundOverload>) {
-        match &df!(func.ast) {
+        match &df!(@ms, func.ast) {
             ast::Decl::Function { params, .. } => {
                 for decl in range_iter(params.clone()) {
                     let param_name = ms.ast.names[decl];
