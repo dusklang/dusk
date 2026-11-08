@@ -700,7 +700,7 @@ impl tir::Expr<tir::DeclRef> {
                 }
 
                 for (&generic_arg, generic_param) in generic_args.iter().zip(range_iter(generic_params)) {
-                    let type_var = ms.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = driver.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     let ty = tp.get_evaluated_type(generic_arg).clone();
 
                     driver.set_type(tp, type_var, ty).unwrap();
@@ -758,7 +758,7 @@ impl tir::Expr<tir::DeclRef> {
             } else {
                 let mut generic_args = Vec::new();
                 for generic_param in range_iter(decl.generic_params.clone()) {
-                    let type_var = ms.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = driver.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     // TODO: error message probably
                     let solution = driver.solve_constraints(tp, type_var).unwrap();
                     generic_args.push(solution.qual_ty.ty);
@@ -1433,8 +1433,8 @@ impl Driver {
 
         let mut generic_param_substitutions = HashMap::new();
         for generic_param in range_iter(decl.generic_params.clone()) {
-            let type_var = *ms.ast.generic_arg_type_variables.pin()
-                .get_or_insert_with((decl_ref, generic_param), || ms.ast.type_vars.next_idx());
+            let type_var = *self.ast.generic_arg_type_variables.pin()
+                .get_or_insert_with((decl_ref, generic_param), || self.ast.type_vars.next_idx());
             generic_param_substitutions.insert(generic_param, Type::TypeVar(type_var));
         }
 

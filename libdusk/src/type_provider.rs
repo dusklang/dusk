@@ -163,7 +163,7 @@ macro_rules! declare_tp {
                     if let Some(decl_ref) = decl_ref {
                         let decl_ref = &d.mutable_state.try_read().unwrap().ast.decl_refs[decl_ref];
                         match decl_ref.namespace {
-                            Namespace::Guarantee(ns) if decl_ref.name == d.mutable_state.try_read().unwrap().ast.known_idents.return_value => {
+                            Namespace::Guarantee(ns) if decl_ref.name == d.ast.known_idents.return_value => {
                                 let func = d.mutable_state.try_read().unwrap().ast.condition_ns[ns].func;
                                 // This gets the return value because this declref refers to the return_value decl
                                 return self.fetch_decl_type(d, ms, func, None).ty.return_ty().unwrap().into();
@@ -217,7 +217,7 @@ macro_rules! declare_tp {
                         self.$fname.resize_with(d.mutable_state.try_read().unwrap().ast.exprs.len(), Default::default);
                     };
                     ($fname:ident, TypeVarId) => {
-                        self.$fname.resize_with(d.mutable_state.try_read().unwrap().ast.type_vars.len(), Default::default);
+                        self.$fname.resize_with(d.ast.type_vars.len(), Default::default);
                     };
                     ($fname:ident, DeclId) => {
                         self.$fname.resize_with(d.mutable_state.try_read().unwrap().ast.decls.len(), Default::default);

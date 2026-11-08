@@ -1961,7 +1961,7 @@ impl Driver {
                         let file = self.src_map.add_file_on_disk(path).unwrap();
                         self.parse_file(file).unwrap();
 
-                        let added_module = *self.mutable_state.try_read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
+                        let added_module = *self.ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
                         Value::from_mod(added_module)
                     },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),

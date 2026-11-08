@@ -57,6 +57,7 @@ define_index_type!(pub struct GenericCtxId = u32;);
 define_index_type!(pub struct LoopId = u32;);
 define_index_type!(pub struct IntrinsicId = u32;);
 define_index_type!(pub struct AttrId = u32;);
+define_index_type!(pub struct AstContextId = u32;);
 
 #[derive(Debug, Clone)]
 pub struct FieldAssignment {
@@ -563,6 +564,10 @@ pub struct SelfParameter {
     pub self_ty: ExprId,
 }
 
+pub struct AstContext {
+
+}
+
 #[derive(Default)]
 pub struct Ast {
     pub known_idents: KnownIdents,
@@ -574,6 +579,11 @@ pub struct Ast {
     pub debug_marked_exprs: papaya::HashSet<ExprId>,
     pub type_vars: ConcurrentIndexCounter<TypeVarId>,
 
+    pub ctxs: ConcurrentIndexVec<AstContextId, OnceLock<AstContext>>,
+}
+
+#[derive(Default)]
+pub struct MutableAst {
     pub items: IndexVec<ItemId, Item>,
     pub exprs: IndexVec<ExprId, Expr>,
     pub source_ranges: IndexVec<ItemId, SourceRange>,
@@ -819,7 +829,7 @@ impl Driver {
         self.add_const_ty(b, Type::Error);
         assert_eq!(self.mutable_state.try_read().unwrap().ast.exprs.len(), 5);
 
-        let return_value = self.mutable_state.try_read().unwrap().ast.known_idents.return_value;
+        let return_value = self.ast.known_idents.return_value;
         self.add_decl(b, Decl::ReturnValue, return_value, None, SourceRange::default());
 
         self.register_internal_fields(b);
@@ -827,12 +837,12 @@ impl Driver {
     }
 
     pub fn debug_mark_expr(&self, expr: ExprId) {
-        self.mutable_state.try_write().unwrap().ast.debug_marked_exprs.pin().insert(expr);
+        self.ast.debug_marked_exprs.pin().insert(expr);
     }
 
     #[allow(unused)]
     pub fn expr_is_debug_marked(&self, expr: ExprId) -> bool {
-        self.mutable_state.try_write().unwrap().ast.debug_marked_exprs.pin().contains(&expr)
+        self.ast.debug_marked_exprs.pin().contains(&expr)
     }
 
     fn add_item(&self, b: &Builder, item: Item, range: SourceRange) -> ItemId {
@@ -848,7 +858,7 @@ impl Driver {
 
     fn add_expr(&self, b: &Builder, expr: Expr, range: SourceRange) -> ExprId {
         let expr_id = self.mutable_state.try_write().unwrap().ast.exprs.push(expr);
-        let type_var_id = self.mutable_state.try_write().unwrap().ast.type_vars.next_idx();
+        let type_var_id = self.ast.type_vars.next_idx();
         self.mutable_state.try_write().unwrap().ast.expr_to_type_vars.push_at(expr_id, type_var_id);
 
         let item_id = self.add_item(b, Item::Expr(expr_id), range);
@@ -1245,7 +1255,7 @@ impl Driver {
     pub fn begin_new_file(&self, b: &Builder, file: SourceFileId) -> AutoPopStackEntry<ScopeState, ModScopeNsId> {
         let mut global_scope = NewNamespace::default();
         // Use all of prelude
-        global_scope.blanket_uses.push(Namespace::Mod(*self.mutable_state.try_read().unwrap().ast.prelude_namespace.get().unwrap()));
+        global_scope.blanket_uses.push(Namespace::Mod(*self.ast.prelude_namespace.get().unwrap()));
         let global_scope = self.mutable_state.try_write().unwrap().ast.new_namespaces.push(global_scope);
         let global_namespace = self.mutable_state.try_write().unwrap().ast.mod_ns.push(
             ModScopeNs {
@@ -1253,7 +1263,7 @@ impl Driver {
                 parent: None
             }
         );
-        self.mutable_state.try_read().unwrap().ast.global_scopes.pin().insert(file, global_scope);
+        self.ast.global_scopes.pin().insert(file, global_scope);
         b.push_to_scope_stack(global_namespace, ScopeState::Mod { id: global_scope, namespace: global_namespace, extern_mod: None })
     }
 
@@ -1449,7 +1459,7 @@ impl Builder {
         None
     }
     pub fn begin_decl_ref_generic_ctx(&self, d: &Driver) -> AutoPopStackEntry<GenericCtxId> {
-        let invalid_declref = d.mutable_state.try_read().unwrap().ast.known_idents.invalid_declref;
+        let invalid_declref = d.ast.known_idents.invalid_declref;
         let id = d.mutable_state.try_write().unwrap().ast.decl_refs.push(
             DeclRef {
                 name: invalid_declref,

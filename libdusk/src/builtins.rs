@@ -151,7 +151,7 @@ impl Drop for EnumBuilder {
 
 impl Driver {
     pub fn add_prelude(&self, b: &mut ast::Builder) {
-        assert!(self.mutable_state.try_write().unwrap().ast.prelude_namespace.get().is_none());
+        assert!(self.ast.prelude_namespace.get().is_none());
         let prelude_scope = self.mutable_state.try_write().unwrap().ast.new_namespaces.push(NewNamespace::default());
         let prelude_namespace = self.mutable_state.try_write().unwrap().ast.mod_ns.push(
             ModScopeNs {
@@ -160,7 +160,7 @@ impl Driver {
             }
         );
         let _prelude_scope = b.push_to_scope_stack(prelude_namespace, ScopeState::Mod { id: prelude_scope, namespace: prelude_namespace, extern_mod: None });
-        self.mutable_state.try_write().unwrap().ast.prelude_namespace.set(prelude_namespace).unwrap();
+        self.ast.prelude_namespace.set(prelude_namespace).unwrap();
 
         // Add intrinsics to prelude
 
@@ -413,7 +413,7 @@ impl Driver {
     fn add_virtual_file_module(&self, b: &ast::Builder, name: &str, src: &str) -> ParseResult<()>  {
         let file = self.src_map.add_virtual_file(name, src.to_string()).unwrap();
         self.parse_file(file)?;
-        let scope = *self.mutable_state.try_read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for virtual file");
+        let scope = *self.ast.global_scopes.pin().get(&file).expect("no global scope found for virtual file");
         self.add_constant_decl(b, name, Const::Mod(scope));
         Ok(())
     }

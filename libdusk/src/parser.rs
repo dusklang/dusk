@@ -869,10 +869,10 @@ impl Driver {
         let at_range = self.eat_tok(p, TokenKind::AtSign)?;
 
         let attr_ident = self.eat_ident(p)?;
-        let is_requires = attr_ident.symbol == self.mutable_state.try_read().unwrap().ast.known_idents.requires;
-        let is_guarantees = attr_ident.symbol == self.mutable_state.try_read().unwrap().ast.known_idents.guarantees;
-        let is_comptime = attr_ident.symbol == self.mutable_state.try_read().unwrap().ast.known_idents.comptime;
-        let is_compiler_test = attr_ident.symbol == self.mutable_state.try_read().unwrap().ast.known_idents.compiler_test;
+        let is_requires = attr_ident.symbol == self.ast.known_idents.requires;
+        let is_guarantees = attr_ident.symbol == self.ast.known_idents.guarantees;
+        let is_comptime = attr_ident.symbol == self.ast.known_idents.comptime;
+        let is_compiler_test = attr_ident.symbol == self.ast.known_idents.compiler_test;
         let is_condition = is_requires || is_guarantees;
 
         let make_bare_attr = || if is_requires {
@@ -972,10 +972,10 @@ impl Driver {
                             let condition = self.eat_ident(p).ok();
                             (compiler_test_condition, compiler_test_condition_range) = if let Some(condition) = condition {
                                 self.eat_separators(p);
-                                if condition.symbol == self.mutable_state.try_read().unwrap().ast.known_idents.failure {
+                                if condition.symbol == self.ast.known_idents.failure {
                                     (CompilerTestCondition::Failure, Some(condition.range))
                                 } else {
-                                    if condition.symbol != self.mutable_state.try_read().unwrap().ast.known_idents.success {
+                                    if condition.symbol != self.ast.known_idents.success {
                                         self.diag.report_error(
                                             format!("unrecognized compiler test condition '{}'", self.interner.read().unwrap().resolve(condition.symbol).unwrap()),
                                             condition.range,
@@ -1076,7 +1076,7 @@ impl Driver {
             },
             &TokenKind::Ident(name) => {
                 p.next();
-                if name == self.mutable_state.try_read().unwrap().ast.known_idents.underscore {
+                if name == self.ast.known_idents.underscore {
                     Ok(Pattern {
                         kind: PatternKind::AnonymousCatchAll(initial_range),
                         scrutinee,
@@ -1697,7 +1697,7 @@ impl Driver {
 
                 let ty = 'blk: {
                     // Handle `self` parameters.
-                    if name == self.mutable_state.try_read().unwrap().ast.known_idents.salf
+                    if name == self.ast.known_idents.salf
                         && *p.cur().kind != TokenKind::Colon {
                             let self_param = self.parse_self_parameter(p, b, param_range);
                             if param_names.len() > 1 {

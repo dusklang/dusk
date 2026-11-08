@@ -330,7 +330,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 }
 
 fn get_main_func(driver: &Driver) -> Option<FuncId> {
-    let main_sym = driver.mutable_state.try_read().unwrap().ast.known_idents.main;
+    let main_sym = driver.ast.known_idents.main;
     driver.mir.functions.iter()
         .position(|func| {
             let func = func.get().unwrap();

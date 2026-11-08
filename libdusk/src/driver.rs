@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use string_interner::DefaultStringInterner as StringInterner;
 
-use crate::ast::{Ast, ExprId, GenericCtx, KnownIdents};
+use crate::ast::{Ast, ExprId, GenericCtx, KnownIdents, MutableAst};
 use crate::mir::{Const, Mir};
 use crate::target::{Arch, OperatingSystem};
 use crate::internal_types::InternalFieldDecls;
@@ -35,6 +35,7 @@ pub struct Driver {
     pub src_map: Arc<SourceMap>,
     pub mir: Arc<Mir>,
     pub internal_field_decls: OnceLock<InternalFieldDecls>,
+    pub ast: Ast,
 
     // Mutable state
     pub mutable_state: RwLock<DriverMutableState>,
@@ -43,7 +44,7 @@ pub struct Driver {
 #[derive(Default)]
 pub struct DriverMutableState {
     pub tir_builder: tir::Builder,
-    pub ast: Ast,
+    pub ast: MutableAst,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -73,13 +74,9 @@ impl Driver {
             no_core,
             mode,
             mir: Default::default(),
+            ast,
 
-            mutable_state: RwLock::new(
-                DriverMutableState {
-                    tir_builder: tir::Builder::default(),
-                    ast,
-                }
-            ),
+            mutable_state: Default::default(),
         };
         val.mutable_state.try_write().unwrap().ast.generic_ctxs.push(GenericCtx::Blank);
         val
