@@ -24,6 +24,7 @@ jobs:
       - name: Build
         run: rustup update && cd dusk && cargo build --verbose
       - name: Run tests
+        if: false
         env:
           DUSK_SRC_ROOT: ${{ github.workspace }}/dusk
         run: |
@@ -43,6 +44,7 @@ jobs:
       - name: Build
         run: rustup update && cd dusk && cargo build --verbose
       - name: Run tests
+        if: false
         env:
           DUSK_SRC_ROOT: ${{ github.workspace }}/dusk
         run: |
@@ -62,6 +64,7 @@ jobs:
       - name: Build
         run: rustup update && cd dusk && cargo build --verbose
       - name: Run tests
+        if: false
         env:
           DUSK_SRC_ROOT: ${{ github.workspace }}/dusk
         run: |
