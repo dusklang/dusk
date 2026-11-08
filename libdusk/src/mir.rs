@@ -612,7 +612,7 @@ impl Driver {
         let arch = self.arch;
         match ty {
             Type::Error | Type::Void | Type::Never | Type::Ty | Type::Mod | Type::LegacyInternal(_) => 0,
-            &Type::Internal(id) => self.mutable_state.read().unwrap().ast.internal_types[id].size,
+            &Type::Internal(id) => self.mutable_state.try_read().unwrap().ast.internal_types[id].size,
             Type::Int { width, .. } => {
                 let bit_width = width.bit_width(arch);
                 assert_eq!(bit_width % 8, 0, "Unexpected bit width: not a multiple of eight!");
@@ -728,7 +728,7 @@ impl Driver {
 impl Driver {
     pub fn build_mir(&self, tp: &dyn TypeProvider) {
         // Start at 1 to avoid RETURN_VALUE_DECL, which we can't and shouldn't generate code for
-        let range = DeclId::new(1)..self.mutable_state.read().unwrap().ast.decls.next_idx();
+        let range = DeclId::new(1)..self.mutable_state.try_read().unwrap().ast.decls.next_idx();
         for id in range_iter(range) {
             self.get_decl(id, tp);
         }
@@ -747,7 +747,7 @@ impl Driver {
         let extern_mods = self.mir.extern_mods.pin();
         if extern_mods.contains_key(&id) { return; }
 
-        let extern_mod = &self.mutable_state.read().unwrap().ast.extern_mods[id];
+        let extern_mod = &self.mutable_state.try_read().unwrap().ast.extern_mods[id];
         let library_path = extern_mod.library_path;
         let library_path = match *tp.eval_result(library_path) {
             Const::Str { id, .. } => self.mir.strings[id].clone(),
@@ -796,14 +796,14 @@ impl Driver {
                 let decl = Decl::Function { get };
                 d.mir.decls.pin().insert(id, decl.clone());
 
-                let func_ty = d.decl_type(id, tp).as_function().unwrap().clone();
-                let name = d.mutable_state.read().unwrap().ast.names[id];
+                let func_ty = d.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp).as_function().unwrap().clone();
+                let name = d.mutable_state.try_read().unwrap().ast.names[id];
                 let mut is_comptime = false;
                 let mut compiler_test_cases = Vec::new();
-                if let Some(attrs) = d.mutable_state.read().unwrap().ast.decl_attributes.get(&id).cloned() {
+                if let Some(attrs) = d.mutable_state.try_read().unwrap().ast.decl_attributes.get(&id).cloned() {
                     for attr in attrs {
                         let d = self;
-                        match d.mutable_state.read().unwrap().ast.attrs[attr] {
+                        match d.mutable_state.try_read().unwrap().ast.attrs[attr] {
                             Attribute::Comptime => is_comptime = true,
                             Attribute::CompilerTest { condition, ref arguments, .. } => {
                                 let arguments = arguments.clone();
@@ -876,7 +876,7 @@ impl Driver {
                 decl
             },
             ast::Decl::LegacyIntrinsic { intr, function_like, .. } => {
-                let mut ty = d.decl_type(id, tp);
+                let mut ty = d.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp);
                 if function_like {
                     ty = ty.return_ty().unwrap().clone();
                 }
@@ -945,7 +945,7 @@ impl Driver {
 impl Driver {
     #[display_adapter]
     fn fmt_variant_name(&self, f: &mut Formatter, enuum: EnumId, index: usize) {
-        let variant = &self.mutable_state.read().unwrap().ast.enums[enuum].variants[index];
+        let variant = &self.mutable_state.try_read().unwrap().ast.enums[enuum].variants[index];
         let interner = self.interner.read().unwrap();
         let name = interner.resolve(variant.name).unwrap();
         write!(f, "{}", name)
@@ -1146,7 +1146,7 @@ impl Driver {
                 write!(f, "legacy_intrinsic `{}`{}", intr.name(), self.display_call_args(func, arguments))?;
             },
             CallKind::Intrinsic { ref arguments, intr, .. } => {
-                write!(f, "intrinsic `{}`{}", &self.mutable_state.read().unwrap().ast.intrinsics[intr].kind.name(), self.display_call_args(func, arguments))?;
+                write!(f, "intrinsic `{}`{}", &self.mutable_state.try_read().unwrap().ast.intrinsics[intr].kind.name(), self.display_call_args(func, arguments))?;
             },
         }
         Ok(())
@@ -1168,7 +1168,7 @@ impl Driver {
             &InstrKind::ObjcClassRef { extern_mod, index } => write!(
                 f,
                 "objc_class_ref `{}` from {:?}",
-                self.mutable_state.read().unwrap().ast.extern_mods[extern_mod].objc_class_references[index],
+                self.mutable_state.try_read().unwrap().ast.extern_mods[extern_mod].objc_class_references[index],
                 self.mir.extern_mods.pin().get(&extern_mod).unwrap().library_path
             )?,
             InstrKind::Const(konst) => {
@@ -1216,7 +1216,7 @@ impl Driver {
             &InstrKind::Enum { ref variants, id } => {
                 write!(f, "define enum{} {{", id.index())?;
 
-                for (i, variant) in self.mutable_state.read().unwrap().ast.enums[id].variants.iter().enumerate() {
+                for (i, variant) in self.mutable_state.try_read().unwrap().ast.enums[id].variants.iter().enumerate() {
                     write!(f, "{}", self.interner.read().unwrap().resolve(variant.name).unwrap())?;
                     if variant.payload_ty.is_some() {
                         write!(f, "({})", self.display_value(func, variants[i]))?;
@@ -1246,7 +1246,7 @@ impl Driver {
                 write!(f, " -> {}", self.display_value(func, ret_ty))?;
             },
             &InstrKind::Variant { enuum, index, payload } => {
-                let variant = &self.mutable_state.read().unwrap().ast.enums[enuum].variants[index];
+                let variant = &self.mutable_state.try_read().unwrap().ast.enums[enuum].variants[index];
                 let variant_name = variant.name;
                 write!(f, "%enum{}.{}", enuum.index(), self.interner.read().unwrap().resolve(variant_name).unwrap())?;
                 if variant.payload_ty.is_some() {
@@ -1432,12 +1432,11 @@ impl Driver {
         let mut blocks = IndexVec::new();
         let entry_block = blocks.next_idx();
         for (param_index, param) in range_iter(params.clone()).enumerate() {
-            let d = self;
-            assert!(matches!(df!(d, param.ast), ast::Decl::Parameter { .. }));
-            let ty = self.decl_type(param, tp);
+            assert!(matches!(df!(param.ast), ast::Decl::Parameter { .. }));
+            let ty = self.decl_type(&*self.mutable_state.try_read().unwrap(), param, tp);
             let param_value = Value::new(ty, ValueKind::Parameter { block: entry_block, index: param_index });
             let param_value = values.push(param_value);
-            let range = df!(d, param.range);
+            let range = df!(param.range);
             let name = value_namespace.insert(self.display_item(None, range).to_string());
             value_names.insert(param_value, name);
             entry.params.push(param_value);
@@ -2059,7 +2058,7 @@ impl Driver {
             },
             CallKind::ExternCall { func, .. } => self.mir.extern_mods.pin().get(&func.extern_mod).unwrap().imported_functions[func.index].ty.return_ty.as_ref().clone(),
             CallKind::LegacyIntrinsic { ref ty, .. } => ty.clone(),
-            CallKind::Intrinsic { intr, .. } => self.mutable_state.read().unwrap().ast.intrinsics[intr].ret_ty.clone(),
+            CallKind::Intrinsic { intr, .. } => self.mutable_state.try_read().unwrap().ast.intrinsics[intr].ret_ty.clone(),
         }
     }
 
@@ -2168,7 +2167,7 @@ impl Driver {
             },
             ScopedItem::Decl(decl) => {
                 let d = self;
-                let ms = d.mutable_state.read().unwrap();
+                let ms = d.mutable_state.try_read().unwrap();
                 match df!(@ms, decl.ast) {
                     ast::Decl::Stored { id, root_expr, .. } => {
                         drop(ms);
@@ -2189,19 +2188,19 @@ impl Driver {
     }
 
     fn build_scope(&self, b: &mut FunctionBuilder, scope: ImperScopeId, ctx: Context, tp: &dyn TypeProvider) -> IndirectValue {
-        let len = self.mutable_state.read().unwrap().ast.imper_scopes[scope].items.len();
+        let len = self.mutable_state.try_read().unwrap().ast.imper_scopes[scope].items.len();
         for i in 0..len {
-            let item = self.mutable_state.read().unwrap().ast.imper_scopes[scope].items[i];
+            let item = self.mutable_state.try_read().unwrap().ast.imper_scopes[scope].items[i];
             self.build_scope_item(b, item, tp);
         }
-        let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr;
+        let terminal_expr = self.mutable_state.try_read().unwrap().ast.imper_scopes[scope].terminal_expr;
         self.build_expr(b, terminal_expr, ctx, tp)
     }
 }
 
 impl Driver {
     fn get_base(&self, id: DeclRefId) -> ExprId {
-        match self.mutable_state.read().unwrap().ast.decl_refs[id].namespace {
+        match self.mutable_state.try_read().unwrap().ast.decl_refs[id].namespace {
             ast::Namespace::MemberRef { base_expr } => base_expr,
             _ => panic!("Expected member ref expression"),
         }
@@ -2211,7 +2210,7 @@ impl Driver {
 impl Driver {
     fn get_callee_declref(&self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, callee_id: ExprId) -> DeclRef {
         let d = self;
-        let ms = d.mutable_state.read().unwrap();
+        let ms = d.mutable_state.try_read().unwrap();
         let callee = ef!(@ms, &callee_id.ast);
         if let &Expr::DeclRef { id, .. } = callee {
             drop(ms);
@@ -2223,10 +2222,10 @@ impl Driver {
 
     fn get(&self, b: &mut FunctionBuilder, decl_ref_id: DeclRefId, tp: &dyn TypeProvider) -> DeclRef {
         let id = tp.selected_overload(decl_ref_id).expect("No overload found!");
-        let generic_params = self.mutable_state.read().unwrap().tir_builder.decls[id].generic_params.clone();
+        let generic_params = self.mutable_state.try_read().unwrap().tir_builder.decls[id].generic_params.clone();
         let generic_arguments = tp.generic_arguments(decl_ref_id).as_ref().unwrap_or(&Vec::new()).clone();
         assert_eq!(generic_params.end - generic_params.start, generic_arguments.len());
-        let expr = self.mutable_state.read().unwrap().ast.decl_refs[decl_ref_id].expr;
+        let expr = self.mutable_state.try_read().unwrap().ast.decl_refs[decl_ref_id].expr;
         let name = self.display_item(None, id).to_string();
         match self.get_decl(id, tp) {
             Decl::Function { get } => DeclRef::Function { func: get, generic_args: generic_arguments },
@@ -2623,11 +2622,11 @@ impl Driver {
             b.start_block(next_block);
 
             let scope_ctx = ctx.redirect(post_block, pass_value_as_argument);
-            let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[cur].terminal_expr;
+            let terminal_expr = self.mutable_state.try_read().unwrap().ast.imper_scopes[cur].terminal_expr;
             // If the current scope consists of a lone if expression
-            if self.mutable_state.read().unwrap().ast.imper_scopes[cur].items.is_empty() {
+            if self.mutable_state.try_read().unwrap().ast.imper_scopes[cur].items.is_empty() {
                 let d = self;
-                let ms = d.mutable_state.read().unwrap();
+                let ms = d.mutable_state.try_read().unwrap();
                 if let &Expr::If { condition, then_scope, else_scope } = ef!(@ms, &terminal_expr.ast) {
                     drop(ms);
                     let true_block = b.func.create_block();
@@ -2903,7 +2902,7 @@ impl Driver {
                         };
                         let base = self.get_base(decl_ref_id);
                         let base_ty = tp.ty(base);
-                        let self_ty = self.mutable_state.read().unwrap().ast.intrinsics[intr].param_tys[0];
+                        let self_ty = self.mutable_state.try_read().unwrap().ast.intrinsics[intr].param_tys[0];
                         let self_ty = tp.get_evaluated_type(self_ty);
                         let indirection = !base_ty.trivially_convertible_to(self_ty) as i8;
                         let base = self.build_expr(b, base, Context::new(indirection, DataDest::Read, ControlDest::Continue), tp);
@@ -3017,9 +3016,9 @@ impl Driver {
             }
             Expr::Struct(id) => {
                 let mut fields = SmallVec::new();
-                let len = self.mutable_state.read().unwrap().ast.structs[id].fields.len();
+                let len = self.mutable_state.try_read().unwrap().ast.structs[id].fields.len();
                 for i in 0..len {
-                    let field_ty = self.mutable_state.read().unwrap().ast.structs[id].fields[i].ty;
+                    let field_ty = self.mutable_state.try_read().unwrap().ast.structs[id].fields[i].ty;
                     let field = self.build_expr(
                         b,
                         field_ty,
@@ -3033,9 +3032,9 @@ impl Driver {
             },
             Expr::Enum(id) => {
                 let mut variants = SmallVec::new();
-                let len = self.mutable_state.read().unwrap().ast.enums[id].variants.len();
+                let len = self.mutable_state.try_read().unwrap().ast.enums[id].variants.len();
                 for i in 0..len {
-                    let payload_ty = self.mutable_state.read().unwrap().ast.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
+                    let payload_ty = self.mutable_state.try_read().unwrap().ast.enums[id].variants[i].payload_ty.unwrap_or(VOID_TYPE);
                     let variant = self.build_expr(
                         b,
                         payload_ty,

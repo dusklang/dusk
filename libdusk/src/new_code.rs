@@ -27,16 +27,16 @@ macro_rules! generate_new_code {
         }
 
         impl Driver {
-            pub fn take_snapshot(&self) -> CodeSnapshot {
+            pub fn take_snapshot(&self, ms: &crate::driver::DriverMutableState) -> CodeSnapshot {
                 CodeSnapshot {
-                    exprs: self.mutable_state.read().unwrap().ast.exprs.next_idx(),
-                    decls: self.mutable_state.read().unwrap().ast.decls.next_idx(),
-                    items: self.mutable_state.read().unwrap().ast.items.next_idx(),
+                    exprs: ms.ast.exprs.next_idx(),
+                    decls: ms.ast.decls.next_idx(),
+                    items: ms.ast.items.next_idx(),
                 }
             }
 
-            pub fn get_new_code_since(&self, before: CodeSnapshot) -> NewCode {
-                let after = self.take_snapshot();
+            pub fn get_new_code_since(&self, ms: &crate::driver::DriverMutableState, before: CodeSnapshot) -> NewCode {
+                let after = self.take_snapshot(ms);
                 NewCode {
                     $($field_name: before.$field_name..after.$field_name),*,
                 }

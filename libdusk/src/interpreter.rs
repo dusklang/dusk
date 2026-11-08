@@ -745,7 +745,7 @@ impl Driver {
                 Const::StructLit { fields, id: strukt.identity }
             },
             Type::Enum(enuum) => {
-                let enum_val = &self.mutable_state.read().unwrap().ast.enums[enuum.identity];
+                let enum_val = &self.mutable_state.try_read().unwrap().ast.enums[enuum.identity];
                 let valid = enum_val.variants.iter().map(|variant| variant.payload_ty).all(|ty| ty.is_none());
                 assert!(valid, "In order to output value of type {:?} as constant, it must not have any payloads", Type::Enum(enuum));
                 Const::Variant { enuum: enuum.identity, index: val.as_enum(&enuum, self).discriminant as usize, payload_tys: enuum.payload_tys.clone() }
@@ -1399,7 +1399,7 @@ impl Driver {
                                 panic!("unable to load library {:?}", library.library_path);
                             }
                             let mut objc_classes = Vec::new();
-                            for class_name in &self.mutable_state.read().unwrap().ast.extern_mods[extern_mod].objc_class_references {
+                            for class_name in &self.mutable_state.try_read().unwrap().ast.extern_mods[extern_mod].objc_class_references {
                                 let class_name = CString::new(class_name.clone()).unwrap();
                                 let class_ptr = unsafe { objc::runtime::objc_getClass(class_name.as_ptr()) };
                                 objc_classes.push(class_ptr as *const c_void);
@@ -1761,7 +1761,7 @@ impl Driver {
             },
             CallKind::Intrinsic { ref arguments, intr } => {
                 let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                let intr = d.mutable_state.read().unwrap().ast.intrinsics[intr].clone();
+                let intr = d.mutable_state.try_read().unwrap().ast.intrinsics[intr].clone();
 
                 intr.kind.call(self, arguments)
             },
@@ -1926,7 +1926,7 @@ impl Driver {
                             match ty {
                                 Type::Struct(strukt) => {
                                     let layout = self.layout_struct(&strukt);
-                                    for (index, field) in self.mutable_state.read().unwrap().ast.structs[strukt.identity].fields.iter().enumerate() {
+                                    for (index, field) in self.mutable_state.try_read().unwrap().ast.structs[strukt.identity].fields.iter().enumerate() {
                                         if field_name == field.name {
                                             offset = Some(layout.field_offsets[index]);
                                             break;
@@ -1966,7 +1966,7 @@ impl Driver {
                         let file = self.src_map.add_file_on_disk(path).unwrap();
                         self.parse_file(file).unwrap();
 
-                        let added_module = *self.mutable_state.read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
+                        let added_module = *self.mutable_state.try_read().unwrap().ast.global_scopes.pin().get(&file).expect("no global scope found for imported module");
                         Value::from_mod(added_module)
                     },
                     _ => panic!("Call to unimplemented intrinsic {:?}", intr),

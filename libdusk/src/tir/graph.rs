@@ -1,7 +1,6 @@
 use std::mem;
 use std::collections::{HashMap, HashSet};
 use std::cmp::max;
-use std::ops::DerefMut;
 
 use bitflags::bitflags;
 
@@ -9,7 +8,7 @@ use crate::ast::{ItemId, VOID_EXPR_ITEM};
 use crate::tir::CompId;
 
 use crate::index_vec::*;
-use crate::driver::Driver;
+use crate::driver::{Driver, DriverMutableState};
 use crate::new_code::NewCode;
 
 use crate::tir::TirError;
@@ -171,9 +170,7 @@ struct Component {
 }
 
 impl Driver {
-    pub fn initialize_graph(&self) {
-        let mut ms = self.mutable_state.write().unwrap();
-        let ms = ms.deref_mut();
+    pub fn initialize_graph(&self, ms: &mut DriverMutableState) {
         let graph = &mut ms.tir_builder.graph;
         let deps = [
             &mut graph.dependees,

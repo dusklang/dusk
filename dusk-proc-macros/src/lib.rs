@@ -103,7 +103,7 @@ pub fn display_adapter(attr: TokenStream, item: TokenStream) -> TokenStream {
 //   the end of that construct), and each expansion takes the lock exactly once, even for nested lookups like `.range`.
 // * `@STATE` uses an existing `DriverMutableState` instead of locking: a lock guard, `&DriverMutableState` or
 //   `&mut DriverMutableState`. Use this when the result must outlive the statement, e.g.
-//   `let ms = d.mutable_state.read().unwrap(); let expr = ef!(@ms, &id.ast);`. The lookup projects straight from
+//   `let ms = d.mutable_state.try_read().unwrap(); let expr = ef!(@ms, &id.ast);`. The lookup projects straight from
 //   `STATE`, so with `ms: &mut DriverMutableState` it only borrows the fields it touches (e.g. `ms.ast.decls`), and
 //   disjoint fields like `ms.tir_builder` stay usable while the result is alive.
 // * The bare form is a place expression (good for copying out `Copy` values, calling `&self` methods, or matching
@@ -272,9 +272,9 @@ fn emit_field_access(
             let ms = proc_macro2::Ident::new("__dusk_mutable_state", proc_macro2::Span::mixed_site());
             let place = place(&quote! { #ms }, &input.base);
             match input.access {
-                Access::Value => quote! { (*match &*(#d).mutable_state.read().unwrap() { #ms => &#place }) },
-                Access::Shared => quote! { match &*(#d).mutable_state.read().unwrap() { #ms => &#place } },
-                Access::Mut => quote! { match &mut *(#d).mutable_state.write().unwrap() { #ms => &mut #place } },
+                Access::Value => quote! { (*match &*(#d).mutable_state.try_read().unwrap() { #ms => &#place }) },
+                Access::Shared => quote! { match &*(#d).mutable_state.try_read().unwrap() { #ms => &#place } },
+                Access::Mut => quote! { match &mut *(#d).mutable_state.try_write().unwrap() { #ms => &mut #place } },
             }
         },
     }.into()
@@ -376,9 +376,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                let namespace = d.mutable_state.write().unwrap().ast.new_namespaces.push(NewNamespace::default());
+                let namespace = d.mutable_state.try_write().unwrap().ast.new_namespaces.push(NewNamespace::default());
                 let internal_type = InternalType { name: String::from(#bridged_name), size: size_of::<#decl_name>(), namespace };
-                let type_id = d.mutable_state.write().unwrap().ast.internal_types.push(internal_type);
+                let type_id = d.mutable_state.try_write().unwrap().ast.internal_types.push(internal_type);
                 let ty = Type::Internal(type_id);
             }
         };
@@ -395,7 +395,7 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     let expr = d.add_const_expr(b, konst);
                     d.add_decl_to_path(b, #bridged_name, #module, Decl::Const { assigned_expr: expr, generic_params: empty_range() }, None);
 
-                    d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
+                    d.mutable_state.try_read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), ty);
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -420,9 +420,9 @@ pub fn derive_dusk_bridge(item: TokenStream) -> TokenStream {
                     use std::any;
                     use crate::{ast::*, ty::*, mir::*};
 
-                    let base_ty = d.mutable_state.read().unwrap().ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
+                    let base_ty = d.mutable_state.try_read().unwrap().ast.bridged_types.pin().get(&any::TypeId::of::<#decl_name>()).unwrap().clone();
 
-                    d.mutable_state.read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
+                    d.mutable_state.try_read().unwrap().ast.bridged_types.pin().insert(any::TypeId::of::<Self>(), base_ty.mut_ptr());
                 }
 
                 fn bridge_from_dusk(value: &crate::interpreter::Value, _d: &crate::driver::Driver) -> Self {
@@ -775,7 +775,7 @@ pub fn dusk_bridge(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     kind: self::IntrinsicKind::#variant,
                                 };
                                 let ret_ty = d.add_const_ty(b, ret_ty);
-                                let intr_id = d.mutable_state.write().unwrap().ast.intrinsics.push(info);
+                                let intr_id = d.mutable_state.try_write().unwrap().ast.intrinsics.push(info);
                                 d.add_decl_to_path(b, #name, #path, #decl, Some(ret_ty));
                             }
                         );

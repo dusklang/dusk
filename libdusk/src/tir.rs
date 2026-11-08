@@ -12,7 +12,7 @@ use crate::internal_types::{internal_fields, internal_field_decls, InternalField
 use crate::ty::Type;
 use crate::ty::StructType;
 
-use crate::driver::Driver;
+use crate::driver::{Driver, DriverMutableState};
 use crate::dep_vec::{self, DepVec, AnyDepVec};
 use crate::index_vec::*;
 use crate::new_code::{NewCode, CodeSnapshot};
@@ -309,13 +309,13 @@ macro_rules! define_legacy_internal_types_internal {
                 };
                 self.internal_field_decls.set(internal_field_decls).unwrap();
             }
-            fn find_overloads_in_internal(&self, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<FoundOverload>) {
+            fn find_overloads_in_internal(&self, ms: &crate::driver::DriverMutableState, lookup: &NameLookup, ns: InternalNamespace, overloads: &mut HashSet<FoundOverload>) {
                 match ns {
                     $(
                         InternalNamespace::$name => {
                             $({
                                 let decl = self.internal_field_decls.get().unwrap().$name.$field_name;
-                                let name = self.mutable_state.read().unwrap().ast.names[decl];
+                                let name = ms.ast.names[decl];
                                 if self.name_matches(lookup, name) {
                                     overloads.insert(decl.into());
                                 }
@@ -357,8 +357,8 @@ impl From<DeclId> for FoundOverload {
 
 impl Driver {
     // See comment about `should_traverse_blanket_uses` later in this file
-    fn find_overloads_in_mod(&self, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
-        let scope = &self.mutable_state.read().unwrap().ast.new_namespaces[scope];
+    fn find_overloads_in_mod(&self, ms: &DriverMutableState, name: &NameLookup, scope: NewNamespaceId, should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
+        let scope = &ms.ast.new_namespaces[scope];
         for decl in &scope.static_decls {
             if self.name_matches(name, decl.name) {
                 overloads.insert(decl.decl.into());
@@ -367,19 +367,19 @@ impl Driver {
         if should_traverse_blanket_uses {
             let mut all_unresolved = !scope.blanket_uses.is_empty();
             for &used_namespace in &scope.blanket_uses {
-                all_unresolved &= !self.find_overloads_in_namespace(name, used_namespace, true, overloads);
+                all_unresolved &= !self.find_overloads_in_namespace(ms, name, used_namespace, true, overloads);
             }
             !all_unresolved
         } else {
             true
         }
     }
-    fn find_overloads_in_new_namespace(&self, name: &NameLookup, base: ExprId, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<FoundOverload>) {
-        let ns = &self.mutable_state.read().unwrap().ast.new_namespaces[id];
+    fn find_overloads_in_new_namespace(&self, ms: &DriverMutableState, name: &NameLookup, base: ExprId, id: NewNamespaceId, kind: NewNamespaceRefKind, overloads: &mut HashSet<FoundOverload>) {
+        let ns = &ms.ast.new_namespaces[id];
 
         match kind {
             NewNamespaceRefKind::Instance => for decl in &ns.instance_decls {
-                let decl_name = self.mutable_state.read().unwrap().ast.names[decl.decl];
+                let decl_name = ms.ast.names[decl.decl];
                 if self.name_matches(name, decl_name) {
                     let scope = if let Some(field_info) = &decl.field_info {
                         OverloadScope::Field { base, struct_id: field_info.struct_id, field_index: field_info.field_index }
@@ -395,7 +395,7 @@ impl Driver {
                 }
             },
             NewNamespaceRefKind::Static => for decl in &ns.static_decls {
-                let decl_name = self.mutable_state.read().unwrap().ast.names[decl.decl];
+                let decl_name = ms.ast.names[decl.decl];
                 if self.name_matches(name, decl_name) {
                     overloads.insert(decl.decl.into());
                     return;
@@ -403,11 +403,11 @@ impl Driver {
             }
         };
     }
-    fn find_overloads_in_function_parameters(&self, name: &NameLookup, func: DeclId, overloads: &mut HashSet<FoundOverload>) {
+    fn find_overloads_in_function_parameters(&self, ms: &DriverMutableState, name: &NameLookup, func: DeclId, overloads: &mut HashSet<FoundOverload>) {
         match &df!(func.ast) {
             ast::Decl::Function { params, .. } => {
                 for decl in range_iter(params.clone()) {
-                    let param_name = self.mutable_state.read().unwrap().ast.names[decl];
+                    let param_name = ms.ast.names[decl];
 
                     if self.name_matches(name, param_name) {
                         overloads.insert(decl.into());
@@ -424,7 +424,7 @@ impl Driver {
     // code outside module X does *not* want to see items from the prelude re-exported. E.g. mod{}.print("Hello, world")
     //
     // TODO: more robust support for access control
-    fn find_overloads_in_namespace(&self, name: &NameLookup, namespace: Namespace, mut should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
+    fn find_overloads_in_namespace(&self, ms: &DriverMutableState, name: &NameLookup, namespace: Namespace, mut should_traverse_blanket_uses: bool, overloads: &mut HashSet<FoundOverload>) -> bool {
         let mut started_at_mod_scope = false;
         let mut root_namespace = true;
         let mut namespace = Some(namespace);
@@ -432,7 +432,7 @@ impl Driver {
             namespace = match ns {
                 Namespace::Imper { scope, end_offset } => {
                     if !started_at_mod_scope {
-                        let namespace = &self.mutable_state.read().unwrap().ast.imper_ns[scope];
+                        let namespace = &ms.ast.imper_ns[scope];
                         let result = namespace.decls[..end_offset].iter()
                             .rev()
                             .find(|&decl| self.name_matches(name, decl.name));
@@ -442,30 +442,30 @@ impl Driver {
                         }
                     }
 
-                    self.mutable_state.read().unwrap().ast.imper_ns[scope].parent
+                    ms.ast.imper_ns[scope].parent
                 },
                 Namespace::Mod(scope_ns) => {
-                    let scope = self.mutable_state.read().unwrap().ast.mod_ns[scope_ns].scope;
-                    self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads);
+                    let scope = ms.ast.mod_ns[scope_ns].scope;
+                    self.find_overloads_in_mod(ms, name, scope, should_traverse_blanket_uses, overloads);
 
                     if root_namespace { started_at_mod_scope = true; }
-                    self.mutable_state.read().unwrap().ast.mod_ns[scope_ns].parent
+                    ms.ast.mod_ns[scope_ns].parent
                 },
                 Namespace::MemberRef { base_expr } => {
                     assert!(root_namespace, "member refs currently must be at the root of a namespace hierarchy");
 
                     should_traverse_blanket_uses = false;
 
-                    if let Some(expr_namespaces) = self.mutable_state.read().unwrap().tir_builder.expr_namespaces.get(&base_expr) {
+                    if let Some(expr_namespaces) = ms.tir_builder.expr_namespaces.get(&base_expr) {
                         for ns in expr_namespaces {
                             match *ns {
                                 ExprNamespace::Mod(scope) => {
-                                    if !self.find_overloads_in_mod(name, scope, should_traverse_blanket_uses, overloads) {
+                                    if !self.find_overloads_in_mod(ms, name, scope, should_traverse_blanket_uses, overloads) {
                                         return false
                                     }
                                 },
-                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(name, internal, overloads),
-                                ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(name, base_expr, id, kind, overloads),
+                                ExprNamespace::Internal(internal) => self.find_overloads_in_internal(ms, name, internal, overloads),
+                                ExprNamespace::New(id, kind) => self.find_overloads_in_new_namespace(ms, name, base_expr, id, kind, overloads),
                                 ExprNamespace::Error => return false,
                             }
                         }
@@ -474,10 +474,10 @@ impl Driver {
                     break;
                 },
                 Namespace::GenericContext(ns_id) => {
-                    let generic_context_ns = &self.mutable_state.read().unwrap().ast.generic_context_ns[ns_id];
+                    let generic_context_ns = &ms.ast.generic_context_ns[ns_id];
                     let generic_params = &generic_context_ns.generic_params;
                     for decl in range_iter(generic_params.clone()) {
-                        let param_name = self.mutable_state.read().unwrap().ast.names[decl];
+                        let param_name = ms.ast.names[decl];
                         if self.name_matches(name, param_name) {
                             overloads.insert(decl.into());
                             break 'find_overloads;
@@ -486,19 +486,19 @@ impl Driver {
                     generic_context_ns.parent
                 },
                 Namespace::Requirement(ns_id) => {
-                    let condition_ns = &self.mutable_state.read().unwrap().ast.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
+                    let condition_ns = &ms.ast.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(ms, name, condition_ns.func, overloads);
                     condition_ns.parent
                 },
                 Namespace::Guarantee(ns_id) => {
-                    let condition_ns = &self.mutable_state.read().unwrap().ast.condition_ns[ns_id];
-                    self.find_overloads_in_function_parameters(name, condition_ns.func, overloads);
-                    if self.name_matches(name, self.mutable_state.read().unwrap().ast.known_idents.return_value) && overloads.is_empty() {
+                    let condition_ns = &ms.ast.condition_ns[ns_id];
+                    self.find_overloads_in_function_parameters(ms, name, condition_ns.func, overloads);
+                    if self.name_matches(name, ms.ast.known_idents.return_value) && overloads.is_empty() {
                         overloads.insert(RETURN_VALUE_DECL.into());
                     }
                     condition_ns.parent
                 },
-                Namespace::ExtendBlock(ns_id) => self.mutable_state.read().unwrap().ast.extend_block_ns[ns_id].parent,
+                Namespace::ExtendBlock(ns_id) => ms.ast.extend_block_ns[ns_id].parent,
                 Namespace::Invalid => {
                     panic!("internal compiler error: invalid namespace");
                 },
@@ -521,18 +521,17 @@ impl Driver {
 
     /// Returns the overloads for a name in a namespace, if they are known (they won't be if it's an unresolved member ref)
     /// Returns None if the namespace comes from a memberref AND the memberref base expression has an error (e.g., invalid variable reference)
-    pub fn find_overloads(&self, namespace: Namespace, name: &NameLookup) -> Option<Vec<FoundOverload>> {
+    pub fn find_overloads(&self, ms: &DriverMutableState, namespace: Namespace, name: &NameLookup) -> Option<Vec<FoundOverload>> {
         let mut overloads = HashSet::new();
-        self.find_overloads_in_namespace(name, namespace, true, &mut overloads)
+        self.find_overloads_in_namespace(ms, name, namespace, true, &mut overloads)
             .then(|| overloads.into_iter().collect())
     }
 
-    fn add_types_2_to_4_deps_to_member_ref(&self, id: ItemId, decl_ref_id: DeclRefId) {
-        let ms = &mut *self.mutable_state.write().unwrap();
+    fn add_types_2_to_4_deps_to_member_ref(&self, ms: &mut DriverMutableState, id: ItemId, decl_ref_id: DeclRefId) {
         add_eval_dep_injector!(ms, add_eval_dep);
 
         let decl_ref = &ms.ast.decl_refs[decl_ref_id];
-        let overloads = self.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
+        let overloads = self.find_overloads(ms, decl_ref.namespace, &NameLookup::Exact(decl_ref.name)).unwrap_or_default();
         for overload in overloads {
             match df!(@ms, overload.decl.ast) {
                 ast::Decl::Function { ref param_tys, .. } => {
@@ -577,15 +576,14 @@ impl Driver {
     /// until after its items. In other words, the call is what truly depends on the items having been typechecked; not
     /// the function itself. I think/hope this could also be a cause for some of the mysterious dependency cycles
     /// that have plagued the compiler for some time (though frankly I don't have a good reason to think that).
-    fn add_type3_scope_dep(&self, a: ItemId, b: ImperScopeId) {
-        let ms = &mut *self.mutable_state.write().unwrap();
+    fn add_type3_scope_dep(&self, ms: &mut DriverMutableState, a: ItemId, b: ImperScopeId) {
         for &item in &ms.ast.imper_scopes[b].items {
             match item {
                 ScopedItem::Expr { expr, .. } => {
                     let item = ms.ast.expr_to_items[expr];
                     ms.tir_builder.graph.add_type3_dep(a, item);
                 },
-                ScopedItem::Decl(decl) => match df!(decl.ast) {
+                ScopedItem::Decl(decl) => match df!(@ms, decl.ast) {
                     ast::Decl::Stored { .. } => {
                         let item = ms.ast.decl_to_items[decl];
                         ms.tir_builder.graph.add_type3_dep(a, item);
@@ -597,8 +595,7 @@ impl Driver {
         }
     }
 
-    fn flush_staged_ret_groups(&self, sp: &mut Subprogram) {
-        let ms = &mut *self.mutable_state.write().unwrap();
+    fn flush_staged_ret_groups(&self, ms: &mut DriverMutableState, sp: &mut Subprogram) {
         let staged_ret_groups = mem::take(&mut ms.tir_builder.staged_ret_groups);
         for (decl, exprs) in staged_ret_groups {
             assert!(matches!(df!(@ms, decl.ast), ast::Decl::Function { .. }));
@@ -609,7 +606,7 @@ impl Driver {
             let unit_id = sp.levels.item_to_units[&item];
             let level = sp.levels.item_to_levels[&item];
             let unit = &mut sp.units[unit_id as usize];
-            let decl_range = df!(decl.range);
+            let decl_range = df!(@ms, decl.range);
             unit.items.ret_groups.insert(
                 level,
                 RetGroup { ty, exprs, decl_range },
@@ -617,7 +614,7 @@ impl Driver {
         }
     }
 
-    fn build_tir_expr(&self, unit: &mut UnitItems, level: u32, id: ExprId) {
+    fn build_tir_expr(&self, ms: &mut DriverMutableState, unit: &mut UnitItems, level: u32, id: ExprId) {
         macro_rules! insert_item {
             ($depvec:ident, $item:expr) => {{
                 unit.$depvec.insert(
@@ -641,7 +638,7 @@ impl Driver {
                 flat_insert_item!($vec, Expr { id, data: $expr, });
             }}
         }
-        match &ef!(id.ast) {
+        match &ef!(@ms, id.ast) {
             ast::Expr::Void => {},
             ast::Expr::Error => flat_insert_expr!(error_exprs, ErrorExpr),
             ast::Expr::IntLit { .. } => flat_insert_expr!(int_lits, IntLit),
@@ -658,7 +655,7 @@ impl Driver {
             &ast::Expr::Cast { expr, ty, cast_id } => insert_expr!(casts, Cast { expr, ty, cast_id }),
             &ast::Expr::Ret { expr, decl } => {
                 if let Some(decl) = decl {
-                    self.mutable_state.write().unwrap().tir_builder.staged_ret_groups.entry(decl).or_default().push(expr);
+                    ms.tir_builder.staged_ret_groups.entry(decl).or_default().push(expr);
                 }
                 insert_expr!(explicit_rets, ExplicitRet)
             }
@@ -666,11 +663,11 @@ impl Driver {
             &ast::Expr::Call { callee, ref arguments } => insert_expr!(calls, Call { callee, args: arguments.clone() }),
             &ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => insert_expr!(function_tys, FunctionTy { param_tys: param_tys.clone(), ret_ty }),
             &ast::Expr::Set { lhs, rhs } => insert_expr!(assignments, Assignment { lhs, rhs }),
-            &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr }),
+            &ast::Expr::Do { scope } => insert_expr!(dos, Do { terminal_expr: ms.ast.imper_scopes[scope].terminal_expr }),
             &ast::Expr::If { condition, then_scope, else_scope } => {
-                let then_expr = self.mutable_state.read().unwrap().ast.imper_scopes[then_scope].terminal_expr;
+                let then_expr = ms.ast.imper_scopes[then_scope].terminal_expr;
                 let else_expr = if let Some(else_scope) = else_scope {
-                    self.mutable_state.read().unwrap().ast.imper_scopes[else_scope].terminal_expr
+                    ms.ast.imper_scopes[else_scope].terminal_expr
                 } else {
                     ast::VOID_EXPR
                 };
@@ -678,7 +675,7 @@ impl Driver {
             },
             &ast::Expr::While { condition, .. } => insert_expr!(whiles, While { condition }),
             &ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
-                let explicit_ty = self.mutable_state.read().unwrap().ast.explicit_tys[binding];
+                let explicit_ty = ms.ast.explicit_tys[binding];
                 insert_expr!(fors, For { binding_decl: binding, binding_explicit_ty: explicit_ty, lower_bound, upper_bound })
             },
             &ast::Expr::Switch { scrutinee, context, ref cases, } => {
@@ -686,7 +683,7 @@ impl Driver {
                 for case in cases {
                     let case = SwitchCase {
                         pattern: case.pattern.clone(),
-                        terminal_expr: self.mutable_state.read().unwrap().ast.imper_scopes[case.scope].terminal_expr,
+                        terminal_expr: ms.ast.imper_scopes[case.scope].terminal_expr,
                         scope: case.scope,
                     };
                     tir_cases.push(case);
@@ -695,12 +692,12 @@ impl Driver {
             },
             &ast::Expr::Mod { extern_library_path, .. } => insert_expr!(modules, Module { extern_library_path }),
             &ast::Expr::Struct(struct_id) => {
-                let field_tys = self.mutable_state.read().unwrap().ast.structs[struct_id].fields.iter().map(|field| field.ty).collect();
+                let field_tys = ms.ast.structs[struct_id].fields.iter().map(|field| field.ty).collect();
                 insert_expr!(structs, Struct { field_tys })
             },
             &ast::Expr::Enum(enum_id) => {
                 let mut variant_payload_tys = SmallVec::new();
-                for variant in &self.mutable_state.read().unwrap().ast.enums[enum_id].variants {
+                for variant in &ms.ast.enums[enum_id].variants {
                     if let Some(payload) = variant.payload_ty {
                         variant_payload_tys.push(payload);
                     }
@@ -716,14 +713,14 @@ impl Driver {
         }
     }
 
-    fn build_tir_attr(&self, unit: &mut UnitItems, level: u32, id: AttrId) {
-        match af!(id.ast) {
+    fn build_tir_attr(&self, ms: &DriverMutableState, unit: &mut UnitItems, level: u32, id: AttrId) {
+        match af!(@ms, id.ast) {
             Attribute::CompilerTest { ref arguments, .. } => {
-                let Some(&target_decl) = self.mutable_state.read().unwrap().ast.attr_targets.get(&id) else {
+                let Some(&target_decl) = ms.ast.attr_targets.get(&id) else {
                     return;
                 };
 
-                match df!(target_decl.ast) {
+                match df!(@ms, target_decl.ast) {
                     ast::Decl::Function { ref param_tys, .. } => {
                         unit.compiler_test_attributes.insert(
                             level,
@@ -740,8 +737,8 @@ impl Driver {
         }
     }
 
-    fn build_tir_decl(&self, unit: &mut UnitItems, level: u32, id: DeclId) {
-        match df!(id.ast) {
+    fn build_tir_decl(&self, ms: &mut DriverMutableState, unit: &mut UnitItems, level: u32, id: DeclId) {
+        match df!(@ms, id.ast) {
             // TODO: Add parameter and field TIR items for (at least) checking that the type of the param is valid
             // LoopBinding doesn't require a TIR decl because it is current checked by its parent `For` expr
             ast::Decl::Parameter { .. } | ast::Decl::Field { .. } | ast::Decl::Variant { .. } |
@@ -751,15 +748,15 @@ impl Driver {
                 unit.generic_params.push(GenericParam { id });
             },
             ast::Decl::Static(root_expr) | ast::Decl::Const { assigned_expr: root_expr, .. } | ast::Decl::Stored { root_expr, .. } => {
-                let explicit_ty = self.mutable_state.read().unwrap().ast.explicit_tys[id];
+                let explicit_ty = ms.ast.explicit_tys[id];
                 unit.assigned_decls.insert(level, AssignedDecl { explicit_ty, root_expr, decl_id: id });
             },
             ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, .. } => {
                 unit.pattern_bindings.insert(level, PatternBinding { context, scrutinee_value: scrutinee, root_scrutinee, decl_id: id });
             },
             ast::Decl::Function { scope, .. } => {
-                let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr;
-                self.mutable_state.write().unwrap().tir_builder.staged_ret_groups.entry(id).or_default().push(terminal_expr);
+                let terminal_expr = ms.ast.imper_scopes[scope].terminal_expr;
+                ms.tir_builder.staged_ret_groups.entry(id).or_default().push(terminal_expr);
                 unit.func_decls.push(FunctionDecl { id });
             },
             ast::Decl::FunctionPrototype { .. } => {
@@ -768,10 +765,10 @@ impl Driver {
         }
     }
 
-    fn initialize_tir_impl(&self, new_code: &NewCode) {
+    fn initialize_tir_impl(&self, ms: &mut DriverMutableState, new_code: &NewCode) {
         // Populate `decls`
         for id in range_iter(new_code.decls.clone()) {
-            let decl = &self.mutable_state.read().unwrap().ast.decls[id];
+            let decl = &ms.ast.decls[id];
             let mut generic_params = empty_range();
             let (is_mut, param_list) = match *decl {
                 ast::Decl::Function { ref param_tys, generic_params: ref og_generic_params, .. } => {
@@ -799,11 +796,11 @@ impl Driver {
                     ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false },
                 ),
                 ast::Decl::Intrinsic(id) => {
-                    let param_tys = &self.mutable_state.read().unwrap().ast.intrinsics[id].param_tys;
+                    let param_tys = &ms.ast.intrinsics[id].param_tys;
                     (false, ParamList { param_tys: param_tys.clone(), has_c_variadic_param: false })
                 },
                 ast::Decl::MethodIntrinsic(id) => {
-                    let param_tys = SmallVec::from(&self.mutable_state.read().unwrap().ast.intrinsics[id].param_tys[1..]);
+                    let param_tys = SmallVec::from(&ms.ast.intrinsics[id].param_tys[1..]);
                     (false, ParamList { param_tys, has_c_variadic_param: false })
                 },
                 ast::Decl::Static(_) => (
@@ -831,33 +828,33 @@ impl Driver {
                     ParamList::default(),
                 ),
             };
-            self.mutable_state.write().unwrap().tir_builder.decls.push_at(id, Decl { param_list, is_mut, generic_params });
+            ms.tir_builder.decls.push_at(id, Decl { param_list, is_mut, generic_params });
         }
 
-        self.initialize_graph();
+        self.initialize_graph(ms);
 
         // Add type 1 dependencies and meta-dependencies to the graph
         for decl_id in range_iter(new_code.decls.clone()) {
-            let id = df!(decl_id.item);
-            match df!(decl_id.ast) {
+            let id = df!(@ms, decl_id.item);
+            match df!(@ms, decl_id.ast) {
                 // NOTE: type 1 dependencies are currently added to LoopBinding by its parent `for` loop; see below.
                 ast::Decl::Parameter { .. } | ast::Decl::LegacyIntrinsic { .. } | ast::Decl::Intrinsic(_) | ast::Decl::MethodIntrinsic(_) | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::GenericParam(_) | ast::Decl::Variant { .. } | ast::Decl::FunctionPrototype { .. } | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } | ast::Decl::ObjcClassRef { .. } => {},
                 ast::Decl::PatternBinding { root_scrutinee, .. } => {
                     // TODO: find out why this seems to cause an infinite loop if it's moved to build_more_tir() and changed to a type 2 dependency
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(root_scrutinee.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, root_scrutinee.item));
                 },
-                ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(expr.item)),
+                ast::Decl::Static(expr) | ast::Decl::Const { assigned_expr: expr, .. } | ast::Decl::Stored { root_expr: expr, .. } => ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, expr.item)),
                 ast::Decl::Function { scope, .. } => {
-                    let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr;
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    let terminal_expr = ms.ast.imper_scopes[scope].terminal_expr;
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, terminal_expr.item));
 
-                    if let Some(attrs) = self.mutable_state.read().unwrap().ast.decl_attributes.get(&decl_id) {
+                    if let Some(attrs) = ms.ast.decl_attributes.get(&decl_id) {
                         for &attr in attrs {
-                            let attr_item = self.mutable_state.read().unwrap().ast.attr_to_items[attr];
-                            match af!(attr.ast) {
+                            let attr_item = ms.ast.attr_to_items[attr];
+                            match af!(@ms, attr.ast) {
                                 Attribute::CompilerTest { ref arguments, .. } => {
                                     for &argument in arguments {
-                                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(attr_item, ef!(argument.item));
+                                        ms.tir_builder.graph.add_type1_dep(attr_item, ef!(@ms, argument.item));
                                     }
                                 },
                                 _ => {}
@@ -868,126 +865,125 @@ impl Driver {
             }
         }
         for expr_id in range_iter(new_code.exprs.clone()) {
-            let id = ef!(expr_id.item);
-            match ef!(expr_id.ast) {
+            let id = ef!(@ms, expr_id.item);
+            match ef!(@ms, expr_id.ast) {
                 ast::Expr::Void | ast::Expr::Error | ast::Expr::IntLit { .. } | ast::Expr::DecLit { .. } | ast::Expr::StrLit { .. }
                     | ast::Expr::CharLit { .. } | ast::Expr::BoolLit { .. } | ast::Expr::Const(_) | ast::Expr::Break(_) | ast::Expr::Continue(_) => {},
                 ast::Expr::Mod { extern_library_path, .. } => {
                     if let Some(extern_library_path) = extern_library_path {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(extern_library_path.item));
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, extern_library_path.item));
                     }
                 },
                 ast::Expr::AddrOf { expr, .. } | ast::Expr::Deref(expr) | ast::Expr::Pointer { expr, .. }
-                    | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(expr.item)),
+                    | ast::Expr::Cast { expr, .. } | ast::Expr::Ret { expr, .. } => ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, expr.item)),
                 ast::Expr::DeclRef { id: decl_ref_id, .. } => {
-                    let decl_ref = &self.mutable_state.read().unwrap().ast.decl_refs[decl_ref_id];
+                    let decl_ref = &ms.ast.decl_refs[decl_ref_id];
                     if let ast::Namespace::MemberRef { base_expr } = decl_ref.namespace {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(base_expr.item));
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_meta_dep(id, ef!(base_expr.item));
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, base_expr.item));
+                        ms.tir_builder.graph.add_meta_dep(id, ef!(@ms, base_expr.item));
                     }
                 },
                 ast::Expr::Call { callee, ref arguments } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(callee.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, callee.item));
                     for &arg in arguments {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(arg.item));
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, arg.item));
 
                         // NOTE: if the callee is a declref, it is important for it to have a type 1 dependency on all
                         // arguments, because declrefs do not lock their generic argument values in until pass 2, when
                         // the caller's pass 2 has already passed. This is important because declrefs need to
                         // substitute all generic arguments for the appropriate generic parameter types.
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(ef!(callee.item), ef!(arg.item));
+                        ms.tir_builder.graph.add_type1_dep(ef!(@ms, callee.item), ef!(@ms, arg.item));
                     }
                 },
                 ast::Expr::FunctionTy { ref param_tys, ret_ty, .. } => {
                     for &param_ty in param_tys {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(param_ty.item));
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, param_ty.item));
                     }
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(ret_ty.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, ret_ty.item));
                 },
                 ast::Expr::Set { lhs, rhs } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(lhs.item));
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(rhs.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, lhs.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, rhs.item));
                 },
                 ast::Expr::Do { scope } => {
-                    let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr;
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    let terminal_expr = ms.ast.imper_scopes[scope].terminal_expr;
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, terminal_expr.item));
                 },
                 ast::Expr::If { condition, then_scope, else_scope } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(condition.item));
-                    let then_expr = self.mutable_state.read().unwrap().ast.imper_scopes[then_scope].terminal_expr;
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, condition.item));
+                    let then_expr = ms.ast.imper_scopes[then_scope].terminal_expr;
                     let else_expr = if let Some(else_scope) = else_scope {
-                        self.mutable_state.write().unwrap().ast.imper_scopes[else_scope].terminal_expr
+                        ms.ast.imper_scopes[else_scope].terminal_expr
                     } else {
                         ast::VOID_EXPR
                     };
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(then_expr.item));
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(else_expr.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, then_expr.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, else_expr.item));
                 },
                 ast::Expr::Switch { scrutinee, ref cases, .. } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(scrutinee.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, scrutinee.item));
                     for case in cases.clone() {
-                        let terminal = self.mutable_state.read().unwrap().ast.imper_scopes[case.scope].terminal_expr;
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(terminal.item));
+                        let terminal = ms.ast.imper_scopes[case.scope].terminal_expr;
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, terminal.item));
                     }
                 },
                 ast::Expr::While { condition, scope, .. } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(condition.item));
-                    let terminal_expr = self.mutable_state.read().unwrap().ast.imper_scopes[scope].terminal_expr;
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(terminal_expr.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, condition.item));
+                    let terminal_expr = ms.ast.imper_scopes[scope].terminal_expr;
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, terminal_expr.item));
                 },
                 ast::Expr::Struct(struct_id) => {
-                    for field in &self.mutable_state.read().unwrap().ast.structs[struct_id].fields {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(field.ty.item));
+                    for field in &ms.ast.structs[struct_id].fields {
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, field.ty.item));
                     }
                 },
                 ast::Expr::Enum(enum_id) => {
-                    for variant in &self.mutable_state.read().unwrap().ast.enums[enum_id].variants {
+                    for variant in &ms.ast.enums[enum_id].variants {
                         if let Some(payload_ty) = variant.payload_ty {
-                            self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(payload_ty.item));
+                            ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, payload_ty.item));
                         }
                     }
                 },
                 ast::Expr::StructLit { ref fields, ty, .. } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(ty.item));
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_meta_dep(id, ef!(ty.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, ty.item));
+                    ms.tir_builder.graph.add_meta_dep(id, ef!(@ms, ty.item));
                     for field in fields {
-                        self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(field.expr.item));
+                        ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, field.expr.item));
                     }
                 },
                 ast::Expr::For { binding, lower_bound, upper_bound, .. } => {
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, df!(binding.item));
+                    ms.tir_builder.graph.add_type1_dep(id, df!(@ms, binding.item));
 
                     // THIS IS KIND OF A HACK. The AST variants for loop binding variables do not currently keep track
                     // of the lower_bound or upper_bound, so I just add the dependencies here.
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(df!(binding.item), ef!(lower_bound.item));
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(df!(binding.item), ef!(upper_bound.item));
+                    ms.tir_builder.graph.add_type1_dep(df!(@ms, binding.item), ef!(@ms, lower_bound.item));
+                    ms.tir_builder.graph.add_type1_dep(df!(@ms, binding.item), ef!(@ms, upper_bound.item));
                 },
                 ast::Expr::ExtendBlock { extendee, id: extend_block_id } => {
-                    self.mutable_state.write().unwrap().tir_builder.extend_blocks.insert(extendee, extend_block_id);
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_super_ultra_hyper_mega_meta_dep(ef!(extendee.item));
-                    self.mutable_state.write().unwrap().tir_builder.graph.add_type1_dep(id, ef!(extendee.item));
+                    ms.tir_builder.extend_blocks.insert(extendee, extend_block_id);
+                    ms.tir_builder.graph.add_super_ultra_hyper_mega_meta_dep(ef!(@ms, extendee.item));
+                    ms.tir_builder.graph.add_type1_dep(id, ef!(@ms, extendee.item));
                 },
             }
         }
 
         // Split the graph into components
-        self.mutable_state.write().unwrap().tir_builder.graph.split(new_code);
+        ms.tir_builder.graph.split(new_code);
 
         // TODO: do something better than an array of bools :(
-        self.mutable_state.write().unwrap().tir_builder.depended_on.resize_with(self.mutable_state.read().unwrap().ast.exprs.len(), || false);
+        ms.tir_builder.depended_on.resize_with(ms.ast.exprs.len(), || false);
     }
 
-    pub fn initialize_tir(&self) {
-        let new_snapshot = self.take_snapshot();
-        let last_snapshot = mem::replace(&mut self.mutable_state.write().unwrap().tir_builder.last_snapshot, new_snapshot);
-        let new_code = self.get_new_code_since(last_snapshot);
-        self.initialize_tir_impl(&new_code);
+    pub fn initialize_tir(&self, ms: &mut DriverMutableState) {
+        let new_snapshot = self.take_snapshot(ms);
+        let last_snapshot = mem::replace(&mut ms.tir_builder.last_snapshot, new_snapshot);
+        let new_code = self.get_new_code_since(ms, last_snapshot);
+        self.initialize_tir_impl(ms, &new_code);
     }
 
-    pub fn build_more_tir(&self, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
-        self.initialize_tir();
+    pub fn build_more_tir(&self, ms: &mut DriverMutableState, last_typecheck_succeeded: bool) -> Result<Option<Units>, TirError> {
+        self.initialize_tir(ms);
 
-        let ms = &mut *self.mutable_state.write().unwrap();
         if !ms.tir_builder.graph.has_outstanding_components() {
             return Ok(None);
         }
@@ -997,9 +993,9 @@ impl Driver {
         // Add types 2-4 dependencies
         let items_that_need_dependencies = ms.tir_builder.graph.get_items_that_need_dependencies();
         for id in items_that_need_dependencies {
-            match self.mutable_state.read().unwrap().ast.items[id] {
+            match ms.ast.items[id] {
                 ast::Item::Decl(decl_id) => {
-                    match df!(decl_id.ast) {
+                    match df!(@ms, decl_id.ast) {
                         ast::Decl::Parameter { .. } | ast::Decl::Static(_) | ast::Decl::Const { .. } | ast::Decl::Stored { .. } | ast::Decl::Field { .. } | ast::Decl::ReturnValue | ast::Decl::InternalField(_) | ast::Decl::LoopBinding { .. } /*  | ast::Decl::PatternBinding { .. }*/ => {},
                         ast::Decl::PatternBinding { root_scrutinee, .. } => {
                             ms.tir_builder.graph.add_type2_dep(id, ef!(@ms, root_scrutinee.item));
@@ -1039,7 +1035,7 @@ impl Driver {
                                 }
                             }
 
-                            self.add_type3_scope_dep(id, scope);
+                            self.add_type3_scope_dep(ms, id, scope);
                             // NOTE: the Some case is handled below this match expression
                             if ms.ast.explicit_tys[decl_id].is_none() {
                                 add_eval_dep!(id, ast::VOID_TYPE);
@@ -1092,27 +1088,27 @@ impl Driver {
                                     add_eval_dep!(id, arg);
                                 }
                             }
-                            self.add_types_2_to_4_deps_to_member_ref(id, decl_ref_id);
+                            self.add_types_2_to_4_deps_to_member_ref(ms, id, decl_ref_id);
                         },
                         ast::Expr::Do { scope } => {
-                            self.add_type3_scope_dep(id, scope);
+                            self.add_type3_scope_dep(ms, id, scope);
                         },
                         ast::Expr::Switch { ref cases, .. } => {
                             for case in cases.clone() {
-                                self.add_type3_scope_dep(id, case.scope);
+                                self.add_type3_scope_dep(ms, id, case.scope);
                             }
                         },
                         ast::Expr::If { then_scope, else_scope, .. } => {
-                            self.add_type3_scope_dep(id, then_scope);
+                            self.add_type3_scope_dep(ms, id, then_scope);
                             if let Some(else_scope) = else_scope {
-                                self.add_type3_scope_dep(id, else_scope);
+                                self.add_type3_scope_dep(ms, id, else_scope);
                             }
                         }
                         ast::Expr::While { scope, .. } => {
-                            self.add_type3_scope_dep(id, scope);
+                            self.add_type3_scope_dep(ms, id, scope);
                         },
                         ast::Expr::For { scope, .. } => {
-                            self.add_type3_scope_dep(id, scope);
+                            self.add_type3_scope_dep(ms, id, scope);
                         },
                     }
                 },
@@ -1132,7 +1128,7 @@ impl Driver {
         })?;
 
         let mut main_sp = Subprogram { units: Vec::new(), mock_units: Vec::new(), levels };
-        self.actually_build_tir(&mut main_sp);
+        self.actually_build_tir(ms, &mut main_sp);
 
         Ok(
             Some(
@@ -1141,50 +1137,50 @@ impl Driver {
         )
     }
 
-    fn actually_build_tir(&self, sp: &mut Subprogram) {
+    fn actually_build_tir(&self, ms: &mut DriverMutableState, sp: &mut Subprogram) {
         sp.units.resize_with(sp.levels.units.len(), Default::default);
 
         // Finally, convert AST items to TIR and add them to the correct spot
         for (unit, levels_unit) in sp.units.iter_mut().zip(&sp.levels.units) {
             for &item_id in &levels_unit.items {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.mutable_state.read().unwrap().ast.items[item_id] {
+                match ms.ast.items[item_id] {
                     ast::Item::Decl(id) => {
-                        self.build_tir_decl(&mut unit.items, level, id);
+                        self.build_tir_decl(ms, &mut unit.items, level, id);
                     }
                     ast::Item::Expr(id) => {
-                        if let Some(&extend_block) = self.mutable_state.read().unwrap().tir_builder.extend_blocks.get(&id) {
+                        if let Some(&extend_block) = ms.tir_builder.extend_blocks.get(&id) {
                             unit.extend_blocks.push(extend_block);
                         }
-                        if self.mutable_state.read().unwrap().tir_builder.depended_on[id] { unit.eval_dependees.push(id); }
+                        if ms.tir_builder.depended_on[id] { unit.eval_dependees.push(id); }
 
-                        self.build_tir_expr(&mut unit.items, level, id);
+                        self.build_tir_expr(ms, &mut unit.items, level, id);
                     },
                     ast::Item::Attr(id) => {
-                        self.build_tir_attr(&mut unit.items, level, id);
+                        self.build_tir_attr(ms, &mut unit.items, level, id);
                     },
                 }
             }
         }
         for mock_unit in &sp.levels.mock_units {
-            let main_expr = match self.mutable_state.read().unwrap().ast.items[mock_unit.item] {
+            let main_expr = match ms.ast.items[mock_unit.item] {
                 ast::Item::Expr(id) => id,
                 ast::Item::Decl(_) => panic!("Can't have metadependency on a declaration!"),
                 ast::Item::Attr(_) => panic!("Can't have metadependency on an attribute!"),
             };
             let mut items = UnitItems::default();
-            self.build_tir_expr(&mut items, mock_unit.item_level, main_expr);
+            self.build_tir_expr(ms, &mut items, mock_unit.item_level, main_expr);
             for &item_id in &mock_unit.deps {
                 let level = sp.levels.item_to_levels[&item_id];
-                match self.mutable_state.read().unwrap().ast.items[item_id] {
+                match ms.ast.items[item_id] {
                     ast::Item::Decl(id) => {
-                        self.build_tir_decl(&mut items, level, id);
+                        self.build_tir_decl(ms, &mut items, level, id);
                     }
                     ast::Item::Expr(id) => {
-                        self.build_tir_expr(&mut items, level, id);
+                        self.build_tir_expr(ms, &mut items, level, id);
                     },
                     ast::Item::Attr(id) => {
-                        self.build_tir_attr(&mut items, level, id);
+                        self.build_tir_attr(ms, &mut items, level, id);
                     },
                 }
             }
@@ -1196,17 +1192,17 @@ impl Driver {
                 },
             );
         }
-        self.flush_staged_ret_groups(sp);
-        for scope in &self.mutable_state.read().unwrap().ast.imper_scopes {
+        self.flush_staged_ret_groups(ms, sp);
+        for scope in &ms.ast.imper_scopes {
             for &item in &scope.items {
                 match item {
                     // TODO: This is a horrible hack! Instead of looping through all imperative scopes, I should somehow
                     // associate statements with their unit
-                    ScopedItem::Expr { expr, has_semicolon } => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(expr.item)) {
+                    ScopedItem::Expr { expr, has_semicolon } => if let Some(&unit) = sp.levels.item_to_units.get(&ef!(@ms, expr.item)) {
                         let unit = &mut sp.units[unit as usize];
                         unit.items.stmts.push(Stmt { root_expr: expr, has_semicolon });
                     },
-                    ScopedItem::Decl(decl) => assert!(matches!(df!(decl.ast), ast::Decl::Stored { .. } | ast::Decl::Function { .. }), "Invalid scope item"),
+                    ScopedItem::Decl(decl) => assert!(matches!(df!(@ms, decl.ast), ast::Decl::Stored { .. } | ast::Decl::Function { .. }), "Invalid scope item"),
                 }
             }
         }

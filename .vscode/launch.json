@@ -28,21 +28,19 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests",
+            "name": "Debug compiler test suite",
             "cargo": {
                 "args": [
-                    "test",
-                    "--no-run",
+                    "build",
                     "--bin=dusk",
                     "--package=dusklang"
                 ],
                 "filter": {
-                    "name": "dusklang",
+                    "name": "dusk",
                     "kind": "bin"
                 }
             },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "args": ["test-compiler"]
         },
         {
             "type": "extensionHost",

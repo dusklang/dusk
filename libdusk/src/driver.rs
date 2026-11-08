@@ -81,7 +81,7 @@ impl Driver {
                 }
             ),
         };
-        val.mutable_state.write().unwrap().ast.generic_ctxs.push(GenericCtx::Blank);
+        val.mutable_state.try_write().unwrap().ast.generic_ctxs.push(GenericCtx::Blank);
         val
     }
 }

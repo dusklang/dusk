@@ -179,14 +179,15 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
     };
 
     begin_phase!(Typecheck);
-    driver.initialize_tir();
+    driver.initialize_tir(&mut *driver.mutable_state.try_write().unwrap());
     let tp = RefCell::new(driver.make_real_type_provider());
     let mut tp_ref = tp.borrow_mut();
     let mut suhmm_tp = None;
     let mut new_code = NewCode::placeholder();
     let mut last_typecheck_succeeded = true;
     loop {
-        if let Ok(Some(units)) = driver.build_more_tir(last_typecheck_succeeded) {
+        let mut ms = driver.mutable_state.try_write().unwrap();
+        if let Ok(Some(units)) = driver.build_more_tir(&mut *ms, last_typecheck_succeeded) {
             for command in &units.commands {
                 match command {
                     MockStateCommand::Mock => {
@@ -208,16 +209,17 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 &mut *tp_ref
             };
 
+            drop(ms);
+
             // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
             // added. Therefore, we take a snapshot before typechecking.
-            let before = driver.take_snapshot();
+            let before = driver.take_snapshot(&*driver.mutable_state.try_read().unwrap());
             last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
             if !last_typecheck_succeeded && !units.is_suhmm {
                 break;
             }
 
-
-            new_code = driver.get_new_code_since(before);
+            new_code = driver.get_new_code_since(&*driver.mutable_state.try_read().unwrap(), before);
             // { flush_diagnostics(&driver); }
         } else {
             break;
@@ -328,7 +330,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
 }
 
 fn get_main_func(driver: &Driver) -> Option<FuncId> {
-    let main_sym = driver.mutable_state.read().unwrap().ast.known_idents.main;
+    let main_sym = driver.mutable_state.try_read().unwrap().ast.known_idents.main;
     driver.mir.functions.iter()
         .position(|func| {
             let func = func.get().unwrap();

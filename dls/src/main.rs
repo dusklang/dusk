@@ -242,21 +242,21 @@ impl Server {
         let pos = lsp_pos_to_dusk_pos(&driver, url, params.text_document_position_params.position);
         // TODO: this is preposterously stupid
         let mut hovered_item = None;
-        for (id, range) in driver.mutable_state.read().unwrap().ast.source_ranges.iter_enumerated() {
+        for (id, range) in driver.mutable_state.try_read().unwrap().ast.source_ranges.iter_enumerated() {
             if range.contains(pos) {
                 hovered_item = Some(id);
                 break;
             }
         }
         hovered_item.map(|item| {
-            let range = driver.mutable_state.read().unwrap().ast.source_ranges[item];
+            let range = driver.mutable_state.try_read().unwrap().ast.source_ranges[item];
             let range = dusk_range_to_lsp_range(&driver, range).map(|(_, range)| range);
-            let message = match driver.mutable_state.read().unwrap().ast.items[item] {
+            let message = match driver.mutable_state.try_read().unwrap().ast.items[item] {
                 Item::Expr(expr) => {
                     let mut message = String::new();
                     match ef!(driver, expr.ast) {
                         Expr::DeclRef { id, .. } => {
-                            let name = driver.mutable_state.read().unwrap().ast.decl_refs[id].name;
+                            let name = driver.mutable_state.try_read().unwrap().ast.decl_refs[id].name;
                             let interner = driver.interner.read().unwrap();
                             let name = interner.resolve(name).unwrap();
                             let mut ty = None;
@@ -281,7 +281,7 @@ impl Server {
                 },
                 Item::Decl(decl) => {
                     let mut message = String::new();
-                    let name = driver.mutable_state.read().unwrap().ast.names[decl];
+                    let name = driver.mutable_state.try_read().unwrap().ast.names[decl];
                     let interner = driver.interner.read().unwrap();
                     let name = interner.resolve(name).unwrap();
                     let mut ty = None;
@@ -466,7 +466,7 @@ impl Server {
             (!fatal_parse_error).then(|| {
                 salf.flush_diagnostics(&driver, &path_ref);
 
-                driver.initialize_tir();
+                driver.initialize_tir(&mut *driver.mutable_state.try_write().unwrap());
 
                 let tp = RefCell::new(driver.make_real_type_provider());
                 let mut tp_ref = tp.borrow_mut();
@@ -474,7 +474,8 @@ impl Server {
                 let mut new_code = NewCode::placeholder();
                 let mut last_typecheck_succeeded = true;
                 loop {
-                    if let Ok(Some(units)) = driver.build_more_tir(last_typecheck_succeeded) {
+                    let mut ms = driver.mutable_state.try_write().unwrap();
+                    if let Ok(Some(units)) = driver.build_more_tir(&mut *ms, last_typecheck_succeeded) {
                         for command in &units.commands {
                             match command {
                                 MockStateCommand::Mock => {
@@ -495,14 +496,17 @@ impl Server {
                             suhmm_tp = None;
                             &mut *tp_ref
                         };
+
+                        drop(ms);
+
                         // Typechecking can lead to expressions being evaluated, which in turn can result in new AST being
                         // added. Therefore, we take a snapshot before typechecking.
-                        let before = driver.take_snapshot();
+                        let before = driver.take_snapshot(&driver.mutable_state.try_read().unwrap());
                         last_typecheck_succeeded = !driver.type_check(&units, tp, new_code).is_err();
                         if !last_typecheck_succeeded && !units.is_suhmm {
                             break;
                         }
-                        new_code = driver.get_new_code_since(before);
+                        new_code = driver.get_new_code_since(&driver.mutable_state.try_read().unwrap(), before);
 
                         salf.flush_diagnostics(&driver, &path_ref);
                     } else {

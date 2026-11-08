@@ -15,7 +15,7 @@ use crate::ty::{EnumType, FunctionType, IntWidth, LegacyInternalType, QualType, 
 use crate::pattern_matching::*;
 use crate::internal_types::InternalNamespace;
 
-use crate::driver::Driver;
+use crate::driver::{Driver, DriverMutableState};
 use crate::error::Error;
 use crate::new_code::NewCode;
 use crate::ty::BuiltinTraits;
@@ -106,7 +106,7 @@ impl tir::Expr<tir::IntLit> {
             .with_preferred_type(Type::i32()));
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for integer literal").qual_ty.ty;
     }
 }
@@ -118,7 +118,7 @@ impl tir::Expr<tir::DecLit> {
             .with_preferred_type(Type::f64()));
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for decimal literal").qual_ty.ty;
     }
 }
@@ -130,7 +130,7 @@ impl tir::Expr<tir::StrLit> {
             .with_preferred_type(Type::u8().ptr()));
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for string literal").qual_ty.ty;
     }
 }
@@ -142,7 +142,7 @@ impl tir::Expr<tir::CharLit> {
             .with_preferred_type(Type::u8().ptr()));
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for character literal").qual_ty.ty;
     }
 }
@@ -152,7 +152,7 @@ impl tir::Expr<tir::BoolLit> {
         view.expr_tys.insert(self.id, Type::Bool);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -162,7 +162,7 @@ impl tir::Expr<tir::Break> {
         view.expr_tys.insert(self.id, Type::Never);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -172,7 +172,7 @@ impl tir::Expr<tir::Continue> {
         view.expr_tys.insert(self.id, Type::Never);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -183,7 +183,7 @@ impl tir::Expr<tir::ConstExpr> {
         view.expr_tys.insert(self.id, ty);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -193,7 +193,7 @@ impl tir::Expr<tir::ErrorExpr> {
         view.expr_tys.insert(self.id, Type::Error);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
@@ -202,14 +202,14 @@ impl tir::GenericParam {
         view.decl_tys.insert(self.id, Type::Ty.into());
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
 
 
 impl tir::AssignedDecl {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = if let &Some(explicit_ty) = &self.explicit_ty {
             let explicit_ty = tp.get_evaluated_type(explicit_ty).clone();
             if let Some(err) = driver.can_unify_to(tp, self.root_expr, &explicit_ty.clone().into()).err() {
@@ -248,16 +248,16 @@ impl tir::AssignedDecl {
         tp.decl_type_mut(self.decl_id).ty = ty;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let decl_id = self.decl_id;
         let root_expr = self.root_expr;
-        let ty = tp.fetch_decl_type(driver, decl_id, None).ty;
+        let ty = tp.fetch_decl_type(driver, ms, decl_id, None).ty;
         driver.set_type(tp, root_expr, ty).unwrap();
     }
 }
 
 impl tir::CompilerTestAttribute {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &dyn TypeProvider) {
         for (&argument, &param_ty) in self.arguments.iter().zip(&self.parameter_tys) {
             let param_ty = tp.get_evaluated_type(param_ty).clone();
             if let Some(err) = driver.can_unify_to(tp, argument, &param_ty.clone().into()).err() {
@@ -281,7 +281,7 @@ impl tir::CompilerTestAttribute {
         }
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         for (&argument, &param_ty) in self.arguments.iter().zip(&self.parameter_tys) {
             let param_ty = tp.get_evaluated_type(param_ty).clone();
             if driver.set_type(tp, argument, param_ty).is_err() {
@@ -292,7 +292,7 @@ impl tir::CompilerTestAttribute {
 }
 
 impl tir::PatternBinding {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         driver.get_typed_pattern_matching_context(tp, self.context);
         if let Some(context) = tp.pattern_matching_context(self.context).as_ref() {
             let binding_ty = context[self.scrutinee_value].ty.clone();
@@ -302,17 +302,17 @@ impl tir::PatternBinding {
         }
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
 impl tir::Expr<tir::Assignment> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         driver.set_type(tp, self.id, Type::Void).unwrap();
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if let Err(err) = driver.intersect_constraints_lopsided(tp, self.lhs, self.rhs) {
             match err {
                 AssignmentError::Immutable => {
@@ -326,13 +326,13 @@ impl tir::Expr<tir::Assignment> {
 }
 
 impl tir::Expr<tir::Cast> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(ty.clone());
         *tp.ty_mut(self.id) = ty;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         // TODO: pass `self.ty` directly to can_unify_to() once its support for generics is more robust
         let ty_and_method: Result<(Type, Option<DeclId>, CastMethod), Vec<QualType>> = if let Ok(success) = driver.can_unify_to(tp, self.expr, &QualType::from(&ty)) {
@@ -398,12 +398,12 @@ impl tir::Expr<tir::Cast> {
 }
 
 impl tir::Expr<tir::While> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Void);
         *tp.ty_mut(self.id) = Type::Void;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if driver.set_type(tp, self.condition, Type::Bool).is_err() {
             panic!("Expected boolean condition in while expression");
         }
@@ -411,7 +411,7 @@ impl tir::Expr<tir::While> {
 }
 
 impl tir::Expr<tir::For> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Void);
         *tp.ty_mut(self.id) = Type::Void;
 
@@ -492,19 +492,19 @@ impl tir::Expr<tir::For> {
             ty
         };
 
-        let is_mut = driver.mutable_state.read().unwrap().tir_builder.decls[self.binding_decl].is_mut;
+        let is_mut = ms.tir_builder.decls[self.binding_decl].is_mut;
         *tp.decl_type_mut(self.binding_decl) = QualType { ty: loop_binding_ty, is_mut };
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        let ty = tp.fetch_decl_type(driver, self.binding_decl, None).ty;
+    fn run_pass_2_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
+        let ty = tp.fetch_decl_type(driver, ms, self.binding_decl, None).ty;
         driver.set_type(tp, self.lower_bound, ty.clone()).unwrap();
         driver.set_type(tp, self.upper_bound, ty).unwrap();
     }
 }
 
 impl tir::Expr<tir::Switch> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         driver.get_typed_pattern_matching_context(tp, self.context);
         let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee).expect("Ambiguous type for scrutinee in switch expression").qual_ty.ty;
 
@@ -537,7 +537,7 @@ impl tir::Expr<tir::Switch> {
         *driver.get_constraints_mut(tp, self.id) = constraints;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let scrutinee_ty = driver.solve_constraints(tp, self.scrutinee)
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
@@ -551,17 +551,17 @@ impl tir::Expr<tir::Switch> {
 }
 
 impl tir::Expr<tir::ExplicitRet> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Never);
         *tp.ty_mut(self.id) = Type::Never;
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
 impl tir::Expr<tir::Module> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Mod);
         *tp.ty_mut(self.id) = Type::Mod;
 
@@ -577,7 +577,7 @@ impl tir::Expr<tir::Module> {
             }
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         // Set the type of the extern library path string
         if let Some(extern_library_path) = self.extern_library_path {
             let selected_type = string_types().into_iter()
@@ -591,7 +591,7 @@ impl tir::Expr<tir::Module> {
 }
 
 impl tir::Expr<tir::Enum> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = ConstraintList::new().with_type(Type::Ty);
         *tp.ty_mut(self.id) = Type::Ty;
         for &payload_ty in &self.variant_payload_tys {
@@ -616,7 +616,7 @@ impl tir::Expr<tir::Enum> {
         driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         for &variant_ty in &self.variant_payload_tys {
             let field_type = driver.solve_constraints(tp, variant_ty)
                 .unwrap_or(ConstraintSolution::error())
@@ -638,10 +638,10 @@ fn string_types() -> [Type; 3] {
 }
 
 impl tir::Expr<tir::DeclRef> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         // Initialize overloads
-        let decl_ref = &driver.mutable_state.read().unwrap().ast.decl_refs[self.decl_ref_id];
-        let overload_decls = match driver.find_overloads(decl_ref.namespace, &NameLookup::Exact(decl_ref.name)) {
+        let decl_ref = &ms.ast.decl_refs[self.decl_ref_id];
+        let overload_decls = match driver.find_overloads(ms, decl_ref.namespace, &NameLookup::Exact(decl_ref.name)) {
             Some(overloads) => overloads,
             None => {
                 *tp.decl_ref_has_error_mut(self.decl_ref_id) = true;
@@ -670,9 +670,9 @@ impl tir::Expr<tir::DeclRef> {
                 assert_eq!(struct_id, strukt.identity);
                 strukt.field_tys[field_index].clone()
             } else {
-                tp.fetch_decl_type(driver, overload.decl, Some(self.decl_ref_id)).ty
+                tp.fetch_decl_type(driver, ms, overload.decl, Some(self.decl_ref_id)).ty
             };
-            let decl = &driver.mutable_state.read().unwrap().tir_builder.decls[overload.decl];
+            let decl = &ms.tir_builder.decls[overload.decl];
             let mut is_mut = decl.is_mut;
             if let OverloadScope::Member { base } = overload.scope {
                 // TODO: Robustness! Base_expr could be an overload set with these types, but also include struct types
@@ -687,20 +687,20 @@ impl tir::Expr<tir::DeclRef> {
                 }
             }
 
-            let before = driver.take_snapshot();
-            ty = driver.register_type_variables_for_decl_ref(tp, self.id, self.decl_ref_id, overload.decl, ty);
-            let new_code = driver.get_new_code_since(before);
+            let before = driver.take_snapshot(ms);
+            ty = driver.register_type_variables_for_decl_ref(ms, tp, self.id, self.decl_ref_id, overload.decl, ty);
+            let new_code = driver.get_new_code_since(ms, before);
             tp.resize(driver, new_code);
 
             if let Some(generic_args) = &self.explicit_generic_args {
-                let generic_params = driver.mutable_state.read().unwrap().tir_builder.decls[overload.decl].generic_params.clone();
+                let generic_params = ms.tir_builder.decls[overload.decl].generic_params.clone();
                 if generic_args.len() != generic_params.end - generic_params.start {
                     nonviable_overloads.push(overload.decl);
                     break;
                 }
 
                 for (&generic_arg, generic_param) in generic_args.iter().zip(range_iter(generic_params)) {
-                    let type_var = driver.mutable_state.read().unwrap().ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = ms.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     let ty = tp.get_evaluated_type(generic_arg).clone();
 
                     driver.set_type(tp, type_var, ty).unwrap();
@@ -715,7 +715,7 @@ impl tir::Expr<tir::DeclRef> {
         *tp.overloads_mut(self.decl_ref_id) = Overloads { overloads, nonviable_overloads };
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
 
@@ -751,14 +751,14 @@ impl tir::Expr<tir::DeclRef> {
             let overload = pref.as_ref().cloned()
                 .filter(|overload| overloads.overloads.contains(overload))
                 .unwrap_or_else(|| overloads.overloads[0]);
-            let decl = &driver.mutable_state.read().unwrap().tir_builder.decls[overload];
+            let decl = &ms.tir_builder.decls[overload];
 
             let generic_args = if tp.is_mock() {
-                range_iter(driver.mutable_state.read().unwrap().tir_builder.decls[overload].generic_params.clone()).map(Type::GenericParam).collect()
+                range_iter(ms.tir_builder.decls[overload].generic_params.clone()).map(Type::GenericParam).collect()
             } else {
                 let mut generic_args = Vec::new();
                 for generic_param in range_iter(decl.generic_params.clone()) {
-                    let type_var = driver.mutable_state.read().unwrap().ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
+                    let type_var = ms.ast.generic_arg_type_variables.pin().get(&(self.decl_ref_id, generic_param)).cloned().unwrap();
                     // TODO: error message probably
                     let solution = driver.solve_constraints(tp, type_var).unwrap();
                     generic_args.push(solution.qual_ty.ty);
@@ -768,7 +768,7 @@ impl tir::Expr<tir::DeclRef> {
 
             (Some(overload), Some(generic_args))
         } else if !*tp.decl_ref_has_error(self.decl_ref_id) {
-            let name = driver.mutable_state.read().unwrap().ast.decl_refs[self.decl_ref_id].name;
+            let name = ms.ast.decl_refs[self.decl_ref_id].name;
             let interner = driver.interner.read().unwrap();
             let name = interner.resolve(name).unwrap();
             if overloads.nonviable_overloads.is_empty() {
@@ -797,17 +797,17 @@ impl tir::Expr<tir::DeclRef> {
 }
 
 impl tir::Expr<tir::Call> {
-    fn decl_ref_id(&self, driver: &Driver) -> DeclRefId {
+    fn decl_ref_id(&self, ms: &DriverMutableState, driver: &Driver) -> DeclRefId {
         let generic_ctx_id = ef!(driver, self.callee.generic_ctx_id);
-        let generic_ctx = &driver.mutable_state.read().unwrap().ast.generic_ctxs[generic_ctx_id];
+        let generic_ctx = &ms.ast.generic_ctxs[generic_ctx_id];
         if let GenericCtx::DeclRef { id, .. } = *generic_ctx {
             id
         } else {
             panic!("unexpected generic context '{:?}' for callee", generic_ctx);
         }
     }
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        let decl_ref_id = self.decl_ref_id(driver);
+    fn run_pass_1_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
+        let decl_ref_id = self.decl_ref_id(ms, driver);
 
         // Rule out function types that don't match the arguments
         let mut one_of: SmallVec<[QualType; 1]> = SmallVec::new();
@@ -820,9 +820,9 @@ impl tir::Expr<tir::Call> {
             let mut num_args = self.args.len();
             if let Some(overload) = overload {
                 if let Decl::MethodIntrinsic(intr) = df!(driver, overload.ast) {
-                    let self_ty = driver.mutable_state.read().unwrap().ast.intrinsics[intr].param_tys[0];
+                    let self_ty = ms.ast.intrinsics[intr].param_tys[0];
                     let self_ty = tp.get_evaluated_type(self_ty);
-                    let ast::Namespace::MemberRef { base_expr } = driver.mutable_state.read().unwrap().ast.decl_refs[decl_ref_id].namespace else {
+                    let ast::Namespace::MemberRef { base_expr } = ms.ast.decl_refs[decl_ref_id].namespace else {
                         panic!("expected MemberRef as base of method intrinsic call");
                     };
                     if driver.can_unify_to(tp, base_expr, &QualType::from(self_ty.clone())).is_err()
@@ -830,13 +830,13 @@ impl tir::Expr<tir::Call> {
                             && driver.can_unify_to(tp, base_expr, pointee_ty).is_err() {
                                 return false;
                             }
-                } else if let Some(self_param) = driver.mutable_state.read().unwrap().ast.decl_self_parameters[overload] {
+                } else if let Some(self_param) = ms.ast.decl_self_parameters[overload] {
                     let self_ty = tp.get_evaluated_type(self_param.self_ty);
-                    let ast::Namespace::MemberRef { base_expr } = driver.mutable_state.read().unwrap().ast.decl_refs[decl_ref_id].namespace else {
+                    let ast::Namespace::MemberRef { base_expr } = ms.ast.decl_refs[decl_ref_id].namespace else {
                         panic!("expected MemberRef as base of method call");
                     };
 
-                    let expr_namespaces = &driver.mutable_state.read().unwrap().tir_builder.expr_namespaces[&base_expr];
+                    let expr_namespaces = &ms.tir_builder.expr_namespaces[&base_expr];
 
                     let is_instance = expr_namespaces.iter().any(|ns| {
                         let ExprNamespace::New(_, kind) = ns else {
@@ -935,7 +935,7 @@ impl tir::Expr<tir::Call> {
             .with_maybe_preferred_type(pref);
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = driver.solve_constraints(tp, self.id)
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
@@ -994,7 +994,7 @@ impl tir::Expr<tir::Call> {
 }
 
 impl tir::Expr<tir::AddrOf> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let constraints = driver.get_constraints(tp, self.expr).filter_map(|ty| {
             if self.is_mut && !ty.is_mut { return None; }
             Some(
@@ -1006,7 +1006,7 @@ impl tir::Expr<tir::AddrOf> {
         *driver.get_constraints_mut(tp, self.id) = constraints;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let pointer_ty = driver.solve_constraints(tp, self.id)
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
@@ -1023,14 +1023,14 @@ impl tir::Expr<tir::AddrOf> {
 }
 
 impl tir::Expr<tir::Dereference> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let constraints = driver.get_constraints(tp, self.expr).filter_map(|ty| {
             ty.ty.deref().cloned()
         });
         *driver.get_constraints_mut(tp, self.id) = constraints;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let mut ty = driver.solve_constraints(tp, self.id).unwrap_or(ConstraintSolution::error());
         *tp.ty_mut(self.id) = ty.qual_ty.ty.clone();
 
@@ -1042,7 +1042,7 @@ impl tir::Expr<tir::Dereference> {
 }
 
 impl tir::Expr<tir::Pointer> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if let Err(err) = driver.set_type(tp, self.id, Type::Ty) {
             let mut error = Error::new("Expected type operand to pointer operator");
             let range = driver.get_range(self.expr);
@@ -1064,7 +1064,7 @@ impl tir::Expr<tir::Pointer> {
 
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let expr_ty = driver.solve_constraints(tp, self.expr)
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
@@ -1077,7 +1077,7 @@ impl tir::Expr<tir::Pointer> {
 }
 
 impl tir::Expr<tir::FunctionTy> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         fn check_type(driver: &Driver, tp: &dyn TypeProvider, ty: ExprId) {
             if let Some(err) = driver.can_unify_to(tp, ty, &Type::Ty.into()).err() {
                 let mut error = Error::new("Expected type");
@@ -1104,7 +1104,7 @@ impl tir::Expr<tir::FunctionTy> {
         driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         fn solve_ty(driver: &Driver, tp: &mut dyn TypeProvider, ty: ExprId) {
             let expr_ty = driver.solve_constraints(tp, ty)
                 .unwrap_or(ConstraintSolution::error())
@@ -1124,7 +1124,7 @@ impl tir::Expr<tir::FunctionTy> {
 }
 
 impl tir::Expr<tir::Struct> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         for &field_ty in &self.field_tys {
             if let Some(err) = driver.can_unify_to(tp, field_ty, &Type::Ty.into()).err() {
                 let mut error = Error::new("Expected field type");
@@ -1147,7 +1147,7 @@ impl tir::Expr<tir::Struct> {
         driver.set_type(tp, self.id, Type::Ty).unwrap();
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         for &field_ty in &self.field_tys {
             let field_type = driver.solve_constraints(tp, field_ty)
                 .unwrap_or(ConstraintSolution::error())
@@ -1162,7 +1162,7 @@ impl tir::Expr<tir::Struct> {
 }
 
 impl tir::Expr<tir::StructLit> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if let Some(err) = driver.can_unify_to(tp, self.ty, &Type::Ty.into()).err() {
             let mut error = Error::new("Expected struct type");
             let range = driver.get_range(self.ty);
@@ -1181,12 +1181,12 @@ impl tir::Expr<tir::StructLit> {
             driver.diag.push(error);
             driver.get_constraints_mut(tp, self.id).make_error();
         } else {
-            if let Some(macro_options) = driver.mutable_state.read().unwrap().tir_builder.expr_macro_info.get(&self.ty) {
+            if let Some(macro_options) = ms.tir_builder.expr_macro_info.get(&self.ty) {
                 let mut one_of = SmallVec::<[QualType; 1]>::new();
                 for option in macro_options {
                     match option {
                         ExprMacroInfo::Struct(strukt) => {
-                            let struct_fields = &driver.mutable_state.read().unwrap().ast.structs[strukt.identity].fields;
+                            let struct_fields = &ms.ast.structs[strukt.identity].fields;
                             let mut matched_fields = Vec::new();
                             matched_fields.resize_with(struct_fields.len(), || MatchedField { expr: ExprId::new(u32::MAX), ty: Type::Error });
 
@@ -1278,7 +1278,7 @@ impl tir::Expr<tir::StructLit> {
 
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = driver.solve_constraints(tp, self.id).unwrap();
 
         *tp.ty_mut(self.id) = ty.qual_ty.ty;
@@ -1293,7 +1293,7 @@ impl tir::Expr<tir::StructLit> {
 }
 
 impl tir::Expr<tir::If> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if let Some(err) = driver.can_unify_to(tp, self.condition, &Type::Bool.into()).err() {
             let mut error = Error::new("Expected boolean condition in if expression");
             let range = driver.get_range(self.condition);
@@ -1324,7 +1324,7 @@ impl tir::Expr<tir::If> {
         *driver.get_constraints_mut(tp, self.id) = constraints;
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let condition_ty = driver.solve_constraints(tp, self.condition)
             .unwrap_or(ConstraintSolution::error())
             .make_immutable();
@@ -1340,11 +1340,11 @@ impl tir::Expr<tir::If> {
 }
 
 impl tir::Expr<tir::Do> {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         *driver.get_constraints_mut(tp, self.id) = driver.get_constraints(tp, self.terminal_expr).clone();
     }
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let solution = driver.solve_constraints(tp, self.id).expect("Ambiguous type for do expression");
         *tp.ty_mut(self.id) = solution.qual_ty.ty.clone();
         driver.get_constraints_mut(tp, self.terminal_expr).set_to(solution);
@@ -1352,7 +1352,7 @@ impl tir::Expr<tir::Do> {
 }
 
 impl tir::Stmt {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_1_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         if let Err(err) = driver.set_type(tp, self.root_expr, Type::Void) {
             if self.has_semicolon {
                 return;
@@ -1375,14 +1375,14 @@ impl tir::Stmt {
         }
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {
     }
 }
 
 impl tir::RetGroup {
-    fn run_pass_1_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {}
+    fn run_pass_1_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {}
 
-    fn run_pass_2_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
+    fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
         let ty = tp.get_evaluated_type(self.ty).clone();
         for &expr in &self.exprs {
             if let Err(err) = driver.set_type(tp, expr, ty.clone()) {
@@ -1417,24 +1417,24 @@ impl tir::RetGroup {
 }
 
 impl tir::FunctionDecl {
-    fn run_pass_1_legacy(&self, driver: &Driver, tp: &mut dyn TypeProvider) {
-        tp.set_decl_type_to_explicit_type_if_exists(driver, self.id);
+    fn run_pass_1_legacy(&self, driver: &Driver, ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
+        tp.set_decl_type_to_explicit_type_if_exists(driver, ms, self.id);
     }
 
-    fn run_pass_2_legacy(&self, _driver: &Driver, _tp: &mut dyn TypeProvider) {}
+    fn run_pass_2_legacy(&self, _driver: &Driver, _ms: &DriverMutableState, _tp: &mut dyn TypeProvider) {}
 }
 
 impl Driver {
-    pub fn register_type_variables_for_decl_ref(&self, tp: &mut dyn TypeProvider, expr: ExprId, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
-        let decl = &self.mutable_state.read().unwrap().tir_builder.decls[overload];
+    pub fn register_type_variables_for_decl_ref(&self, ms: &DriverMutableState, tp: &mut dyn TypeProvider, expr: ExprId, decl_ref: DeclRefId, overload: DeclId, ty: Type) -> Type {
+        let decl = &ms.tir_builder.decls[overload];
         if decl.generic_params.is_empty() {
             return ty;
         }
 
         let mut generic_param_substitutions = HashMap::new();
         for generic_param in range_iter(decl.generic_params.clone()) {
-            let type_var = *self.mutable_state.read().unwrap().ast.generic_arg_type_variables.pin()
-                .get_or_insert_with((decl_ref, generic_param), || self.mutable_state.read().unwrap().ast.type_vars.next_idx());
+            let type_var = *ms.ast.generic_arg_type_variables.pin()
+                .get_or_insert_with((decl_ref, generic_param), || ms.ast.type_vars.next_idx());
             generic_param_substitutions.insert(generic_param, Type::TypeVar(type_var));
         }
 
@@ -1445,18 +1445,18 @@ impl Driver {
         ty
     }
 
-    pub fn decl_type(&self, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
-        let explicit_ty = self.mutable_state.read().unwrap().ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
+    pub fn decl_type(&self, ms: &DriverMutableState, id: DeclId, tp: &(impl TypeProvider + ?Sized)) -> Type {
+        let explicit_ty = ms.ast.explicit_tys[id].map(|ty| tp.get_evaluated_type(ty)).unwrap_or(&tp.decl_type(id).ty).clone();
         match &df!(id.ast) {
             ast::Decl::Function { param_tys, .. } | ast::Decl::LegacyIntrinsic { function_like: true, param_tys, .. } =>
                 self.function_decl_type(param_tys, false, explicit_ty, tp),
             ast::Decl::FunctionPrototype { param_list, .. } => self.function_decl_type(&param_list.param_tys, param_list.has_c_variadic_param, explicit_ty, tp),
             &ast::Decl::Intrinsic(intr) => {
-                let param_tys = &self.mutable_state.read().unwrap().ast.intrinsics[intr].param_tys;
+                let param_tys = &ms.ast.intrinsics[intr].param_tys;
                 self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             &ast::Decl::MethodIntrinsic(intr) => {
-                let param_tys = &self.mutable_state.read().unwrap().ast.intrinsics[intr].param_tys[1..];
+                let param_tys = &ms.ast.intrinsics[intr].param_tys[1..];
                 self.function_decl_type(param_tys, false, explicit_ty, tp)
             },
             &ast::Decl::Variant { payload_ty, .. } => if let Some(payload_ty) = payload_ty {
@@ -1477,12 +1477,12 @@ impl Driver {
         Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty })
     }
 
-    fn run_pass_1(&self, unit: &UnitItems, start_level: u32, tp: &mut dyn TypeProvider) {
+    fn run_pass_1(&self, ms: &DriverMutableState, unit: &UnitItems, start_level: u32, tp: &mut dyn TypeProvider) {
         macro_rules! run_pass_1_legacy_flat {
             ($($name:ident$(,)*)+) => {
                 $(
                     for item in &unit.$name {
-                        item.run_pass_1_legacy(self, tp);
+                        item.run_pass_1_legacy(self, ms, tp);
                     }
                 )+
             }
@@ -1521,7 +1521,7 @@ impl Driver {
                 ($($name:ident$(,)*)+) => {
                     $(
                         for item in unit.$name.get_level(level) {
-                            item.run_pass_1_legacy(self, tp);
+                            item.run_pass_1_legacy(self, ms, tp);
                         }
                     )+
                 }
@@ -1537,14 +1537,14 @@ impl Driver {
         run_pass_1_legacy_flat!(stmts);
     }
 
-    fn run_pass_2(&self, unit: &UnitItems, tp: &mut dyn TypeProvider) {
+    fn run_pass_2(&self, ms: &DriverMutableState, unit: &UnitItems, tp: &mut dyn TypeProvider) {
         for level in (0..unit.num_levels()).rev() {
             macro_rules! run_pass_2_legacy {
                 ($($name:ident$(,)*)+) => {
                     $(
                         for item in unit.$name.get_level(level) {
                             self.initialize_global_expressions(tp); // this is a hack to erase the effects of modifying constraints on VOID_EXPR and ERROR_EXPR
-                            item.run_pass_2_legacy(self, tp);
+                            item.run_pass_2_legacy(self, ms, tp);
                         }
                     )+
                 }
@@ -1559,7 +1559,7 @@ impl Driver {
             ($($name:ident$(,)*)+) => {
                 $(
                     for item in &unit.$name {
-                        item.run_pass_2_legacy(self, tp);
+                        item.run_pass_2_legacy(self, ms, tp);
                     }
                 )+
             }
@@ -1586,10 +1586,10 @@ impl Driver {
         tp.resize(&self, new_code);
         for unit in &units.units {
             // Pass 1: propagate info down from leaves to roots
-            self.run_pass_1(&unit.items, 0, tp);
+            self.run_pass_1(&*self.mutable_state.try_read().unwrap(), &unit.items, 0, tp);
 
             // Pass 2: propagate info up from roots to leaves
-            self.run_pass_2(&unit.items, tp);
+            self.run_pass_2(&*self.mutable_state.try_read().unwrap(), &unit.items, tp);
 
             if self.diag.has_errors() {
                 return Err(());
@@ -1614,7 +1614,7 @@ impl Driver {
             // TODO: reduce duplicated code with eval dependencies
             for i in 0..unit.extend_blocks.len() {
                 let block_id = unit.extend_blocks[i];
-                let mut stack = vec![self.mutable_state.read().unwrap().ast.extend_blocks[block_id].extendee];
+                let mut stack = vec![self.mutable_state.try_read().unwrap().ast.extend_blocks[block_id].extendee];
                 while let Some(expr) = stack.pop() {
 
                     let val = self.eval_expr(expr, tp);
@@ -1627,12 +1627,12 @@ impl Driver {
                         }
                 }
 
-                let block = self.mutable_state.read().unwrap().ast.extend_blocks[block_id].clone();
+                let block = self.mutable_state.try_read().unwrap().ast.extend_blocks[block_id].clone();
                 let extendee_ty = tp.get_evaluated_type(block.extendee);
                 let ns = self.find_namespace_for_type(extendee_ty);
                 for method in block.static_methods {
-                    let name = self.mutable_state.read().unwrap().ast.names[method];
-                    self.mutable_state.write().unwrap().ast.new_namespaces[ns].static_decls.push(
+                    let name = self.mutable_state.try_read().unwrap().ast.names[method];
+                    self.mutable_state.try_write().unwrap().ast.new_namespaces[ns].static_decls.push(
                         StaticDecl {
                             name,
                             decl: method,
@@ -1641,7 +1641,7 @@ impl Driver {
                 }
 
                 for method in block.instance_methods {
-                    self.mutable_state.write().unwrap().ast.new_namespaces[ns].instance_decls.push(
+                    self.mutable_state.try_write().unwrap().ast.new_namespaces[ns].instance_decls.push(
                         InstanceDecl {
                             decl: method,
                             field_info: None,
@@ -1649,8 +1649,8 @@ impl Driver {
                     );
 
                     // Add to static decls as well, so we can call it using UFCS style.
-                    let name = self.mutable_state.read().unwrap().ast.names[method];
-                    self.mutable_state.write().unwrap().ast.new_namespaces[ns].static_decls.push(
+                    let name = self.mutable_state.try_read().unwrap().ast.names[method];
+                    self.mutable_state.try_write().unwrap().ast.new_namespaces[ns].static_decls.push(
                         StaticDecl {
                             name,
                             decl: method,
@@ -1662,7 +1662,7 @@ impl Driver {
 
         for unit in &units.mock_units {
             let mut mock_tp = MockTypeProvider::new(tp);
-            self.run_pass_1(&unit.items, 0, &mut mock_tp);
+            self.run_pass_1(&*self.mutable_state.try_read().unwrap(), &unit.items, 0, &mut mock_tp);
             let constraints = self.get_constraints(&mock_tp, unit.main_expr);
             let one_of = constraints
                 .one_of()
@@ -1672,7 +1672,7 @@ impl Driver {
                 .map(|ty| ty.ty.clone())
                 .collect::<Vec<_>>();
             if constraints.is_error() {
-                self.mutable_state.write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                self.mutable_state.try_write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
             } else {
                 // TODO: we currently write to both `tir.expr_namespaces` and `tir.macro_info`, but we will only ever
                 // actually read the value inserted into one or the other. We should specify which one we care about
@@ -1681,9 +1681,9 @@ impl Driver {
                     let mut macro_info = None;
                     let ns = match ty {
                         Type::Mod => {
-                            self.run_pass_2(&unit.items, &mut mock_tp);
+                            self.run_pass_2(&*self.mutable_state.try_read().unwrap(), &unit.items, &mut mock_tp);
                             let Ok(module) = self.eval_expr(unit.main_expr, &mock_tp) else {
-                                self.mutable_state.write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                self.mutable_state.try_write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
                             };
                             match module {
@@ -1692,32 +1692,32 @@ impl Driver {
                             }
                         },
                         Type::Struct(strukt) => {
-                            ExprNamespace::New(self.mutable_state.read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
+                            ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance)
                         },
-                        Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
-                        Type::Internal(id) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
+                        Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
+                        Type::Internal(id) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                         Type::Pointer(ref pointee) => {
                             match &pointee.ty {
-                                Type::Struct(strukt) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
-                                &Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
-                                &Type::Internal(id) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
+                                Type::Struct(strukt) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Enum(EnumType { identity, .. }) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Instance),
+                                &Type::Internal(id) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Instance),
                                 _ => continue,
                             }
                         },
                         Type::Ty => {
-                            self.run_pass_2(&unit.items, &mut mock_tp);
+                            self.run_pass_2(&*self.mutable_state.try_read().unwrap(), &unit.items, &mut mock_tp);
                             let Ok(ty) = self.eval_expr(unit.main_expr, &mock_tp) else {
-                                self.mutable_state.write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
+                                self.mutable_state.try_write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ExprNamespace::Error);
                                 continue;
                             };
 
                             match ty {
                                 Const::Ty(Type::Struct(ref strukt)) => {
                                     macro_info = Some(ExprMacroInfo::Struct(strukt.clone()));
-                                    ExprNamespace::New(self.mutable_state.read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
+                                    ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.structs[strukt.identity].namespace, NewNamespaceRefKind::Static)
                                 },
-                                Const::Ty(Type::Enum(EnumType { identity, .. })) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Static),
-                                Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.mutable_state.read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Enum(EnumType { identity, .. })) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.enums[identity].namespace, NewNamespaceRefKind::Static),
+                                Const::Ty(Type::Internal(id)) => ExprNamespace::New(self.mutable_state.try_read().unwrap().ast.internal_types[id].namespace, NewNamespaceRefKind::Static),
                                 _ => panic!("Unexpected const kind, expected enum!"),
                             }
                         },
@@ -1727,9 +1727,9 @@ impl Driver {
                         Type::Error => ExprNamespace::Error,
                         _ => continue,
                     };
-                    self.mutable_state.write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
+                    self.mutable_state.try_write().unwrap().tir_builder.expr_namespaces.entry(unit.main_expr).or_default().push(ns);
                     if let Some(macro_info) = macro_info {
-                        self.mutable_state.write().unwrap().tir_builder.expr_macro_info.entry(unit.main_expr).or_default().push(macro_info);
+                        self.mutable_state.try_write().unwrap().tir_builder.expr_macro_info.entry(unit.main_expr).or_default().push(macro_info);
                     }
                 }
             }
@@ -1741,8 +1741,8 @@ impl Driver {
 impl Driver {
     fn find_namespace_for_type(&self, ty: &Type) -> NewNamespaceId {
         match *ty {
-            Type::Struct(StructType { identity, .. }) => self.mutable_state.read().unwrap().ast.structs[identity].namespace,
-            Type::Enum(EnumType { identity, .. }) => self.mutable_state.read().unwrap().ast.enums[identity].namespace,
+            Type::Struct(StructType { identity, .. }) => self.mutable_state.try_read().unwrap().ast.structs[identity].namespace,
+            Type::Enum(EnumType { identity, .. }) => self.mutable_state.try_read().unwrap().ast.enums[identity].namespace,
             _ => todo!("find namespace for type {:?}", ty),
         }
     }
