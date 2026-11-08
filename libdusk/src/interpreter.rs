@@ -1305,8 +1305,7 @@ impl Driver {
             .map(|arg| arg.as_mut_ptr())
             .collect();
 
-        let d = self;
-        let extern_mods = d.mir.extern_mods.pin();
+        let extern_mods = self.mir.extern_mods.pin();
         let library = extern_mods.get(&func_ref.extern_mod).unwrap();
         let func = &library.imported_functions[func_ref.index];
         // TODO: cache library and proc addresses (and thunks when possible)
@@ -1370,8 +1369,7 @@ impl Driver {
             let mut stack = stack_cell.borrow_mut();
             let frame = stack.last().unwrap();
             let pc = frame.pc;
-            let d = self;
-            let func = function_by_ref(&d.mir, &frame.func_ref);
+            let func = function_by_ref(&self.mir, &frame.func_ref);
             match pc {
                 ProgramCounter::Instr(next_instr) => match func.instrs[next_instr].kind.clone() {
                     InstrKind::Const(konst) => Value::from_const(&konst.clone(), &self),
@@ -1388,8 +1386,7 @@ impl Driver {
                     },
                     #[cfg(target_os = "macos")]
                     InstrKind::ObjcClassRef { extern_mod, index } => {
-                        let d = self;
-                        let extern_mods = d.mir.extern_mods.pin();
+                        let extern_mods = self.mir.extern_mods.pin();
                         let library = extern_mods.get(&extern_mod).unwrap();
                         let mut interp = INTERP.write().unwrap();
                         let cache = interp.lib_cache.entry(extern_mod).or_insert_with(|| {
@@ -1416,7 +1413,7 @@ impl Driver {
                     InstrKind::GenericParam(id) => {
                         let ty = Type::GenericParam(id);
                         let ty = frame.canonicalize_type(&ty);
-                        Value::from_new_internal(ty, &d)
+                        Value::from_new_internal(ty, self)
                     },
                     InstrKind::Call(ref call) => {
                         drop(stack);
@@ -1548,7 +1545,7 @@ impl Driver {
                     },
                     InstrKind::Pointer { value, is_mut } => {
                         let ty = frame.get_val(value, &self).as_ty().ptr_with_mut(is_mut);
-                        Value::from_new_internal(ty, &d)
+                        Value::from_new_internal(ty, self)
                     },
                     InstrKind::FunctionTy { ref param_tys, has_c_variadic_param, ret_ty } => {
                         let param_tys = param_tys.iter()
@@ -1556,7 +1553,7 @@ impl Driver {
                             .collect();
                         let ret_ty = frame.get_val(ret_ty, &self).as_ty();
                         let ty = Type::Function(FunctionType { param_tys, has_c_variadic_param, return_ty: Box::new(ret_ty) });
-                        Value::from_new_internal(ty, &d)
+                        Value::from_new_internal(ty, self)
                     }
                     InstrKind::Struct { ref fields, id } => {
                         let mut field_tys = Vec::new();
@@ -1607,12 +1604,12 @@ impl Driver {
                     },
                     InstrKind::PayloadAccess { val, variant_index: _ } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enum_val = frame.get_val(val, &self).as_enum(enum_ty, &d);
+                        let enum_val = frame.get_val(val, &self).as_enum(enum_ty, self);
                         enum_val.payload
                     },
                     InstrKind::DiscriminantAccess { val } => {
                         let enum_ty = func.type_of_val(val).as_enum().unwrap();
-                        let enuum = frame.get_val(val, &self).as_enum(enum_ty, &d);
+                        let enuum = frame.get_val(val, &self).as_enum(enum_ty, self);
                         Value::from_u32(enuum.discriminant)
                     },
                     InstrKind::DirectFieldAccess { val, index } => {
@@ -1662,14 +1659,14 @@ impl Driver {
                         },
                         TerminatorKind::Jump(ref target) => {
                             let frame = stack.last_mut().unwrap();
-                            frame.jump_to(&target, &d);
+                            frame.jump_to(&target, self);
                             None
                         },
                         TerminatorKind::CondBr { condition, ref true_target, ref false_target } => {
-                            let condition = frame.get_val(condition, &d).as_bool();
+                            let condition = frame.get_val(condition, self).as_bool();
                             let target = if condition { true_target } else { false_target };
                             let frame = stack.last_mut().unwrap();
-                            frame.jump_to(&target, &d);
+                            frame.jump_to(&target, self);
                             None
                         },
                         TerminatorKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -1691,7 +1688,7 @@ impl Driver {
                             }.unwrap_or(catch_all_target.clone());
 
                             let frame = stack.last_mut().unwrap();
-                            frame.jump_to(&target, &d);
+                            frame.jump_to(&target, self);
                             None
                         },
                         TerminatorKind::Call(ref call) => {
@@ -1711,8 +1708,7 @@ impl Driver {
         let frame = stack.last_mut().unwrap();
         frame.pc = match frame.pc {
             ProgramCounter::Instr(instr) => {
-                let d = self;
-                let func = function_by_ref(&d.mir, &frame.func_ref);
+                let func = function_by_ref(&self.mir, &frame.func_ref);
                 let instr_result = func.instrs[instr].value;
                 let next_pc = if let Some(next_instr) = func.instr_nodes[instr].next {
                     ProgramCounter::Instr(next_instr)
@@ -1731,8 +1727,7 @@ impl Driver {
     fn execute_call(&self, call: &CallKind, pc: ProgramCounter, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Value> {
         let stack = stack_cell.borrow();
         let frame = stack.last().unwrap();
-        let d = self;
-        let func = function_by_ref(&d.mir, &frame.func_ref);
+        let func = function_by_ref(&self.mir, &frame.func_ref);
         let val = match *call {
             CallKind::Call { ref arguments, ref generic_arguments, func } => {
                 let mut copied_args = Vec::new();
@@ -1760,8 +1755,8 @@ impl Driver {
                 self.extern_call(callee, copied_args, arg_tys)
             },
             CallKind::Intrinsic { ref arguments, intr } => {
-                let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, &d)).collect();
-                let intr = d.mutable_state.try_read().unwrap().ast.intrinsics[intr].clone();
+                let arguments: Vec<&Value> = arguments.iter().map(|&arg| frame.get_val(arg, self)).collect();
+                let intr = self.mutable_state.try_read().unwrap().ast.intrinsics[intr].clone();
 
                 intr.kind.call(self, arguments)
             },
@@ -1958,8 +1953,8 @@ impl Driver {
                         let ProgramCounter::Instr(instr) = pc else {
                             panic!("internal compiler error: import instruction in terminator position?");
                         };
-                        let (file, _) = d.lookup_file(instr).unwrap();
-                        let base_path = d.src_map.files[file].location.as_path();
+                        let (file, _) = self.lookup_file(instr).unwrap();
+                        let base_path = self.src_map.files[file].location.as_path();
                         let path = base_path
                             .map(|base| base.parent().unwrap().join(path))
                             .unwrap_or_else(|| path.into());

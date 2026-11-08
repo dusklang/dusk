@@ -785,25 +785,23 @@ impl Driver {
 
 impl Driver {
     fn get_decl(&self, id: DeclId, tp: &dyn TypeProvider) -> Decl {
-        let d = self;
-        if let Some(decl) = d.mir.decls.pin().get(&id) { return decl.clone(); }
-        match df!(d, id.ast) {
+        if let Some(decl) = self.mir.decls.pin().get(&id) { return decl.clone(); }
+        match df!(id.ast) {
             ast::Decl::Function { ref params, scope, ref generic_params, .. } => {
                 // Add placeholder function to reserve ID ahead of time
                 let params = params.clone();
                 let generic_params = generic_params.clone();
-                let get = d.mir.functions.push(OnceLock::new());
+                let get = self.mir.functions.push(OnceLock::new());
                 let decl = Decl::Function { get };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
 
-                let func_ty = d.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp).as_function().unwrap().clone();
-                let name = d.mutable_state.try_read().unwrap().ast.names[id];
+                let func_ty = self.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp).as_function().unwrap().clone();
+                let name = self.mutable_state.try_read().unwrap().ast.names[id];
                 let mut is_comptime = false;
                 let mut compiler_test_cases = Vec::new();
-                if let Some(attrs) = d.mutable_state.try_read().unwrap().ast.decl_attributes.get(&id).cloned() {
+                if let Some(attrs) = self.mutable_state.try_read().unwrap().ast.decl_attributes.get(&id).cloned() {
                     for attr in attrs {
-                        let d = self;
-                        match d.mutable_state.try_read().unwrap().ast.attrs[attr] {
+                        match self.mutable_state.try_read().unwrap().ast.attrs[attr] {
                             Attribute::Comptime => is_comptime = true,
                             Attribute::CompilerTest { condition, ref arguments, .. } => {
                                 let arguments = arguments.clone();
@@ -843,89 +841,86 @@ impl Driver {
             },
             ast::Decl::FunctionPrototype { extern_func, .. } => {
                 let decl = if let Some(extern_func) = extern_func {
-                    d.resolve_extern_mod(extern_func.extern_mod, tp);
+                    self.resolve_extern_mod(extern_func.extern_mod, tp);
                     Decl::ExternFunction(extern_func)
                 } else {
                     let err = Error::new("cannot declare prototype outside of extern module")
                         .adding_primary_range(id, "prototype here");
-                    d.diag.push(err);
+                    self.diag.push(err);
                     Decl::Invalid
                 };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::ObjcClassRef { extern_mod, index } => {
-                d.resolve_extern_mod(extern_mod, tp);
+                self.resolve_extern_mod(extern_mod, tp);
                 let decl = Decl::ObjcClassRef { extern_mod, index };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Stored { id: index, .. } | ast::Decl::LoopBinding { id: index, .. } => {
                 let decl = Decl::Stored(index);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Parameter { index } => {
                 let decl = Decl::Parameter { index };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::PatternBinding { context, scrutinee, root_scrutinee, .. } => {
                 let decl = Decl::PatternBinding { context, scrutinee, root_scrutinee };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::LegacyIntrinsic { intr, function_like, .. } => {
-                let mut ty = d.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp);
+                let mut ty = self.decl_type(&*self.mutable_state.try_read().unwrap(), id, tp);
                 if function_like {
                     ty = ty.return_ty().unwrap().clone();
                 }
                 let decl = Decl::LegacyIntrinsic(intr, ty);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Intrinsic(intr) => {
                 let decl = Decl::Intrinsic(intr);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::MethodIntrinsic(intr) => {
                 let decl = Decl::MethodIntrinsic(intr);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Static(expr) => {
-                let name = d.display_item(None, id).to_string();
+                let name = self.display_item(None, id).to_string();
                 let konst = self.eval_expr(expr, tp);
-                let d = self;
-                let statik = d.mir.statics.push(
+                let statik = self.mir.statics.push(
                     Static {
                         name,
                         val: konst.into(),
                     }
                 );
                 let decl = Decl::Static(statik);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Const { assigned_expr: root_expr, .. } => {
                 let konst = self.eval_expr(root_expr, tp);
 
-                let d = self;
-
                 // TODO: Deal with cycles!
                 let decl = Decl::Const(konst.into());
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Field { index, .. } => {
                 let decl = Decl::Field { index };
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::InternalField(field) => {
                 let decl = Decl::InternalField(field);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::Variant { enuum, index, payload_ty } => {
@@ -934,7 +929,7 @@ impl Driver {
             },
             ast::Decl::GenericParam(param) => {
                 let decl = Decl::GenericParam(param);
-                d.mir.decls.pin().insert(id, decl.clone());
+                self.mir.decls.pin().insert(id, decl.clone());
                 decl
             },
             ast::Decl::ReturnValue => panic!("Can't get_decl() the return_value decl"),
@@ -2166,8 +2161,7 @@ impl Driver {
                 self.build_expr(b, expr, Context::new(0, DataDest::Void, ControlDest::Continue), tp);
             },
             ScopedItem::Decl(decl) => {
-                let d = self;
-                let ms = d.mutable_state.try_read().unwrap();
+                let ms = self.mutable_state.try_read().unwrap();
                 match df!(@ms, decl.ast) {
                     ast::Decl::Stored { id, root_expr, .. } => {
                         drop(ms);
@@ -2209,8 +2203,7 @@ impl Driver {
 
 impl Driver {
     fn get_callee_declref(&self, b: &mut FunctionBuilder, tp: &dyn TypeProvider, callee_id: ExprId) -> DeclRef {
-        let d = self;
-        let ms = d.mutable_state.try_read().unwrap();
+        let ms = self.mutable_state.try_read().unwrap();
         let callee = ef!(@ms, &callee_id.ast);
         if let &Expr::DeclRef { id, .. } = callee {
             drop(ms);
@@ -2625,8 +2618,7 @@ impl Driver {
             let terminal_expr = self.mutable_state.try_read().unwrap().ast.imper_scopes[cur].terminal_expr;
             // If the current scope consists of a lone if expression
             if self.mutable_state.try_read().unwrap().ast.imper_scopes[cur].items.is_empty() {
-                let d = self;
-                let ms = d.mutable_state.try_read().unwrap();
+                let ms = self.mutable_state.try_read().unwrap();
                 if let &Expr::If { condition, then_scope, else_scope } = ef!(@ms, &terminal_expr.ast) {
                     drop(ms);
                     let true_block = b.func.create_block();
@@ -2665,8 +2657,7 @@ impl Driver {
         let ty = self.get_canonical_type(tp, expr);
 
         let expr_val = {
-            let d = self;
-            ef!(d, expr.ast).clone()
+            ef!(expr.ast).clone()
         };
 
         let val = match expr_val {
@@ -2723,17 +2714,15 @@ impl Driver {
 
                 match decl_ref {
                     DeclRef::Function { func, generic_args } => {
-                        let d = self;
-                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.ast) else {
+                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(callee.ast) else {
                             panic!("expected declref callee");
                         };
                         let mut arguments = get_args(self, b, tp, &arguments);
-                        let d = self;
                         // Handle method calls.
                         // TODO: comparing the number of arguments to the number of parameters to determine whether this is a method call is kind of a horrible hack
                         // TODO: unify code here with the near-identical `DeclRef::MethodIntrinsic` case
-                        if arguments.len() != d.mir.function_sigs.pin().get(&func).unwrap().ty.param_tys.len() {
-                            let base = d.get_base(decl_ref_id);
+                        if arguments.len() != self.mir.function_sigs.pin().get(&func).unwrap().ty.param_tys.len() {
+                            let base = self.get_base(decl_ref_id);
                             let base_ty = tp.ty(base);
                             let self_ty = self.mir.function_sigs.pin().get(&func).unwrap().ty.param_tys.first().unwrap().clone();
                             let indirection = !base_ty.trivially_convertible_to(&self_ty) as i8;
@@ -2896,8 +2885,7 @@ impl Driver {
                         self.push_call(b, CallKind::Intrinsic { arguments, intr }, expr).direct()
                     },
                     DeclRef::MethodIntrinsic(intr) => {
-                        let d = self;
-                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(d, callee.ast) else {
+                        let Expr::DeclRef { id: decl_ref_id, .. } = ef!(callee.ast) else {
                             panic!("expected declref callee");
                         };
                         let base = self.get_base(decl_ref_id);
@@ -3122,8 +3110,7 @@ impl Driver {
                 }
             },
             Expr::For { loop_id, binding, lower_bound, upper_bound, scope } => {
-                let d = self;
-                let ast::Decl::LoopBinding { id: binding_stored_decl_id, .. } = df!(d, binding.ast) else {
+                let ast::Decl::LoopBinding { id: binding_stored_decl_id, .. } = df!(binding.ast) else {
                     panic!("incorrect type of decl found in decl binding id");
                 };
                 let binding_ty = tp.ty(lower_bound).clone();

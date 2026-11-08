@@ -1602,8 +1602,7 @@ impl Driver {
                     let val = self.eval_expr(expr, tp);
                     tp.insert_eval_result(expr, val.into());
 
-                    let d = self;
-                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(d, expr.ast)
+                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(expr.ast)
                         && let Some(generic_args) = explicit_generic_args {
                             stack.extend_from_slice(generic_args);
                         }
@@ -1620,8 +1619,7 @@ impl Driver {
                     let val = self.eval_expr(expr, tp);
                     tp.insert_eval_result(expr, val.into());
 
-                    let d = self;
-                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(d, expr.ast)
+                    if let ast::Expr::DeclRef { explicit_generic_args, .. } = &ef!(expr.ast)
                         && let Some(generic_args) = explicit_generic_args {
                             stack.extend_from_slice(generic_args);
                         }
