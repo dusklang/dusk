@@ -2,7 +2,8 @@ use std::mem;
 
 use crate::index_vec::*;
 
-use crate::mir::{Block, BlockId, Function, InstrId, InstrKind, InstrNode, TerminatorKind};
+use crate::linked_list::{LinkedList, LinkedListStorage};
+use crate::mir::{Block, BlockId, Function, InstrId, InstrKind, InstrNodeData, TerminatorKind};
 
 // This pattern is heavily inspired by Cranelift
 #[derive(Copy, Clone)]
@@ -33,7 +34,8 @@ pub trait Cursor<'func> {
     fn first_block(&self) -> BlockId;
     fn last_block(&self) -> BlockId;
     fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a;
-    fn instr_nodes<'a>(&'a self) -> &'a IndexVec<InstrId, InstrNode> where 'func: 'a;
+    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a;
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a;
 
     fn reset_position(&mut self) {
         self.set_position(CursorPosition::None);
@@ -45,7 +47,7 @@ pub trait Cursor<'func> {
 
     fn goto_bottom(&mut self, block: BlockId) {
         self.set_position(
-            if let Some(last_instr) = self.blocks()[block].last_instr {
+            if let Some(last_instr) = self.blocks()[block].instrs.last() {
                 CursorPosition::At(last_instr)
             } else {
                 CursorPosition::After(block)
@@ -69,7 +71,7 @@ pub trait Cursor<'func> {
                 Some(next_block)
             }
             CursorPosition::Before(block) | CursorPosition::After(block) => {
-                let next_block = self.blocks()[block].next;
+                let next_block = self.block_nodes()[block].next();
                 self.set_position(if let Some(next_block) = next_block {
                     CursorPosition::Before(next_block)
                 } else {
@@ -101,14 +103,14 @@ pub trait Cursor<'func> {
 
     fn next_instr(&mut self) -> Option<InstrId> {
         match self.position() {
-            CursorPosition::At(instr) => if let Some(next_instr) = self.instr_nodes()[instr].next {
+            CursorPosition::At(instr) => if let Some(next_instr) = self.instr_nodes()[instr].next() {
                 self.set_position(CursorPosition::At(next_instr));
                 Some(next_instr)
             } else {
                 self.set_position(CursorPosition::After(self.instr_nodes()[instr].block.unwrap()));
                 None
             },
-            CursorPosition::Before(block) => if let Some(first_instr) = self.blocks()[block].first_instr {
+            CursorPosition::Before(block) => if let Some(first_instr) = self.blocks()[block].instrs.first() {
                 self.set_position(CursorPosition::At(first_instr));
                 Some(first_instr)
             } else {
@@ -121,12 +123,12 @@ pub trait Cursor<'func> {
 
     fn peek_next_instr(&self) -> Option<InstrId> {
         match self.position() {
-            CursorPosition::At(instr) => if let Some(next_instr) = self.instr_nodes()[instr].next {
+            CursorPosition::At(instr) => if let Some(next_instr) = self.instr_nodes()[instr].next() {
                 Some(next_instr)
             } else {
                 None
             },
-            CursorPosition::Before(block) => if let Some(first_instr) = self.blocks()[block].first_instr {
+            CursorPosition::Before(block) => if let Some(first_instr) = self.blocks()[block].instrs.first() {
                 Some(first_instr)
             } else {
                 None
@@ -176,15 +178,18 @@ impl<'func> Cursor<'func> for FuncCursor<'func> {
         self.func.entry_block
     }
     fn first_block(&self) -> BlockId {
-        self.func.first_block
+        self.func.block_nodes.first().unwrap()
     }
     fn last_block(&self) -> BlockId {
-        self.func.last_block
+        self.func.block_nodes.last().unwrap()
     }
     fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
         &self.func.blocks
     }
-    fn instr_nodes<'a>(&'a self) -> &'a IndexVec<InstrId, InstrNode> where 'func: 'a {
+    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a {
+        &self.func.block_nodes
+    }
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
         &self.func.instr_nodes
     }
 }
@@ -206,15 +211,18 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
         self.func.entry_block
     }
     fn first_block(&self) -> BlockId {
-        self.func.first_block
+        self.func.block_nodes.first().unwrap()
     }
     fn last_block(&self) -> BlockId {
-        self.func.last_block
+        self.func.block_nodes.last().unwrap()
     }
     fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
         &self.func.blocks
     }
-    fn instr_nodes<'a>(&'a self) -> &'a IndexVec<InstrId, InstrNode> where 'func: 'a {
+    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a {
+        &self.func.block_nodes
+    }
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
         &self.func.instr_nodes
     }
 }

@@ -450,7 +450,7 @@ impl StackFrame {
         for (arg, &param) in arguments.into_iter().zip(&block.params) {
             self.results.insert(param, arg);
         }
-        self.pc = block.first_instr.map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(target.block));
+        self.pc = block.instrs.first().map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(target.block));
     }
 
     fn canonicalize_type(&self, ty: &Type) -> Type {
@@ -778,7 +778,7 @@ impl Driver {
             );
         }
         let entry_block = &func.blocks[entry_block_id];
-        let pc = entry_block.first_instr.map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(entry_block_id));
+        let pc = entry_block.instrs.first().map(ProgramCounter::Instr).unwrap_or(ProgramCounter::Terminator(entry_block_id));
         for (arg, &param) in arguments.into_iter().zip(&entry_block.params) {
             results.insert(param, arg);
         }
@@ -1710,7 +1710,7 @@ impl Driver {
             ProgramCounter::Instr(instr) => {
                 let func = function_by_ref(&self.mir, &frame.func_ref);
                 let instr_result = func.instrs[instr].value;
-                let next_pc = if let Some(next_instr) = func.instr_nodes[instr].next {
+                let next_pc = if let Some(next_instr) = func.instr_nodes[instr].next() {
                     ProgramCounter::Instr(next_instr)
                 } else {
                     let block = func.instr_nodes[instr].block.unwrap();

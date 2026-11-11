@@ -12,6 +12,7 @@ use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::IndexVec;
 use crate::display_adapter;
 
+use crate::linked_list::{LinkedList, LinkedListHead, LinkedListNode, LinkedListStorage};
 use crate::mir::cursor::{Cursor, CursorMut};
 use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScrutineeValueId, TypedSwitchScrutineeValue, TypedSwitchScrutineeValueKind};
 use crate::source_info::SourceRange;
@@ -63,19 +64,18 @@ impl Instr {
 #[derive(Default, Debug, Clone)]
 pub struct Block {
     pub params: Vec<ValueId>,
-    pub first_instr: Option<InstrId>,
-    pub last_instr: Option<InstrId>,
+    pub instrs: LinkedListHead<InstrId>,
     pub terminator: Option<TerminatorKind>,
-    pub prev: Option<BlockId>,
-    pub next: Option<BlockId>,
 }
 
+pub type BlockNode = LinkedListNode<BlockId, ()>;
+
 #[derive(Debug, Clone)]
-pub struct InstrNode {
+pub struct InstrNodeData {
     pub block: Option<BlockId>,
-    pub prev: Option<InstrId>,
-    pub next: Option<InstrId>,
 }
+
+pub type InstrNode = LinkedListNode<InstrId, InstrNodeData>;
 
 #[derive(Clone, Debug, PartialEq, InstrOperands)]
 pub struct JumpTarget {
@@ -221,11 +221,10 @@ pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
     pub blocks: IndexVec<BlockId, Block>,
-    pub first_block: BlockId,
-    pub last_block: BlockId,
+    pub block_nodes: LinkedList<BlockId>,
     pub entry_block: BlockId,
     pub instrs: IndexVec<InstrId, Instr>,
-    pub instr_nodes: IndexVec<InstrId, InstrNode>,
+    pub instr_nodes: LinkedListStorage<InstrId, InstrNodeData>,
     pub values: IndexVec<ValueId, Value>,
     pub source_ranges: HashMap<InstrId, SourceRange>,
     pub value_names: HashMap<ValueId, String>,
@@ -254,8 +253,7 @@ impl Default for Function {
             name: Default::default(),
             ty: Default::default(),
             blocks: Default::default(),
-            first_block: BlockId::new(0),
-            last_block: BlockId::new(0),
+            block_nodes: Default::default(),
             entry_block: BlockId::new(0),
             instrs: Default::default(),
             instr_nodes: Default::default(),
@@ -1425,7 +1423,8 @@ impl Driver {
         values.push_at(NEVER_VALUE, Value::new(Type::Never, ValueKind::Never));
         let mut value_names = HashMap::new();
         let mut blocks = IndexVec::new();
-        let entry_block = blocks.next_idx();
+        let mut block_nodes = LinkedList::new();
+        let entry_block = block_nodes.push_back(());
         for (param_index, param) in range_iter(params.clone()).enumerate() {
             assert!(matches!(df!(param.ast), ast::Decl::Parameter { .. }));
             let ty = self.decl_type(&*self.mutable_state.try_read().unwrap(), param, tp);
@@ -1441,8 +1440,7 @@ impl Driver {
             name,
             ty: func_ty,
             blocks,
-            first_block: entry_block,
-            last_block: entry_block,
+            block_nodes,
             entry_block,
             instrs: Default::default(),
             instr_nodes: Default::default(),
@@ -1560,7 +1558,7 @@ impl Driver {
                             // If the address of the alloca is used as the *location* in the store, then it doesn't count
                             // as a use, and we can potentially delete both it and the alloca later.
                             if let InstrKind::Store { location, .. } = cursor.func.instrs[other_instr_id].kind
-                                && location != instr_value {
+                                && location == instr_value {
                                 potential_deletions.push(other_instr_id);
                             } else {
                                 is_used = true;
@@ -1581,7 +1579,6 @@ impl Driver {
                     }
                 }
             }
-
         }
 
         did_something
@@ -1670,7 +1667,7 @@ impl Driver {
         let mut did_something = false;
         let mut cursor = func.make_cursor();
         let mut process_block = |block_id: BlockId, block: &Block| {
-            let only_terminator_in_block = block.first_instr.is_none() && block.last_instr.is_none() && block.terminator.is_some();
+            let only_terminator_in_block = block.instrs.is_empty() && block.terminator.is_some();
             if !only_terminator_in_block { return; }
 
             cursor.goto_top(block_id);
@@ -2317,16 +2314,8 @@ impl Driver {
 
 impl Function {
     fn create_block(&mut self) -> BlockId {
-        let prev = self.last_block;
-
-        let block = Block {
-            prev: Some(prev),
-            ..Default::default()
-        };
-        let block_id = self.blocks.push(block);
-        assert_eq!(self.blocks[prev].next, None);
-        self.blocks[prev].next = Some(block_id);
-        self.last_block = block_id;
+        let block_id = self.block_nodes.push_back(());
+        self.blocks.push_at(block_id, Default::default());
         block_id
     }
 
@@ -2360,15 +2349,8 @@ impl Function {
         let instr = Instr::new(instr, value);
         self.instrs.push_at(id, instr);
         let block = &mut self.blocks[block_id];
-        let prev = block.last_instr;
-        self.instr_nodes.push_at(id, InstrNode { block: Some(block_id), prev, next: None });
-        block.last_instr = Some(id);
-        if block.first_instr.is_none() {
-            block.first_instr = Some(id);
-        }
-        if let Some(prev) = prev {
-            self.instr_nodes[prev].next = Some(id);
-        }
+        let other_id = self.instr_nodes.push_back(&mut block.instrs, InstrNodeData { block: Some(block_id) });
+        assert_eq!(other_id, id);
         self.source_ranges.insert(id, source_range);
     }
 
@@ -2378,81 +2360,35 @@ impl Function {
     }
 
     fn prev_block(&self, block_id: BlockId) -> Option<BlockId> {
-        self.blocks[block_id].prev
+        self.block_nodes[block_id].prev()
     }
 
     #[allow(unused)]
     fn next_block(&self, block_id: BlockId) -> Option<BlockId> {
-        self.blocks[block_id].next
+        self.block_nodes[block_id].next()
     }
 
     fn prev_instr(&self, instr_id: InstrId) -> Option<InstrId> {
-        self.instr_nodes[instr_id].prev
+        self.instr_nodes[instr_id].prev()
     }
 
     #[allow(unused)]
     fn next_instr(&self, instr_id: InstrId) -> Option<InstrId> {
-        self.instr_nodes[instr_id].next
+        self.instr_nodes[instr_id].next()
     }
 
     fn remove_block(&mut self, block_id: BlockId) {
-        assert!(block_id != self.first_block || block_id != self.last_block, "cannot remove only block in function");
         assert!(block_id != self.entry_block, "cannot remove entry block");
-
-        let block = &mut self.blocks[block_id];
-        let prev = block.prev;
-        let next = block.next;
-        block.prev = None;
-        block.next = None;
-        if let Some(prev) = prev {
-            if self.last_block == block_id {
-                self.last_block = prev;
-            }
-            let prev = &mut self.blocks[prev];
-            debug_assert_eq!(prev.next, Some(block_id));
-            prev.next = next;
-        }
-        if let Some(next) = next {
-            if self.first_block == block_id {
-                self.first_block = next;
-            }
-            let next = &mut self.blocks[next];
-            debug_assert_eq!(next.prev, Some(block_id));
-            next.prev = prev;
-        }
+        self.block_nodes.remove(block_id);
+        debug_assert!(!self.block_nodes.is_empty(), "cannot remove only block in function");
     }
 
     fn remove_instr(&mut self, instr_id: InstrId) {
         let instr = &mut self.instr_nodes[instr_id];
         let block_id = instr.block.expect("instruction not part of a block");
-        let block = &mut self.blocks[block_id];
-
-        let first_instr = block.first_instr.expect("instruction is part of block with no first instruction");
-        let last_instr = block.last_instr.expect("instruction is part of block with no last instruction");
-
-        let prev = instr.prev;
-        let next = instr.next;
-
-        if last_instr == instr_id {
-            block.last_instr = prev;
-        }
-        if first_instr == instr_id {
-            block.first_instr = next;
-        }
-
-        instr.prev = None;
-        instr.next = None;
         instr.block = None;
-        if let Some(prev) = prev {
-            let prev_node = &mut self.instr_nodes[prev];
-            debug_assert_eq!(prev_node.next, Some(instr_id));
-            prev_node.next = next;
-        }
-        if let Some(next) = next {
-            let next_node = &mut self.instr_nodes[next];
-            debug_assert_eq!(next_node.prev, Some(instr_id));
-            next_node.prev = prev;
-        }
+        let block = &mut self.blocks[block_id];
+        self.instr_nodes.remove(&mut block.instrs, instr_id);
     }
 
     fn replace_uses(&mut self, uses: &ValueUses, old: ValueId, new: ValueId) {

@@ -36,5 +36,6 @@ mod builtins;
 mod autopop;
 mod tbd_parser;
 mod zip;
+mod linked_list;
 
 use display_adapter::display_adapter;
