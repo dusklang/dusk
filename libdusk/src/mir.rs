@@ -1276,7 +1276,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_param_list(&self, func: &Function, block: BlockId, f: &mut Formatter) {
+    pub fn display_mir_param_list(&self, func: &Function, block: BlockId, f: &mut Formatter) {
         let mut first = true;
         for &param in &func.blocks[block].params {
             if first {
@@ -1295,7 +1295,7 @@ impl Driver {
         let block = &func.blocks[id];
         write!(f, "%block{}", id.index())?;
         if id != func.entry_block && !block.params.is_empty() {
-            write!(f, "({})", self.display_param_list(func, id))?;
+            write!(f, "({})", self.display_mir_param_list(func, id))?;
         }
         writeln!(f, ":")?;
 
@@ -1330,7 +1330,7 @@ impl Driver {
             }
             write!(f, "|>")?;
         }
-        writeln!(f, "({}): {:?} {{", self.display_param_list(func, func.entry_block), func.ty.return_ty.as_ref())?;
+        writeln!(f, "({}): {:?} {{", self.display_mir_param_list(func, func.entry_block), func.ty.return_ty.as_ref())?;
         write!(f, "{}", self.display_mir_block(func, func.entry_block))?;
         for block_id in func.make_cursor().block_ids_iter() {
             if block_id != func.entry_block {

@@ -6,6 +6,7 @@ pub mod index_vec;
 pub mod internal_types;
 pub mod source_info;
 pub mod mir;
+pub mod lir;
 pub mod driver;
 pub mod interpreter;
 pub mod error;
