@@ -1,7 +1,5 @@
 use std::mem;
 
-use crate::index_vec::*;
-
 use crate::linked_list::{LinkedList, LinkedListStorage};
 use crate::mir::{Block, BlockId, Function, InstrId, InstrKind, InstrNodeData, TerminatorKind};
 
@@ -33,8 +31,7 @@ pub trait Cursor<'func> {
     fn entry_block(&self) -> BlockId;
     fn first_block(&self) -> BlockId;
     fn last_block(&self) -> BlockId;
-    fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a;
-    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a;
+    fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a;
     fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a;
 
     fn reset_position(&mut self) {
@@ -71,7 +68,7 @@ pub trait Cursor<'func> {
                 Some(next_block)
             }
             CursorPosition::Before(block) | CursorPosition::After(block) => {
-                let next_block = self.block_nodes()[block].next();
+                let next_block = self.blocks()[block].next();
                 self.set_position(if let Some(next_block) = next_block {
                     CursorPosition::Before(next_block)
                 } else {
@@ -178,16 +175,13 @@ impl<'func> Cursor<'func> for FuncCursor<'func> {
         self.func.entry_block
     }
     fn first_block(&self) -> BlockId {
-        self.func.block_nodes.first().unwrap()
+        self.func.blocks.first().unwrap()
     }
     fn last_block(&self) -> BlockId {
-        self.func.block_nodes.last().unwrap()
+        self.func.blocks.last().unwrap()
     }
-    fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
+    fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a {
         &self.func.blocks
-    }
-    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a {
-        &self.func.block_nodes
     }
     fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
         &self.func.instr_nodes
@@ -211,16 +205,13 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
         self.func.entry_block
     }
     fn first_block(&self) -> BlockId {
-        self.func.block_nodes.first().unwrap()
+        self.func.blocks.first().unwrap()
     }
     fn last_block(&self) -> BlockId {
-        self.func.block_nodes.last().unwrap()
+        self.func.blocks.last().unwrap()
     }
-    fn blocks<'a>(&'a self) -> &'a IndexVec<BlockId, Block> where 'func: 'a {
+    fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a {
         &self.func.blocks
-    }
-    fn block_nodes<'a>(&'a self) -> &'a LinkedList<BlockId> where 'func: 'a {
-        &self.func.block_nodes
     }
     fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
         &self.func.instr_nodes

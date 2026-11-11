@@ -68,8 +68,6 @@ pub struct Block {
     pub terminator: Option<TerminatorKind>,
 }
 
-pub type BlockNode = LinkedListNode<BlockId, ()>;
-
 #[derive(Debug, Clone)]
 pub struct InstrNodeData {
     pub block: Option<BlockId>,
@@ -220,8 +218,7 @@ pub struct CompilerTestCase {
 pub struct Function {
     pub name: Option<Sym>,
     pub ty: FunctionType,
-    pub blocks: IndexVec<BlockId, Block>,
-    pub block_nodes: LinkedList<BlockId>,
+    pub blocks: LinkedList<BlockId, Block>,
     pub entry_block: BlockId,
     pub instrs: IndexVec<InstrId, Instr>,
     pub instr_nodes: LinkedListStorage<InstrId, InstrNodeData>,
@@ -253,7 +250,6 @@ impl Default for Function {
             name: Default::default(),
             ty: Default::default(),
             blocks: Default::default(),
-            block_nodes: Default::default(),
             entry_block: BlockId::new(0),
             instrs: Default::default(),
             instr_nodes: Default::default(),
@@ -1416,15 +1412,14 @@ impl Driver {
     fn build_function(&self, name: Option<Sym>, func_ty: FunctionType, body: FunctionBody, params: Range<DeclId>, generic_params: Range<GenericParamId>, is_comptime: bool, tp: &dyn TypeProvider) -> Function {
         debug_assert_ne!(func_ty.return_ty.as_ref(), &Type::Error, "can't build MIR function with Error return type");
 
-        let mut entry = Block::default();
         let mut value_namespace = ValueNamespace::default();
         let mut values = IndexVec::new();
         values.push_at(VOID_VALUE, Value::new(Type::Void, ValueKind::Void));
         values.push_at(NEVER_VALUE, Value::new(Type::Never, ValueKind::Never));
         let mut value_names = HashMap::new();
-        let mut blocks = IndexVec::new();
-        let mut block_nodes = LinkedList::new();
-        let entry_block = block_nodes.push_back(());
+        let mut blocks: LinkedList<BlockId, Block> = LinkedList::new();
+        let entry_block = blocks.push_back(Default::default());
+        let entry = &mut blocks[entry_block];
         for (param_index, param) in range_iter(params.clone()).enumerate() {
             assert!(matches!(df!(param.ast), ast::Decl::Parameter { .. }));
             let ty = self.decl_type(&*self.mutable_state.try_read().unwrap(), param, tp);
@@ -1435,12 +1430,10 @@ impl Driver {
             value_names.insert(param_value, name);
             entry.params.push(param_value);
         }
-        blocks.push_at(entry_block, entry);
         let core = Function {
             name,
             ty: func_ty,
             blocks,
-            block_nodes,
             entry_block,
             instrs: Default::default(),
             instr_nodes: Default::default(),
@@ -2314,9 +2307,7 @@ impl Driver {
 
 impl Function {
     fn create_block(&mut self) -> BlockId {
-        let block_id = self.block_nodes.push_back(());
-        self.blocks.push_at(block_id, Default::default());
-        block_id
+        self.blocks.push_back(Default::default())
     }
 
     pub fn parameter_tys(&self) -> impl Iterator<Item=&Type> {
@@ -2360,12 +2351,12 @@ impl Function {
     }
 
     fn prev_block(&self, block_id: BlockId) -> Option<BlockId> {
-        self.block_nodes[block_id].prev()
+        self.blocks[block_id].prev()
     }
 
     #[allow(unused)]
     fn next_block(&self, block_id: BlockId) -> Option<BlockId> {
-        self.block_nodes[block_id].next()
+        self.blocks[block_id].next()
     }
 
     fn prev_instr(&self, instr_id: InstrId) -> Option<InstrId> {
@@ -2379,8 +2370,8 @@ impl Function {
 
     fn remove_block(&mut self, block_id: BlockId) {
         assert!(block_id != self.entry_block, "cannot remove entry block");
-        self.block_nodes.remove(block_id);
-        debug_assert!(!self.block_nodes.is_empty(), "cannot remove only block in function");
+        self.blocks.remove(block_id);
+        debug_assert!(!self.blocks.is_empty(), "cannot remove only block in function");
     }
 
     fn remove_instr(&mut self, instr_id: InstrId) {
