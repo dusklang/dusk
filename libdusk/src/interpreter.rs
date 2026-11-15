@@ -5,7 +5,6 @@ use std::ffi::{CStr, CString, c_void, OsString};
 use std::mem;
 use std::slice;
 use std::fmt::{Write, Debug};
-use std::cell::RefCell;
 use std::sync::{RwLock, LazyLock};
 use std::borrow::Cow;
 #[cfg(windows)]
@@ -656,7 +655,8 @@ extern "C" fn interp_ffi_entry_point(func: u32, params: *const *const (), return
         arguments.push(val);
     }
 
-    let Ok(return_value) = driver.call_direct(FunctionRef::Id(func_id), arguments, Vec::new()) else {
+    let mut stack = Vec::new();
+    let Ok(return_value) = driver.call_direct(FunctionRef::Id(func_id), arguments, Vec::new(), &mut stack) else {
         // TODO: catch and handle this in a more reasonable way. This is tricky for a few reasons. For one, DLS and the
         // compiler want different things. DLS would want to gracefully send the error over to the client, while the
         // compiler would want to print it out. This implies adding some sort of callback or trait object which enables
@@ -825,24 +825,21 @@ impl Driver {
         };
         result
     }
-    pub fn call_direct(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>) -> Result<Value> {
+    pub fn call_direct(&self, func_ref: FunctionRef, arguments: Vec<Value>, generic_arguments: Vec<Type>, stack: &mut Vec<StackFrame>) -> Result<Value> {
         let frame = self.new_stack_frame(func_ref, arguments, generic_arguments);
-        INTERP_STACK.with(|stack| {
-            stack.borrow_mut().push(frame);
-            loop {
-                // TODO: I don't love the fact that I repeatedly borrow the RefCell here...
-                match self.execute_next(stack) {
-                    Ok(val) => if let Some(val) = val {
-                        stack.borrow_mut().pop().unwrap();
-                        return Ok(val);
-                    },
-                    Err(err) => {
-                        stack.borrow_mut().pop().unwrap();
-                        return Err(err)
-                    },
-                }
+        stack.push(frame);
+        loop {
+            match self.execute_next(stack) {
+                Ok(val) => if let Some(val) = val {
+                    stack.pop().unwrap();
+                    return Ok(val);
+                },
+                Err(err) => {
+                    stack.pop().unwrap();
+                    return Err(err)
+                },
             }
-        })
+        }
     }
     pub fn compiler_test_call(&self, test_case: &CompilerTestCase) -> bool {
         let response = dvm::send_message(
@@ -855,11 +852,11 @@ impl Driver {
         };
         passed
     }
-    pub fn compiler_test_call_direct(&self, test_case: &CompilerTestCase) -> bool {
+    pub fn compiler_test_call_direct(&self, test_case: &CompilerTestCase, stack: &mut Vec<StackFrame>) -> bool {
         assert_matches!(INTERP.read().unwrap().mode, InterpMode::TestCompiler, "can't call @compiler_test function when not in test-compiler mode");
         let argument_values = test_case.arguments.iter().map(|arg| Value::from_const(arg, &self)).collect();
         let test_passed = matches!(
-            (self.call_direct(FunctionRef::Id(test_case.func), argument_values, vec![]), test_case.condition),
+            (self.call_direct(FunctionRef::Id(test_case.func), argument_values, vec![], stack), test_case.condition),
             (Ok(_), CompilerTestCondition::Success) | (Err(_), CompilerTestCondition::Failure)
         );
         test_passed
@@ -1364,9 +1361,8 @@ impl Driver {
     /// Execute the next instruction. Iff the instruction is a return, this function returns its `Value`. Otherwise, it returns `None`.
     // NOTE FOR CORRECTNESS: If you return an Err() result, you MUST first report an error! Otherwise
     // compilation could end up "succeeding", even though compile-time code execution failed.
-    fn execute_next(&self, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Option<Value>> {
+    fn execute_next(&self, stack: &mut Vec<StackFrame>) -> Result<Option<Value>> {
         let val = {
-            let mut stack = stack_cell.borrow_mut();
             let frame = stack.last().unwrap();
             let pc = frame.pc;
             let func = function_by_ref(&self.mir, &frame.func_ref);
@@ -1416,8 +1412,7 @@ impl Driver {
                         Value::from_new_internal(ty, self)
                     },
                     InstrKind::Call(ref call) => {
-                        drop(stack);
-                        self.execute_call(call, pc, stack_cell)?
+                        self.execute_call(call, pc, stack)?
                     },
                     InstrKind::Reinterpret(instr, _) => frame.get_val(instr, &self).clone(),
                     InstrKind::Truncate(instr, ref ty) => {
@@ -1692,8 +1687,7 @@ impl Driver {
                             None
                         },
                         TerminatorKind::Call(ref call) => {
-                            drop(stack);
-                            let Err(err) = self.execute_call(call, pc, stack_cell) else {
+                            let Err(err) = self.execute_call(call, pc, stack) else {
                                 panic!("terminator call returned normally");
                             };
                             return Err(err)
@@ -1704,7 +1698,6 @@ impl Driver {
             }
         };
 
-        let mut stack = stack_cell.borrow_mut();
         let frame = stack.last_mut().unwrap();
         frame.pc = match frame.pc {
             ProgramCounter::Instr(instr) => {
@@ -1724,8 +1717,7 @@ impl Driver {
         Ok(None)
     }
 
-    fn execute_call(&self, call: &CallKind, pc: ProgramCounter, stack_cell: &RefCell<Vec<StackFrame>>) -> Result<Value> {
-        let stack = stack_cell.borrow();
+    fn execute_call(&self, call: &CallKind, pc: ProgramCounter, stack: &mut Vec<StackFrame>) -> Result<Value> {
         let frame = stack.last().unwrap();
         let func = function_by_ref(&self.mir, &frame.func_ref);
         let val = match *call {
@@ -1738,9 +1730,7 @@ impl Driver {
                 let generic_arguments = generic_arguments.iter()
                     .map(|arg| frame.canonicalize_type(arg))
                     .collect();
-                // Stop immutably borrowing the stack, so it can be borrowed again in call()
-                drop(stack);
-                self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments)?
+                self.call_direct(FunctionRef::Id(func), copied_args, generic_arguments, stack)?
             },
             CallKind::ExternCall { ref arguments, func: callee } => {
                 let mut copied_args = Vec::new();
@@ -1751,7 +1741,6 @@ impl Driver {
                     copied_args.push(frame.get_val(arg, &self).as_bytes_without_driver().as_ref().to_owned().into_boxed_slice());
                     arg_tys.push(func.type_of_val(arg).clone());
                 }
-                drop(stack);
                 self.extern_call(callee, copied_args, arg_tys)
             },
             CallKind::Intrinsic { ref arguments, intr } => {
@@ -1975,9 +1964,6 @@ impl Driver {
 
 pub static INTERP: LazyLock<RwLock<Interpreter>> = LazyLock::new(|| RwLock::new(Interpreter::new(InterpMode::CompileTime)));
 
-thread_local! {
-    static INTERP_STACK: RefCell<Vec<StackFrame>> = const { RefCell::new(Vec::new()) };
-}
 pub fn restart_interp(mode: InterpMode) {
     *INTERP.write().unwrap() = Interpreter::new(mode);
 }

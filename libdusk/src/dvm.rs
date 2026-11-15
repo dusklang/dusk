@@ -80,15 +80,18 @@ impl DvmServerCoordinator {
         let (call_tx, call_rx) = mpsc::channel::<Call>();
         let (call_response_tx, call_response_rx) = mpsc::channel::<Response>();
         thread::spawn(move || {
+            let mut stack = Vec::new();
             while let Ok(call) = call_rx.recv() {
                 let driver = DRIVER.read().unwrap().clone();
                 let res = match call {
                     Call::Direct(call) => {
-                        let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments);
+                        stack.clear();
+                        let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments, &mut stack);
                         Response::Direct(result)
                     },
                     Call::CompilerTest(test_case) => {
-                        let passed = driver.compiler_test_call_direct(&test_case);
+                        stack.clear();
+                        let passed = driver.compiler_test_call_direct(&test_case, &mut stack);
                         Response::CompilerTest { passed }
                     },
                 };
