@@ -140,9 +140,6 @@ pub enum InstrKind {
     DiscriminantAccess { val: ValueId },
     PayloadAccess { val: ValueId, variant_index: usize },
     Call(CallKind),
-    /// This variant currently exists (rather than just stuffing a constant `Type` into `InstrKind::Const()`) so that we
-    /// know to lookup the generic param instead of preserving it as-is.
-    GenericParam(GenericParamId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,6 +225,7 @@ pub struct Function {
     pub value_namespace: ValueNamespace,
     pub decl: Option<DeclId>,
     pub generic_params: Range<GenericParamId>,
+    pub generic_param_values: HashMap<GenericParamId, ValueId>,
     pub is_comptime: bool,
 
     // The set of instructions that failed to be const-eval'ed (e.g., due to a panic)
@@ -258,6 +256,7 @@ impl Default for Function {
             value_names: Default::default(),
             decl: Default::default(),
             generic_params: empty_range(),
+            generic_param_values: Default::default(),
             value_namespace: Default::default(),
             is_comptime: Default::default(),
             poisoned_instrs: Default::default(),
@@ -410,6 +409,7 @@ pub enum ValueKind {
         block: BlockId,
         index: usize,
     },
+    GenericParameter(GenericParamId),
     Void,
     Never,
 }
@@ -1029,6 +1029,7 @@ impl Driver {
             ValueKind::InstrResult(_) | ValueKind::Parameter { .. } => write!(f, "%{}", self.display_value_name_impl(value_names, value)),
             ValueKind::Void => write!(f, "void"),
             ValueKind::Never => write!(f, "never"),
+            ValueKind::GenericParameter(param) => write!(f, "generic_param{}", param.index()),
         }
     }
 
@@ -1240,10 +1241,6 @@ impl Driver {
             &InstrKind::InternalFieldAccess { val, field } => write!(f, "{}.{}", self.display_value(func, val), field.name())?,
             &InstrKind::DiscriminantAccess { val } => write!(f, "discriminant of {}", self.display_value(func, val))?,
             &InstrKind::PayloadAccess { val, variant_index } => write!(f, "payload of {} using variant {}", self.display_value(func, val), variant_index)?,
-            // TODO: instead of emitting these instructions as needed, add all generic params to the beginning of the MIR function as "hidden" values, just like normal parameters.
-            &InstrKind::GenericParam(param) => {
-                write!(f, "generic_param{}", param.index())?
-            },
             InstrKind::Invalid => write!(f, "invalid!")?,
         };
         Ok(())
@@ -1422,6 +1419,14 @@ impl Driver {
             value_names.insert(param_value, name);
             entry.params.push(param_value);
         }
+
+        let mut generic_param_values = HashMap::new();
+        for generic_param in range_iter(generic_params.clone()) {
+            let generic_param_value = Value::new(Type::Ty, ValueKind::GenericParameter(generic_param));
+            let generic_param_value = values.push(generic_param_value);
+            generic_param_values.insert(generic_param, generic_param_value);
+        }
+
         let core = Function {
             name,
             ty: func_ty,
@@ -1434,6 +1439,7 @@ impl Driver {
             value_names,
             value_namespace,
             generic_params,
+            generic_param_values,
             decl: if let FunctionBody::Scope { decl, .. } = body {
                 Some(decl)
             } else {
@@ -1754,7 +1760,7 @@ impl Driver {
                                 did_something = true;
                             }
                         },
-                        ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never => {},
+                        ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never | ValueKind::GenericParameter(_) => {},
                     }
                 },
                 TerminatorKind::SwitchBr { scrutinee, ref cases, ref catch_all_target } => {
@@ -1771,7 +1777,7 @@ impl Driver {
                                 did_something = true;
                             }
                         },
-                        ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never => {},
+                        ValueKind::Parameter { .. } | ValueKind::Void | ValueKind::Never | ValueKind::GenericParameter(_) => {},
                     }
                 },
                 _ => {},
@@ -1840,7 +1846,7 @@ impl Driver {
     fn value_is_const(&self, func: &Function, value: ValueId) -> bool {
         match func.values[value].kind {
             ValueKind::Void | ValueKind::Never => true,
-            ValueKind::Parameter { .. } => false,
+            ValueKind::Parameter { .. } | ValueKind::GenericParameter(_) => false,
             ValueKind::InstrResult(instr) => self.instruction_is_const(func, instr),
         }
     }
@@ -1857,7 +1863,7 @@ impl Driver {
             },
             ValueKind::Void => VOID_VALUE,
             ValueKind::Never => NEVER_VALUE,
-            ValueKind::Parameter { .. } => panic!("internal compiler error: attempt to copy non-constant parameter value to new function"),
+            ValueKind::Parameter { .. } | ValueKind::GenericParameter(_) => panic!("internal compiler error: attempt to copy non-constant parameter value to new function"),
         }
     }
 
@@ -1882,7 +1888,7 @@ impl Driver {
                         debug_assert_eq!(old, NEVER_VALUE);
                         debug_assert_eq!(new, NEVER_VALUE);
                     },
-                    ValueKind::Parameter { .. } => {},
+                    ValueKind::Parameter { .. } | ValueKind::GenericParameter(_) => {},
                 }
             }
 
@@ -2044,7 +2050,7 @@ impl Driver {
             InstrKind::Store { .. } => Type::Void,
             InstrKind::ObjcClassRef { .. } => Type::Void.ptr(),
             InstrKind::Invalid => Type::Error,
-            InstrKind::Pointer { .. } | InstrKind::Struct { .. } | InstrKind::GenericParam(_) | InstrKind::Enum { .. } | InstrKind::FunctionTy { .. } => Type::Ty,
+            InstrKind::Pointer { .. } | InstrKind::Struct { .. } | InstrKind::Enum { .. } | InstrKind::FunctionTy { .. } => Type::Ty,
             &InstrKind::StructLit { ref fields, id } => {
                 let field_tys = fields.iter()
                     .map(|&val| {
@@ -2225,7 +2231,8 @@ impl Driver {
                 DeclRef::Value(param_value.direct())
             },
             Decl::GenericParam(param) => {
-                DeclRef::Value(self.push_instr(b, InstrKind::GenericParam(param), expr).direct())
+                debug_assert!(b.func.generic_params.contains(&param));
+                DeclRef::Value(b.func.generic_param_values[&param].direct())
             },
             Decl::LegacyIntrinsic(intr, ref ty) => {
                 let ty = ty.clone();
@@ -3284,6 +3291,7 @@ impl Driver {
                     ValueKind::Void => {
                         panic!("internal compiler error: branching on void")
                     },
+                    ValueKind::GenericParameter(_) => panic!("internal compiler error: branching on generic parameter"),
                     ValueKind::Never => return NEVER_VALUE.direct(),
                 };
 

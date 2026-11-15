@@ -458,43 +458,45 @@ pub struct StackFrame {
     generic_ctx: HashMap<GenericParamId, Type>,
 }
 
+fn canonicalize_type(ty: &Type, generic_ctx: &HashMap<GenericParamId, Type>) -> Type {
+    match ty {
+        Type::GenericParam(id) => if let Some(result) = generic_ctx.get(id) {
+            result.clone()
+        } else {
+            ty.clone()
+        },
+        Type::TypeVar(_) => panic!("shouldn't be possible"),
+        Type::Pointer(pointee) =>
+            Type::Pointer(
+                Box::new(QualType { ty: canonicalize_type(&pointee.ty, generic_ctx), is_mut: pointee.is_mut })
+            ),
+        &Type::Function(FunctionType { ref param_tys, has_c_variadic_param, ref return_ty }) =>
+            Type::Function(
+                FunctionType {
+                    param_tys: param_tys.iter().map(|ty| canonicalize_type(ty, generic_ctx)).collect(),
+                    has_c_variadic_param,
+                    return_ty: Box::new(canonicalize_type(return_ty, generic_ctx)),
+                }
+            ),
+        &Type::Struct(StructType { ref field_tys, identity }) => Type::Struct(
+            StructType {
+                field_tys: field_tys.iter().map(|ty| canonicalize_type(ty, generic_ctx)).collect(),
+                identity,
+            }
+        ),
+        &Type::Enum(EnumType { ref payload_tys, identity }) => Type::Enum(
+            EnumType {
+                payload_tys: payload_tys.iter().map(|ty| canonicalize_type(ty, generic_ctx)).collect(),
+                identity,
+            }
+        ),
+        ty => ty.clone(),
+    }
+}
+
 impl StackFrame {
-
-
     fn canonicalize_type(&self, ty: &Type) -> Type {
-        match ty {
-            Type::GenericParam(id) => if let Some(result) = self.generic_ctx.get(id) {
-                result.clone()
-            } else {
-                ty.clone()
-            },
-            Type::TypeVar(_) => panic!("shouldn't be possible"),
-            Type::Pointer(pointee) =>
-                Type::Pointer(
-                    Box::new(QualType { ty: self.canonicalize_type(&pointee.ty), is_mut: pointee.is_mut })
-                ),
-            &Type::Function(FunctionType { ref param_tys, has_c_variadic_param, ref return_ty }) =>
-                Type::Function(
-                    FunctionType {
-                        param_tys: param_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
-                        has_c_variadic_param,
-                        return_ty: Box::new(self.canonicalize_type(return_ty)),
-                    }
-                ),
-            &Type::Struct(StructType { ref field_tys, identity }) => Type::Struct(
-                StructType {
-                    field_tys: field_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
-                    identity,
-                }
-            ),
-            &Type::Enum(EnumType { ref payload_tys, identity }) => Type::Enum(
-                EnumType {
-                    payload_tys: payload_tys.iter().map(|ty| self.canonicalize_type(ty)).collect(),
-                    identity,
-                }
-            ),
-            ty => ty.clone(),
-        }
+        canonicalize_type(ty, &self.generic_ctx)
     }
 
     fn get_val(&self, value: ValueId) -> &Value {
@@ -854,8 +856,14 @@ impl Interpreter<'_> {
 
         let mut generic_ctx = HashMap::new();
         assert_eq!(func.generic_params.end - func.generic_params.start, generic_arguments.len());
-        for (generic_param, generic_argument) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
-            generic_ctx.insert(generic_param, generic_argument);
+        for (generic_param, ty) in range_iter(func.generic_params.clone()).zip(generic_arguments.clone()) {
+            generic_ctx.insert(generic_param, ty);
+        }
+
+        for (generic_param, ty) in range_iter(func.generic_params.clone()).zip(generic_arguments) {
+            let ty = canonicalize_type(&ty, &generic_ctx);
+            let generic_param_value = func.generic_param_values[&generic_param];
+            results.insert(generic_param_value, Value::from_new_internal(ty, self.driver));
         }
 
         let new_frame = StackFrame {
@@ -1459,11 +1467,6 @@ impl Interpreter<'_> {
                     },
                     #[cfg(not(target_os = "macos"))]
                     InstrKind::ObjcClassRef { .. } => unimplemented!("cannot refer to Objective-C class on a non-macOS platform"),
-                    InstrKind::GenericParam(id) => {
-                        let ty = Type::GenericParam(id);
-                        let ty = frame.canonicalize_type(&ty);
-                        Value::from_new_internal(ty, self.driver)
-                    },
                     InstrKind::Call(ref call) => {
                         self.execute_call(call, pc)?
                     },

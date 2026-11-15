@@ -1455,7 +1455,7 @@ impl Driver {
             ToSourceRange::Instr(instr) => ctx.map(|ctx| ctx.source_ranges[&instr]).unwrap_or_default(),
             ToSourceRange::Value(value) => ctx.map(|ctx| match ctx.values[value].kind {
                 ValueKind::InstrResult(instr) => ctx.source_ranges[&instr],
-                ValueKind::Void | ValueKind::Never | ValueKind::Parameter { .. } => SourceRange::default(),
+                ValueKind::Void | ValueKind::Never | ValueKind::Parameter { .. } | ValueKind::GenericParameter(_) => SourceRange::default(),
             }).unwrap_or_default(),
             ToSourceRange::SourceRange(range) => range,
         }
