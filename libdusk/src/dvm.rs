@@ -5,7 +5,7 @@ use std::sync::{Mutex, LazyLock};
 use std::thread_local;
 
 use crate::driver::DRIVER;
-use crate::interpreter::{Value, Result as EvalResult};
+use crate::interpreter::{Interpreter, Result as EvalResult, Value};
 use crate::mir::{CompilerTestCase, FunctionRef};
 use crate::ty::Type;
 
@@ -80,18 +80,18 @@ impl DvmServerCoordinator {
         let (call_tx, call_rx) = mpsc::channel::<Call>();
         let (call_response_tx, call_response_rx) = mpsc::channel::<Response>();
         thread::spawn(move || {
-            let mut stack = Vec::new();
             while let Ok(call) = call_rx.recv() {
                 let driver = DRIVER.read().unwrap().clone();
+                let mut interp = Interpreter::new(&*driver);
                 let res = match call {
                     Call::Direct(call) => {
-                        stack.clear();
-                        let result = driver.call_direct(call.func_ref, call.arguments, call.generic_arguments, &mut stack);
+                        interp.clear();
+                        let result = interp.call_direct(call.func_ref, call.arguments, call.generic_arguments);
                         Response::Direct(result)
                     },
                     Call::CompilerTest(test_case) => {
-                        stack.clear();
-                        let passed = driver.compiler_test_call_direct(&test_case, &mut stack);
+                        interp.clear();
+                        let passed = interp.compiler_test_call_direct(&test_case);
                         Response::CompilerTest { passed }
                     },
                 };

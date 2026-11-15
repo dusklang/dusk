@@ -569,13 +569,6 @@ pub enum FunctionRef {
 // TODO: remove this as soon as discriminants can be other types, and deal with the fallout from that
 const TYPE_OF_DISCRIMINANTS: Type = Type::u32();
 
-pub fn function_by_ref<'a>(code: &'a Mir, func_ref: &'a FunctionRef) -> &'a Function {
-    match func_ref {
-        &FunctionRef::Id(id) => code.functions[id].get().unwrap(),
-        FunctionRef::Ref(func) => func,
-    }
-}
-
 const MAX_LITERAL_BASED_INSTRUCTION_NAME_LENGTH: usize = 15;
 /// Takes an arbitrary byte string and makes it suitable for inclusion in an instruction name
 fn identifierify(mut string: Vec<u8>) -> String {
@@ -1311,8 +1304,7 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_mir_function(&self, func: &FunctionRef, f: &mut Formatter) {
-        let func = function_by_ref(&self.mir, func);
+    pub fn display_mir_function(&self, func: &Function, f: &mut Formatter) {
         if func.is_comptime {
             write!(f, "@comptime ")?;
         }
@@ -1350,8 +1342,8 @@ impl Driver {
         }
 
         let mut iter = self.mir.functions.indices().peekable();
-        while let Some(i) = iter.next() {
-            write!(f, "{}", self.display_mir_function(&FunctionRef::Id(i)))?;
+        while let Some(id) = iter.next() {
+            write!(f, "{}", self.display_mir_function(self.mir.functions[id].get().unwrap()))?;
             if iter.peek().is_some() {
                 writeln!(f, "\n")?;
             }

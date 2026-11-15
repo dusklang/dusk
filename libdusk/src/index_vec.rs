@@ -164,6 +164,10 @@ impl<I: Idx, T> IndexVec<I, T> {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.raw.clear();
+    }
+
     pub const fn len(&self) -> usize {
         self.raw.len()
     }
