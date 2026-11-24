@@ -4,12 +4,20 @@ use crate::linked_list::{LinkedList, LinkedListHead, LinkedListStorage};
 define_index_type!(pub struct FuncId = u32;);
 define_index_type!(pub struct BlockId = u32;);
 define_index_type!(pub struct InstrId = u32;);
+define_index_type!(pub struct StackSlotId = u32;);
 
 pub struct Function<InstrKind> {
     blocks: LinkedList<BlockId, Block>,
     instrs: IndexVec<InstrId, InstrKind>,
     instr_nodes: LinkedListStorage<InstrId, InstrNode>,
     entry_block: Option<BlockId>,
+    stack_slots: IndexVec<StackSlotId, StackSlot>,
+    vreg_counter: usize,
+}
+
+pub struct StackSlot {
+    pub size: usize,
+    pub align: usize,
 }
 
 struct InstrNode {
@@ -29,6 +37,8 @@ impl<InstrKind> Function<InstrKind> {
             instrs: IndexVec::new(),
             instr_nodes: LinkedListStorage::new(),
             entry_block: None,
+            stack_slots: IndexVec::new(),
+            vreg_counter: 0,
         }
     }
 
@@ -55,18 +65,36 @@ impl<InstrKind> Function<InstrKind> {
 
         id
     }
+
+    pub fn push_stack_slot(&mut self, size: usize, align: usize) -> StackSlotId {
+        self.stack_slots.push(
+            StackSlot {
+                size,
+                align,
+            }
+        )
+    }
+
+    pub fn make_vreg(&mut self, class: RegisterClass) -> VirtualRegister {
+        let num = self.vreg_counter;
+        self.vreg_counter += 1;
+        VirtualRegister { num, class }
+    }
 }
 
+#[derive(Copy, Clone)]
 pub enum RegisterClass {
     Int,
     Float,
 }
 
+#[derive(Copy, Clone)]
 pub struct VirtualRegister {
     num: usize,
     class: RegisterClass,
 }
 
+#[derive(Copy, Clone)]
 pub struct PhysicalRegister {
     num: usize,
     class: RegisterClass,
