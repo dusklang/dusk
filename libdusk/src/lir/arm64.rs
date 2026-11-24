@@ -50,7 +50,15 @@ impl Driver {
             }
 
             while let Some(mir_instr_id) = cursor.next_instr() {
+                match b.mir_func.instrs[mir_instr_id] {
+                    ref instr => todo!("{:?}", instr)
+                }
+            }
 
+            if let Some(terminator) = cursor.terminator() {
+                match terminator {
+                    terminator => todo!("{:?}", terminator)
+                }
             }
         }
     }
