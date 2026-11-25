@@ -227,9 +227,9 @@ impl Driver {
     pub fn display_lir_function(&self, func: &Function<Arm64Instr>, f: &mut Formatter) {
         writeln!(f, "fn {} {{", self.fn_name(None))?;
         if let Some(entry_block) = func.entry_block() {
-            write!(f, "{}", self.display_lir_block(func, func.entry_block().unwrap()))?;
+            write!(f, "{}", self.display_lir_block(func, entry_block))?;
         } else {
-            writeln!(f, "<no entry block>");
+            writeln!(f, "<no entry block>")?;
         }
 
         for block_id in func.make_cursor().block_ids_iter() {
