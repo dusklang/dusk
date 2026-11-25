@@ -1,7 +1,7 @@
 use std::mem;
 
 use crate::linked_list::{LinkedList, LinkedListStorage};
-use crate::mir::{Block, BlockId, Function, InstrId, InstrKind, InstrNodeData, TerminatorKind};
+use crate::mir::{Block, BlockId, Function, InstrId, InstrKind, InstrNode, TerminatorKind};
 
 // This pattern is heavily inspired by Cranelift
 #[derive(Copy, Clone)]
@@ -32,7 +32,7 @@ pub trait Cursor<'func> {
     fn first_block(&self) -> BlockId;
     fn last_block(&self) -> BlockId;
     fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a;
-    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a;
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNode> where 'func: 'a;
 
     fn reset_position(&mut self) {
         self.set_position(CursorPosition::None);
@@ -183,7 +183,7 @@ impl<'func> Cursor<'func> for FuncCursor<'func> {
     fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a {
         &self.func.blocks
     }
-    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNode> where 'func: 'a {
         &self.func.instr_nodes
     }
 }
@@ -213,7 +213,7 @@ impl<'func> Cursor<'func> for FuncCursorMut<'func> {
     fn blocks<'a>(&'a self) -> &'a LinkedList<BlockId, Block> where 'func: 'a {
         &self.func.blocks
     }
-    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNodeData> where 'func: 'a {
+    fn instr_nodes<'a>(&'a self) -> &'a LinkedListStorage<InstrId, InstrNode> where 'func: 'a {
         &self.func.instr_nodes
     }
 }

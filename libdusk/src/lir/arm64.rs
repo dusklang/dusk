@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use dusk_proc_macros::display_adapter;
 
 use crate::driver::Driver;
-use crate::lir::func::{BlockId, Function, PhysicalRegister, StackSlotId, VirtualRegister};
+use crate::linker::dex::DexReturnType::Float;
+use crate::lir::cursor::Cursor;
+use crate::lir::func::{BlockId, Function, InstrId, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
 use crate::mir;
-use crate::mir::cursor::Cursor;
+use crate::mir::cursor::Cursor as _;
 
 #[derive(Copy, Clone)]
 pub struct ArgAssignment {
@@ -136,20 +138,106 @@ impl Driver {
     }
 
     #[display_adapter]
-    fn display_lir_block(&self, func: &Function<Arm64Instr>, block: BlockId, f: &mut Formatter) {
+    pub fn display_arm64_lir_virt_register(&self, func: &Function<Arm64Instr>, reg: VirtualRegister, f: &mut Formatter) {
+        write!(f, "%v{}", reg.num)
+    }
+
+    #[display_adapter]
+    pub fn display_arm64_lir_phys_register(&self, func: &Function<Arm64Instr>, reg: PhysicalRegister, f: &mut Formatter) {
+        match reg.class {
+            RegisterClass::Int => write!(f, "x{}", reg.num),
+            RegisterClass::Float => write!(f, "d{}", reg.num),
+        }
+    }
+
+    #[display_adapter]
+    pub fn display_arm64_lir_arg_assignment(&self, func: &Function<Arm64Instr>, assignment: ArgAssignment, f: &mut Formatter) {
+        write!(
+            f,
+            "{} = {}",
+            self.display_arm64_lir_virt_register(func, assignment.virt),
+            self.display_arm64_lir_phys_register(func, assignment.phys),
+        )
+    }
+
+    #[display_adapter]
+    pub fn display_arm64_lir_ret_assignment(&self, func: &Function<Arm64Instr>, assignment: RetAssignment, f: &mut Formatter) {
+        write!(
+            f,
+            "{} = {}",
+            self.display_arm64_lir_phys_register(func, assignment.phys),
+            self.display_arm64_lir_virt_register(func, assignment.virt),
+        )
+    }
+
+    #[display_adapter]
+    pub fn display_arm64_lir_instr(&self, func: &Function<Arm64Instr>, instr_id: InstrId, f: &mut Formatter) {
+        match func.instrs[instr_id] {
+            Arm64Instr::PseudoArgs(ref args) => {
+                write!(f, "@args {{")?;
+                let mut first = true;
+                for &arg in args {
+                    if !first {
+                        write!(f, ", ")?;
+                    } else {
+                        first = false;
+                    }
+
+                    write!(f, "{}", self.display_arm64_lir_arg_assignment(func, arg))?;
+                }
+                write!(f, " }}")?;
+            },
+            Arm64Instr::PseudoRet(ref values) => {
+                write!(f, "@ret")?;
+                if values.len() == 1 {
+                    write!(f, "{}", self.display_arm64_lir_ret_assignment(func, values[0]))?;
+                } else if !values.is_empty() {
+                    write!(f, " {{ ")?;
+                    let mut first = true;
+                    for &value in values {
+                        if !first {
+                            write!(f, ", ")?;
+                        } else {
+                            first = false;
+                        }
+
+                        write!(f, "{}", self.display_arm64_lir_ret_assignment(func, value))?;
+                    }
+                    write!(f, " }}")?;
+                }
+            },
+        };
+        Ok(())
+    }
+
+    #[display_adapter]
+    fn display_lir_block(&self, func: &Function<Arm64Instr>, id: BlockId, f: &mut Formatter) {
+        let block = &func.blocks[id];
+        writeln!(f, "%block{}:", id.index())?;
+
+        let mut cursor = func.make_cursor();
+        cursor.goto_top(id);
+        while let Some(instr_id) = cursor.next_instr() {
+            writeln!(f, "    {}", self.display_arm64_lir_instr(func, instr_id))?;
+        }
         Ok(())
     }
 
     #[display_adapter]
     pub fn display_lir_function(&self, func: &Function<Arm64Instr>, f: &mut Formatter) {
         writeln!(f, "fn {} {{", self.fn_name(None))?;
-        write!(f, "{}", self.display_lir_block(func, func.entry_block().unwrap()))?;
-        // let mut block_id = func.
-        // for block_id in func.make_cursor().block_ids_iter() {
-        //     if block_id != func.entry_block {
-        //         write!(f, "{}", self.display_lir_block(func, block_id))?;
-        //     }
-        // }
+        if let Some(entry_block) = func.entry_block() {
+            write!(f, "{}", self.display_lir_block(func, func.entry_block().unwrap()))?;
+        } else {
+            writeln!(f, "<no entry block>");
+        }
+
+        for block_id in func.make_cursor().block_ids_iter() {
+            if Some(block_id) != func.entry_block {
+                write!(f, "{}", self.display_lir_block(func, block_id))?;
+            }
+        }
+
         write!(f, "}}")
     }
 }

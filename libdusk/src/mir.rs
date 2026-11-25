@@ -69,11 +69,9 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone)]
-pub struct InstrNodeData {
+pub struct InstrNode {
     pub block: Option<BlockId>,
 }
-
-pub type InstrNode = LinkedListNode<InstrId, InstrNodeData>;
 
 #[derive(Clone, Debug, PartialEq, InstrOperands)]
 pub struct JumpTarget {
@@ -218,7 +216,7 @@ pub struct Function {
     pub blocks: LinkedList<BlockId, Block>,
     pub entry_block: BlockId,
     pub instrs: IndexVec<InstrId, Instr>,
-    pub instr_nodes: LinkedListStorage<InstrId, InstrNodeData>,
+    pub instr_nodes: LinkedListStorage<InstrId, InstrNode>,
     pub values: IndexVec<ValueId, Value>,
     pub source_ranges: HashMap<InstrId, SourceRange>,
     pub value_names: HashMap<ValueId, String>,
@@ -2339,7 +2337,7 @@ impl Function {
         let instr = Instr::new(instr, value);
         self.instrs.push_at(id, instr);
         let block = &mut self.blocks[block_id];
-        let other_id = self.instr_nodes.push_back(&mut block.instrs, InstrNodeData { block: Some(block_id) });
+        let other_id = self.instr_nodes.push_back(&mut block.instrs, InstrNode { block: Some(block_id) });
         assert_eq!(other_id, id);
         self.source_ranges.insert(id, source_range);
     }

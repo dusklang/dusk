@@ -7,12 +7,12 @@ define_index_type!(pub struct InstrId = u32;);
 define_index_type!(pub struct StackSlotId = u32;);
 
 pub struct Function<InstrKind> {
-    blocks: LinkedList<BlockId, Block>,
-    instrs: IndexVec<InstrId, InstrKind>,
-    instr_nodes: LinkedListStorage<InstrId, InstrNode>,
-    entry_block: Option<BlockId>,
-    stack_slots: IndexVec<StackSlotId, StackSlot>,
-    vreg_counter: usize,
+    pub blocks: LinkedList<BlockId, Block>,
+    pub instrs: IndexVec<InstrId, InstrKind>,
+    pub instr_nodes: LinkedListStorage<InstrId, InstrNode>,
+    pub entry_block: Option<BlockId>,
+    pub stack_slots: IndexVec<StackSlotId, StackSlot>,
+    pub vreg_counter: usize,
 }
 
 pub struct StackSlot {
@@ -20,8 +20,8 @@ pub struct StackSlot {
     pub align: usize,
 }
 
-struct InstrNode {
-    block: Option<BlockId>,
+pub struct InstrNode {
+    pub block: Option<BlockId>,
 }
 
 impl<InstrKind> Default for Function<InstrKind> {
@@ -80,6 +80,38 @@ impl<InstrKind> Function<InstrKind> {
         self.vreg_counter += 1;
         VirtualRegister { num, class }
     }
+
+    pub fn prev_block(&self, block_id: BlockId) -> Option<BlockId> {
+        self.blocks[block_id].prev()
+    }
+
+    #[allow(unused)]
+    pub fn next_block(&self, block_id: BlockId) -> Option<BlockId> {
+        self.blocks[block_id].next()
+    }
+
+    pub fn prev_instr(&self, instr_id: InstrId) -> Option<InstrId> {
+        self.instr_nodes[instr_id].prev()
+    }
+
+    #[allow(unused)]
+    pub fn next_instr(&self, instr_id: InstrId) -> Option<InstrId> {
+        self.instr_nodes[instr_id].next()
+    }
+
+    pub fn remove_block(&mut self, block_id: BlockId) {
+        assert_ne!(Some(block_id), self.entry_block, "cannot remove entry block");
+        self.blocks.remove(block_id);
+        debug_assert!(!self.blocks.is_empty(), "cannot remove only block in function");
+    }
+
+    pub fn remove_instr(&mut self, instr_id: InstrId) {
+        let instr = &mut self.instr_nodes[instr_id];
+        let block_id = instr.block.expect("instruction not part of a block");
+        instr.block = None;
+        let block = &mut self.blocks[block_id];
+        self.instr_nodes.remove(&mut block.instrs, instr_id);
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -90,14 +122,14 @@ pub enum RegisterClass {
 
 #[derive(Copy, Clone)]
 pub struct VirtualRegister {
-    num: usize,
-    class: RegisterClass,
+    pub num: usize,
+    pub class: RegisterClass,
 }
 
 #[derive(Copy, Clone)]
 pub struct PhysicalRegister {
-    num: usize,
-    class: RegisterClass,
+    pub num: usize,
+    pub class: RegisterClass,
 }
 
 pub enum Register {
@@ -107,5 +139,5 @@ pub enum Register {
 
 #[derive(Default)]
 pub struct Block {
-    instrs: LinkedListHead<InstrId>,
+    pub instrs: LinkedListHead<InstrId>,
 }
