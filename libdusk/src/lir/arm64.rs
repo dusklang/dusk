@@ -3,11 +3,37 @@ use std::collections::HashMap;
 use dusk_proc_macros::display_adapter;
 
 use crate::driver::Driver;
-use crate::linker::dex::DexReturnType::Float;
 use crate::lir::cursor::Cursor;
 use crate::lir::func::{BlockId, Function, InstrId, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
 use crate::mir;
 use crate::mir::cursor::Cursor as _;
+use crate::ty::Type;
+
+enum Arm64Reg {}
+
+impl Arm64Reg {
+    const R0: PhysicalRegister = PhysicalRegister { num: 0, class: RegisterClass::Int };
+    const R1: PhysicalRegister = PhysicalRegister { num: 1, class: RegisterClass::Int };
+    const R2: PhysicalRegister = PhysicalRegister { num: 2, class: RegisterClass::Int };
+    const R3: PhysicalRegister = PhysicalRegister { num: 3, class: RegisterClass::Int };
+    const R4: PhysicalRegister = PhysicalRegister { num: 4, class: RegisterClass::Int };
+    const R5: PhysicalRegister = PhysicalRegister { num: 5, class: RegisterClass::Int };
+    const R6: PhysicalRegister = PhysicalRegister { num: 6, class: RegisterClass::Int };
+    const R7: PhysicalRegister = PhysicalRegister { num: 7, class: RegisterClass::Int };
+    const R8: PhysicalRegister = PhysicalRegister { num: 8, class: RegisterClass::Int };
+    const R9: PhysicalRegister = PhysicalRegister { num: 9, class: RegisterClass::Int };
+    const R10: PhysicalRegister = PhysicalRegister { num: 10, class: RegisterClass::Int };
+    const R11: PhysicalRegister = PhysicalRegister { num: 11, class: RegisterClass::Int };
+    const R12: PhysicalRegister = PhysicalRegister { num: 12, class: RegisterClass::Int };
+    const R13: PhysicalRegister = PhysicalRegister { num: 13, class: RegisterClass::Int };
+    const R14: PhysicalRegister = PhysicalRegister { num: 14, class: RegisterClass::Int };
+    const R15: PhysicalRegister = PhysicalRegister { num: 15, class: RegisterClass::Int };
+    const R16: PhysicalRegister = PhysicalRegister { num: 16, class: RegisterClass::Int };
+    const R17: PhysicalRegister = PhysicalRegister { num: 17, class: RegisterClass::Int };
+    const R18: PhysicalRegister = PhysicalRegister { num: 18, class: RegisterClass::Int };
+    const R19: PhysicalRegister = PhysicalRegister { num: 19, class: RegisterClass::Int };
+    const R20: PhysicalRegister = PhysicalRegister { num: 20, class: RegisterClass::Int };
+}
 
 #[derive(Copy, Clone)]
 pub struct ArgAssignment {
@@ -24,6 +50,39 @@ pub struct RetAssignment {
 pub enum Arm64Instr {
     PseudoArgs(Vec<ArgAssignment>),
     PseudoRet(Vec<RetAssignment>),
+    MovK {
+        width: IntWidth,
+        destination: VirtualRegister,
+        immediate: u16,
+        shift: u8,
+    },
+    MovZ {
+        width: IntWidth,
+        destination: VirtualRegister,
+        immediate: u16,
+        shift: u8,
+    },
+}
+
+#[derive(Copy, Clone)]
+pub enum IntWidth {
+    W32,
+    W64,
+}
+
+#[derive(Copy, Clone)]
+pub enum RegisterWidth {
+    W32,
+    W64,
+}
+
+impl From<IntWidth> for RegisterWidth {
+    fn from(value: IntWidth) -> Self {
+        match value {
+            IntWidth::W32 => RegisterWidth::W32,
+            IntWidth::W64 => RegisterWidth::W64,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -57,10 +116,12 @@ pub struct Builder<'mir> {
 }
 
 impl<'mir> Builder<'mir> {
-    pub fn new(func: &'mir mir::Function) -> Self {
+    pub fn new(mir_func: &'mir mir::Function) -> Self {
+        let mut func = Function::new();
+        func.name = mir_func.name;
         Self {
-            mir_func: func,
-            func: Default::default(),
+            mir_func,
+            func,
             block_map: Default::default(),
             value_map: Default::default(),
         }
@@ -83,6 +144,24 @@ impl Driver {
                         let slot = b.func.push_stack_slot(size, align);
                         Value::StackAddress { slot, offset: 0, size }
                     },
+                    mir::InstrKind::Const(ref konst) => {
+                        let konst = match konst {
+                            mir::Const::Int { lit, ty } => {
+                                match *ty {
+                                    Type::Int { is_signed, .. } => {
+                                        if is_signed {
+                                            Const::Signed(lit.try_into().unwrap())
+                                        } else {
+                                            Const::Unsigned(lit.try_into().unwrap())
+                                        }
+                                    },
+                                    _ => todo!(),
+                                }
+                            },
+                            _ => todo!(),
+                        };
+                        Value::Const(konst)
+                    },
                     _ => todo!(),
                 }
             },
@@ -91,6 +170,68 @@ impl Driver {
 
         b.value_map.insert(value, new_value);
         new_value
+    }
+
+    fn load_scalar_value(&self, b: &mut Builder<'_>, block_id: BlockId, value: Value) -> Option<VirtualRegister> {
+        match value {
+            Value::Const(konst) => {
+                let mut value = match konst {
+                    Const::Signed(value) => value.cast_unsigned(),
+                    Const::Unsigned(value) => value,
+                };
+                let destination = b.func.make_vreg(RegisterClass::Int);
+                let mut already_zeroed = false;
+                let mut shift = 0;
+                while value > 0 {
+                    let immediate = (value & 0xFFFF) as u16;
+                    if immediate > 0 {
+                        if !already_zeroed {
+                            b.func.push_instr(
+                                block_id,
+                                Arm64Instr::MovZ {
+                                    width: IntWidth::W64,
+                                    destination,
+                                    shift,
+                                    immediate: (immediate & 0xFFFF) as u16,
+                                }
+                            );
+                            already_zeroed = true;
+                        } else {
+                            b.func.push_instr(
+                                block_id,
+                                Arm64Instr::MovK {
+                                    width: IntWidth::W64,
+                                    destination,
+                                    shift,
+                                    immediate: (immediate & 0xFFFF) as u16,
+                                }
+                            );
+                        }
+                    }
+                    value >>= 16;
+                    shift += 16;
+                }
+                if !already_zeroed {
+                    b.func.push_instr(
+                        block_id,
+                        Arm64Instr::MovZ {
+                            width: IntWidth::W64,
+                            destination,
+                            shift: 0,
+                            immediate: 0,
+                        }
+                    );
+                }
+                Some(destination)
+            },
+            Value::VirtualRegister(reg) => Some(reg),
+            Value::Nothing => None,
+            _ => todo!(),
+        }
+    }
+
+    fn load_abi_values(&self, b: &mut Builder<'_>, block_id: BlockId, value: Value) -> Vec<VirtualRegister> {
+        self.load_scalar_value(b, block_id, value).into_iter().collect()
     }
 
     fn build_arm64_lir(&self, b: &mut Builder<'_>) {
@@ -105,11 +246,25 @@ impl Driver {
             }
         }
 
-        // Start iteration over from the first block
+        // Start iteration over
         cursor.position = mir::cursor::CursorPosition::None;
         while let Some(mir_block_id) = cursor.next_block() {
+            let block_id = b.block_map[&mir_block_id];
+            if mir_block_id == b.mir_func.entry_block {
+                let block = &b.mir_func.blocks[mir_block_id];
+                let args = Vec::new();
+                for &_param in &block.params {
+                    todo!("functions with parameters");
+                }
+                b.func.push_instr(block_id, Arm64Instr::PseudoArgs(args));
+            }
+
             while let Some(mir_instr_id) = cursor.next_instr() {
-                match b.mir_func.instrs[mir_instr_id] {
+                let instr = &b.mir_func.instrs[mir_instr_id];
+                match instr.kind {
+                    mir::InstrKind::Const(_) | mir::InstrKind::Alloca(_) => {
+                        self.map_value(b, instr.value);
+                    },
                     ref instr => todo!("{:?}", instr)
                 }
             }
@@ -118,12 +273,14 @@ impl Driver {
                 match *terminator {
                     mir::TerminatorKind::Ret(ret_value) => {
                         let ret_value = self.map_value(b, ret_value);
-                        if !matches!(ret_value, Value::Nothing) {
-                            todo!("non-void return values");
-                        }
+                        let registers = self.load_abi_values(b, block_id, ret_value);
+                        assert!(registers.len() <= 1, "more than 1 ABI value not implemented");
+                        let mut ret_assignments = Vec::new();
+                        for virt in registers {
+                            ret_assignments.push(RetAssignment { virt, phys: Arm64Reg::R0 });
+                        };
 
-                        let block_id = b.block_map[&mir_block_id];
-                        b.func.push_instr(block_id, Arm64Instr::PseudoRet(Vec::new()));
+                        b.func.push_instr(block_id, Arm64Instr::PseudoRet(ret_assignments));
                     },
                     ref terminator => todo!("{:?}", terminator)
                 }
@@ -143,29 +300,35 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_arm64_lir_phys_register(&self, func: &Function<Arm64Instr>, reg: PhysicalRegister, f: &mut Formatter) {
+    pub fn display_arm64_lir_phys_register(&self, func: &Function<Arm64Instr>, reg: PhysicalRegister, width: impl Into<RegisterWidth> + Copy + 'display_adapter_lifetime, f: &mut Formatter) {
         match reg.class {
-            RegisterClass::Int => write!(f, "x{}", reg.num),
-            RegisterClass::Float => write!(f, "d{}", reg.num),
+            RegisterClass::Int => match width.into() {
+                RegisterWidth::W32 => write!(f, "w{}", reg.num),
+                RegisterWidth::W64 => write!(f, "x{}", reg.num),
+            },
+            RegisterClass::Float => match width.into() {
+                RegisterWidth::W32 => write!(f, "s{}", reg.num),
+                RegisterWidth::W64 => write!(f, "d{}", reg.num),
+            },
         }
     }
 
     #[display_adapter]
-    pub fn display_arm64_lir_arg_assignment(&self, func: &Function<Arm64Instr>, assignment: ArgAssignment, f: &mut Formatter) {
+    pub fn display_arm64_lir_arg_assignment(&self, func: &Function<Arm64Instr>, assignment: ArgAssignment, width: impl Into<RegisterWidth> + Copy + 'display_adapter_lifetime, f: &mut Formatter) {
         write!(
             f,
             "{} = {}",
             self.display_arm64_lir_virt_register(func, assignment.virt),
-            self.display_arm64_lir_phys_register(func, assignment.phys),
+            self.display_arm64_lir_phys_register(func, assignment.phys, width),
         )
     }
 
     #[display_adapter]
-    pub fn display_arm64_lir_ret_assignment(&self, func: &Function<Arm64Instr>, assignment: RetAssignment, f: &mut Formatter) {
+    pub fn display_arm64_lir_ret_assignment(&self, func: &Function<Arm64Instr>, assignment: RetAssignment, width: impl Into<RegisterWidth> + Copy + 'display_adapter_lifetime, f: &mut Formatter) {
         write!(
             f,
             "{} = {}",
-            self.display_arm64_lir_phys_register(func, assignment.phys),
+            self.display_arm64_lir_phys_register(func, assignment.phys, width),
             self.display_arm64_lir_virt_register(func, assignment.virt),
         )
     }
@@ -174,23 +337,26 @@ impl Driver {
     pub fn display_arm64_lir_instr(&self, func: &Function<Arm64Instr>, instr_id: InstrId, f: &mut Formatter) {
         match func.instrs[instr_id] {
             Arm64Instr::PseudoArgs(ref args) => {
-                write!(f, "@args {{")?;
-                let mut first = true;
-                for &arg in args {
-                    if !first {
-                        write!(f, ", ")?;
-                    } else {
-                        first = false;
-                    }
+                write!(f, "@ARGS")?;
+                if !args.is_empty() {
+                    write!(f, " {{")?;
+                    let mut first = true;
+                    for &arg in args {
+                        if !first {
+                            write!(f, ", ")?;
+                        } else {
+                            first = false;
+                        }
 
-                    write!(f, "{}", self.display_arm64_lir_arg_assignment(func, arg))?;
+                        write!(f, "{}", self.display_arm64_lir_arg_assignment(func, arg, RegisterWidth::W64))?;
+                    }
+                    write!(f, " }}")?;
                 }
-                write!(f, " }}")?;
             },
             Arm64Instr::PseudoRet(ref values) => {
-                write!(f, "@ret")?;
+                write!(f, "@RET")?;
                 if values.len() == 1 {
-                    write!(f, "{}", self.display_arm64_lir_ret_assignment(func, values[0]))?;
+                    write!(f, " {}", self.display_arm64_lir_ret_assignment(func, values[0], RegisterWidth::W64))?;
                 } else if !values.is_empty() {
                     write!(f, " {{ ")?;
                     let mut first = true;
@@ -201,9 +367,22 @@ impl Driver {
                             first = false;
                         }
 
-                        write!(f, "{}", self.display_arm64_lir_ret_assignment(func, value))?;
+                        write!(f, "{}", self.display_arm64_lir_ret_assignment(func, value, RegisterWidth::W64))?;
                     }
                     write!(f, " }}")?;
+                }
+            },
+
+            Arm64Instr::MovK { destination, immediate, shift, .. } => {
+                write!(f, "MOVK {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?;
+                if shift > 0 {
+                    write!(f, ", LSL #{}", shift)?;
+                }
+            },
+            Arm64Instr::MovZ { destination, immediate, shift, .. } => {
+                write!(f, "MOVZ {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?;
+                if shift > 0 {
+                    write!(f, ", LSL #{}", shift)?;
                 }
             },
         };
@@ -225,7 +404,7 @@ impl Driver {
 
     #[display_adapter]
     pub fn display_lir_function(&self, func: &Function<Arm64Instr>, f: &mut Formatter) {
-        writeln!(f, "fn {} {{", self.fn_name(None))?;
+        writeln!(f, "fn {} {{", self.fn_name(func.name))?;
         if let Some(entry_block) = func.entry_block() {
             write!(f, "{}", self.display_lir_block(func, entry_block))?;
         } else {

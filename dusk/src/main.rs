@@ -271,9 +271,13 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                 return ExitCode::FAILURE;
             };
 
-            let main_func = driver.mir.functions[main].get().unwrap();
-            let lir_func = driver.build_lir(main_func);
-            println!("{}", driver.display_lir_function(&lir_func));
+            for func in driver.mir.functions.iter() {
+                let Some(func) = func.get() else {
+                    continue;
+                };
+                let lir_func = driver.build_lir(func);
+                println!("{}", driver.display_lir_function(&lir_func));
+            }
 
             #[cfg(debug_assertions)]
             println!("Running main in the interpreter:\n");

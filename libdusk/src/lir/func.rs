@@ -1,3 +1,5 @@
+use string_interner::DefaultSymbol as Sym;
+
 use crate::index_vec::IndexVec;
 use crate::linked_list::{LinkedList, LinkedListHead, LinkedListStorage};
 
@@ -7,6 +9,7 @@ define_index_type!(pub struct InstrId = u32;);
 define_index_type!(pub struct StackSlotId = u32;);
 
 pub struct Function<InstrKind> {
+    pub name: Option<Sym>,
     pub blocks: LinkedList<BlockId, Block>,
     pub instrs: IndexVec<InstrId, InstrKind>,
     pub instr_nodes: LinkedListStorage<InstrId, InstrNode>,
@@ -33,6 +36,7 @@ impl<InstrKind> Default for Function<InstrKind> {
 impl<InstrKind> Function<InstrKind> {
     pub fn new() -> Self {
         Self {
+            name: None,
             blocks: LinkedList::new(),
             instrs: IndexVec::new(),
             instr_nodes: LinkedListStorage::new(),
