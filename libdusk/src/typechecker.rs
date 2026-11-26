@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use num_bigint::BigInt;
+use num_traits::Signed;
 use smallvec::SmallVec;
 use rayon::prelude::*;
 
@@ -99,6 +101,14 @@ impl StupidNaiveTypeProviderView {
     }
 }
 
+fn max_int_value(num_bits: usize) -> BigInt {
+    1u64.unbounded_shl(num_bits as u32).wrapping_sub(1).into()
+}
+
+fn min_signed_int_value(num_bits: usize) -> BigInt {
+    (i64::MIN >> (64 - num_bits)).into()
+}
+
 impl tir::Expr<tir::IntLit> {
     fn run_pass_1(&self, _driver: &Driver, view: &mut StupidNaiveTypeProviderView) {
         view.expr_constraints.insert(self.id, ConstraintList::new()
@@ -107,7 +117,32 @@ impl tir::Expr<tir::IntLit> {
     }
 
     fn run_pass_2_legacy(&self, driver: &Driver, _ms: &DriverMutableState, tp: &mut dyn TypeProvider) {
-        *tp.ty_mut(self.id) = driver.solve_constraints(tp, self.id).expect("Ambiguous type for integer literal").qual_ty.ty;
+        let ty = driver.solve_constraints(tp, self.id).expect("Ambiguous type for integer literal").qual_ty.ty;
+        if let Type::Int { width, is_signed } = ty {
+            let ms = driver.mutable_state.read().unwrap();
+            let ast::Expr::IntLit { ref lit } = ef!(@ms, self.id.ast) else {
+                panic!("internal compiler error: int lit is not an int lit");
+            };
+            let bit_width = width.bit_width(driver.arch);
+            let (max_value, min_value) = if is_signed {
+                (max_int_value(bit_width - 1), min_signed_int_value(bit_width))
+            } else {
+                (max_int_value(bit_width), BigInt::ZERO)
+            };
+            let too_positive = lit > &max_value;
+            let too_negative = lit < &min_value;
+            if lit.is_negative() && !is_signed {
+                driver.diag.report_error("unsigned integer literal cannot be negative", self.id, format!("inferred type is '{:?}'", ty));
+            } else if too_positive || too_negative {
+                let limit_violation_msg = if too_positive {
+                    format!("maximum value allowed is {}", max_value)
+                } else {
+                    format!("minimum value allowed is {}", min_value)
+                };
+                driver.diag.report_error(format!("integer literal does not fit in inferred type '{:?}'", ty), self.id, limit_violation_msg);
+            }
+        }
+        *tp.ty_mut(self.id) = ty;
     }
 }
 
