@@ -1,0 +1,10 @@
+// See https://github.com/dusklang/dusk/issues/133
+
+// foo :: foo
+
+// Foo :: struct { foo: Foo }
+
+// fn foo(bar: u32): u32 { bar }
+// bar :: foo(bar)
+
+// Foo :: struct { foo: *Foo }

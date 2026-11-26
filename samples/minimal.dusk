@@ -1,3 +1,35 @@
+// fn main() {
+//     print("Hello, world!\n")
+//     print_int(return_int())
+// }
+
+// A :: enum {
+//     a(B)
+// }
+
+// B :: enum {
+//     b(C)
+// }
+
+// C :: enum {
+//     c
+// }
+
+// fn return_int(): usize {
+//     switch B.b(C.c) {
+//         .b(c): {
+//             c
+//         }
+//     }
+// }
+
+fn return_int(): usize {
+    7
+}
+
+fn return_i32(): i32 {
+    7
+}
+
 fn main() {
-    print("Hello, world!\n")
 }
