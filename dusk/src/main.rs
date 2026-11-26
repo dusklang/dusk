@@ -276,7 +276,7 @@ fn dusk_main(task: DuskTask<'_>) -> ExitCode {
                     continue;
                 };
                 let lir_func = driver.build_lir(func);
-                println!("{}", driver.display_lir_function(&lir_func));
+                println!("{}\n", driver.display_lir_function(&lir_func));
             }
 
             #[cfg(debug_assertions)]
