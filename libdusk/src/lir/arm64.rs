@@ -5,12 +5,13 @@ use dusk_proc_macros::display_adapter;
 use crate::driver::Driver;
 use crate::lir::cursor::Cursor;
 use crate::lir::func::{BlockId, Function, InstrId, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
-use crate::mir;
+use crate::{mir, ty};
 use crate::mir::cursor::Cursor as _;
 use crate::ty::Type;
 
 enum Arm64Reg {}
 
+#[allow(unused)]
 impl Arm64Reg {
     const R0: PhysicalRegister = PhysicalRegister { num: 0, class: RegisterClass::Int };
     const R1: PhysicalRegister = PhysicalRegister { num: 1, class: RegisterClass::Int };
@@ -112,8 +113,8 @@ impl From<IntWidth> for RegisterWidth {
 
 #[derive(Copy, Clone)]
 pub enum Const {
-    Unsigned(usize),
-    Signed(isize),
+    Int32(u32),
+    Int64(u64),
 }
 
 #[derive(Copy, Clone)]
@@ -173,11 +174,46 @@ impl Driver {
                         let konst = match konst {
                             mir::Const::Int { lit, ty } => {
                                 match *ty {
-                                    Type::Int { is_signed, .. } => {
-                                        if is_signed {
-                                            Const::Signed(lit.try_into().unwrap())
-                                        } else {
-                                            Const::Unsigned(lit.try_into().unwrap())
+                                    Type::Int { is_signed, width } => {
+                                        match width {
+                                            ty::IntWidth::Pointer | ty::IntWidth::W64 => {
+                                                let lit64: u64 = if is_signed {
+                                                    let lit_signed_64: i64 = lit.try_into().unwrap();
+                                                    lit_signed_64.cast_unsigned()
+                                                } else {
+                                                    lit.try_into().unwrap()
+                                                };
+                                                Const::Int64(lit64)
+                                            },
+                                            ty::IntWidth::W32 => {
+                                                let lit32: u32 = if is_signed {
+                                                    let lit_signed_32: i32 = lit.try_into().unwrap();
+                                                    lit_signed_32.cast_unsigned()
+                                                } else {
+                                                    lit.try_into().unwrap()
+                                                };
+                                                Const::Int32(lit32)
+                                            },
+                                            ty::IntWidth::W16 => {
+                                                let lit32: u32 = if is_signed {
+                                                    let lit_signed_16: i16 = lit.try_into().unwrap();
+                                                    let lit_signed_32: i32 = lit_signed_16.into();
+                                                    lit_signed_32.cast_unsigned()
+                                                } else {
+                                                    lit.try_into().unwrap()
+                                                };
+                                                Const::Int32(lit32)
+                                            },
+                                            ty::IntWidth::W8 => {
+                                                let lit32: u32 = if is_signed {
+                                                    let lit_signed_8: i8 = lit.try_into().unwrap();
+                                                    let lit_signed_32: i32 = lit_signed_8.into();
+                                                    lit_signed_32.cast_unsigned()
+                                                } else {
+                                                    lit.try_into().unwrap()
+                                                };
+                                                Const::Int32(lit32)
+                                            },
                                         }
                                     },
                                     _ => todo!(),
@@ -200,18 +236,18 @@ impl Driver {
     fn load_scalar_value(&self, b: &mut Builder<'_>, block_id: BlockId, value: Value) -> Option<VirtualRegister> {
         match value {
             Value::Const(konst) => {
-                let value = match konst {
-                    Const::Signed(value) => value.cast_unsigned(),
-                    Const::Unsigned(value) => value,
-                };
                 let destination = b.func.make_vreg(RegisterClass::Int);
-                b.func.push_instr(
-                    block_id,
-                    Arm64Instr::PseudoMovImmediate64 {
+                let instr = match konst {
+                    Const::Int32(immediate) => Arm64Instr::PseudoMovImmediate32 {
                         destination,
-                        immediate: value.try_into().unwrap(),
-                    }
-                );
+                        immediate,
+                    },
+                    Const::Int64(immediate) => Arm64Instr::PseudoMovImmediate64 {
+                        destination,
+                        immediate,
+                    },
+                };
+                b.func.push_instr(block_id, instr);
                 Some(destination)
             },
             Value::VirtualRegister(reg) => Some(reg),
@@ -371,8 +407,8 @@ impl Driver {
                     write!(f, " }}")?;
                 }
             },
-            Arm64Instr::PseudoMovImmediate32 { destination, immediate } => write!(f, "@mov {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
-            Arm64Instr::PseudoMovImmediate64 { destination, immediate } => write!(f, "@mov {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
+            Arm64Instr::PseudoMovImmediate32 { destination, immediate } => write!(f, "@mov32 {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
+            Arm64Instr::PseudoMovImmediate64 { destination, immediate } => write!(f, "@mov64 {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
 
             Arm64Instr::MovK { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'k'))?,
             Arm64Instr::MovZ { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
