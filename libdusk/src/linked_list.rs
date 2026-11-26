@@ -161,6 +161,66 @@ impl<Id: Idx, Data> LinkedListStorage<Id, Data> {
             next.prev = prev;
         }
     }
+
+    pub fn insert_before(&mut self, head: &mut LinkedListHead<Id>, next: Id, data: Data) -> Id {
+        debug_assert!(head.first.is_some());
+        debug_assert!(head.last.is_some());
+        #[cfg(debug_assertions)]
+        assert_eq!(self.nodes[next].head_id, Some(head.id));
+
+        let prev = self.nodes[next].prev;
+        let id = self.nodes.push(
+            LinkedListNode {
+                prev,
+                next: Some(next),
+                data,
+
+                #[cfg(debug_assertions)]
+                head_id: Some(head.id),
+            }
+        );
+        if head.first == Some(next) {
+            head.first = Some(id);
+        }
+        if let Some(prev) = prev {
+            let prev_node = &mut self.nodes[prev];
+            debug_assert_eq!(prev_node.next, Some(next));
+            prev_node.next = Some(id);
+        }
+        self.nodes[next].prev = Some(id);
+
+        id
+    }
+
+    pub fn insert_after(&mut self, head: &mut LinkedListHead<Id>, prev: Id, data: Data) -> Id {
+        debug_assert!(head.first.is_some());
+        debug_assert!(head.last.is_some());
+        #[cfg(debug_assertions)]
+        assert_eq!(self.nodes[prev].head_id, Some(head.id));
+
+        let next = self.nodes[prev].next;
+        let id = self.nodes.push(
+            LinkedListNode {
+                prev: Some(prev),
+                next,
+                data,
+
+                #[cfg(debug_assertions)]
+                head_id: Some(head.id),
+            }
+        );
+        if head.last == Some(prev) {
+            head.last = Some(id);
+        }
+        if let Some(next) = next {
+            let next_node = &mut self.nodes[next];
+            debug_assert_eq!(next_node.prev, Some(prev));
+            next_node.prev = Some(id);
+        }
+        self.nodes[prev].next = Some(id);
+
+        id
+    }
 }
 
 impl<Id: Idx, Data> Index<Id> for LinkedListStorage<Id, Data> {
@@ -209,6 +269,14 @@ impl<Id: Idx, Data> LinkedList<Id, Data> {
 
     pub fn remove(&mut self, id: Id) {
         self.storage.remove(&mut self.head, id);
+    }
+
+    pub fn insert_before(&mut self, next: Id, data: Data) -> Id {
+        self.storage.insert_before(&mut self.head, next, data)
+    }
+
+    pub fn insert_after(&mut self, prev: Id, data: Data) -> Id {
+        self.storage.insert_after(&mut self.head, prev, data)
     }
 
     pub fn is_empty(&self) -> bool {
