@@ -50,6 +50,25 @@ pub struct RetAssignment {
 pub enum Arm64Instr {
     PseudoArgs(Vec<ArgAssignment>),
     PseudoRet(Vec<RetAssignment>),
+
+    // TODO: map these pseudo-instructions to movk, movz and movn. Rough algorithm:
+    //     - Split number into 16-bit chunks (4 for 64-bit case, 2 for 32-bit case)
+    //     - Count how many chunks are equal to 0, and how many are equal to 0xffff.
+    //     - If either of the counts are equal to the total number of chunks, then do
+    //       a single movz/movn for 0 and 0xffff respectively, with immediate = 0.
+    //     - If the counts are the same, or there are more chunks = 0 than = 0xffff,
+    //       then start with a movz of the first non-zero chunk, movk of the rest.
+    //     - If there are more chunks = 0xffff than = 0, then start with a movn of the
+    //       bitwise not of the first non-0xffff chunk, then movk of the rest.
+    PseudoMovImmediate64 {
+        destination: VirtualRegister,
+        immediate: u64
+    },
+    PseudoMovImmediate32 {
+        destination: VirtualRegister,
+        immediate: u32,
+    },
+
     MovK {
         width: IntWidth,
         destination: VirtualRegister,
@@ -57,6 +76,12 @@ pub enum Arm64Instr {
         shift: u8,
     },
     MovZ {
+        width: IntWidth,
+        destination: VirtualRegister,
+        immediate: u16,
+        shift: u8,
+    },
+    MovN {
         width: IntWidth,
         destination: VirtualRegister,
         immediate: u16,
@@ -175,53 +200,18 @@ impl Driver {
     fn load_scalar_value(&self, b: &mut Builder<'_>, block_id: BlockId, value: Value) -> Option<VirtualRegister> {
         match value {
             Value::Const(konst) => {
-                let mut value = match konst {
+                let value = match konst {
                     Const::Signed(value) => value.cast_unsigned(),
                     Const::Unsigned(value) => value,
                 };
                 let destination = b.func.make_vreg(RegisterClass::Int);
-                let mut already_zeroed = false;
-                let mut shift = 0;
-                while value > 0 {
-                    let immediate = (value & 0xFFFF) as u16;
-                    if immediate > 0 {
-                        if !already_zeroed {
-                            b.func.push_instr(
-                                block_id,
-                                Arm64Instr::MovZ {
-                                    width: IntWidth::W64,
-                                    destination,
-                                    shift,
-                                    immediate: (immediate & 0xFFFF) as u16,
-                                }
-                            );
-                            already_zeroed = true;
-                        } else {
-                            b.func.push_instr(
-                                block_id,
-                                Arm64Instr::MovK {
-                                    width: IntWidth::W64,
-                                    destination,
-                                    shift,
-                                    immediate: (immediate & 0xFFFF) as u16,
-                                }
-                            );
-                        }
+                b.func.push_instr(
+                    block_id,
+                    Arm64Instr::PseudoMovImmediate64 {
+                        destination,
+                        immediate: value.try_into().unwrap(),
                     }
-                    value >>= 16;
-                    shift += 16;
-                }
-                if !already_zeroed {
-                    b.func.push_instr(
-                        block_id,
-                        Arm64Instr::MovZ {
-                            width: IntWidth::W64,
-                            destination,
-                            shift: 0,
-                            immediate: 0,
-                        }
-                    );
-                }
+                );
                 Some(destination)
             },
             Value::VirtualRegister(reg) => Some(reg),
@@ -334,10 +324,19 @@ impl Driver {
     }
 
     #[display_adapter]
+    pub fn display_arm64_lir_mov_instr(&self, func: &Function<Arm64Instr>, destination: VirtualRegister, immediate: u64, shift: u8, variant: char, f: &mut Formatter) {
+        write!(f, "mov{} {}, #{}", variant, self.display_arm64_lir_virt_register(func, destination), immediate)?;
+        if shift > 0 {
+            write!(f, ", lsl #{}", shift)?;
+        }
+        Ok(())
+    }
+
+    #[display_adapter]
     pub fn display_arm64_lir_instr(&self, func: &Function<Arm64Instr>, instr_id: InstrId, f: &mut Formatter) {
         match func.instrs[instr_id] {
             Arm64Instr::PseudoArgs(ref args) => {
-                write!(f, "@ARGS")?;
+                write!(f, "@args")?;
                 if !args.is_empty() {
                     write!(f, " {{")?;
                     let mut first = true;
@@ -354,7 +353,7 @@ impl Driver {
                 }
             },
             Arm64Instr::PseudoRet(ref values) => {
-                write!(f, "@RET")?;
+                write!(f, "@ret")?;
                 if values.len() == 1 {
                     write!(f, " {}", self.display_arm64_lir_ret_assignment(func, values[0], RegisterWidth::W64))?;
                 } else if !values.is_empty() {
@@ -372,19 +371,12 @@ impl Driver {
                     write!(f, " }}")?;
                 }
             },
+            Arm64Instr::PseudoMovImmediate32 { destination, immediate } => write!(f, "@mov {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
+            Arm64Instr::PseudoMovImmediate64 { destination, immediate } => write!(f, "@mov {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
 
-            Arm64Instr::MovK { destination, immediate, shift, .. } => {
-                write!(f, "MOVK {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?;
-                if shift > 0 {
-                    write!(f, ", LSL #{}", shift)?;
-                }
-            },
-            Arm64Instr::MovZ { destination, immediate, shift, .. } => {
-                write!(f, "MOVZ {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?;
-                if shift > 0 {
-                    write!(f, ", LSL #{}", shift)?;
-                }
-            },
+            Arm64Instr::MovK { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'k'))?,
+            Arm64Instr::MovZ { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
+            Arm64Instr::MovN { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
         };
         Ok(())
     }
