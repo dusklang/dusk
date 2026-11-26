@@ -1,5 +1,6 @@
 use crate::linker::exe::{Exe, FixupLocationId};
-use crate::mir::FuncId;
+use crate::mir;
+use crate::lir;
 use crate::driver::Driver;
 use crate::target::Arch;
 
@@ -11,13 +12,31 @@ pub mod x64;
 pub mod arm64;
 pub mod dex;
 
-pub trait Backend {
+pub trait AnyBackend {
     fn arch(&self) -> Arch;
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe);
+    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe);
+}
+
+impl<B> AnyBackend for B where B: Backend {
+    fn arch(&self) -> Arch {
+        Backend::arch(self)
+    }
+    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) {
+        let func = self.lower_func(d, func_index, is_main, exe);
+        self.generate_func(d, &func, is_main, exe);
+    }
+}
+
+pub trait Backend: AnyBackend {
+    type Instr;
+
+    fn arch(&self) -> Arch;
+    fn lower_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) -> lir::Function<Self::Instr>;
+    fn generate_func(&self, d: &Driver, func: &lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe);
 }
 
 impl Driver {
-    pub fn create_backend(&self) -> Box<dyn Backend> {
+    pub fn create_backend(&self) -> Box<dyn AnyBackend> {
         match self.arch {
             Arch::X86_64 => Box::new(X64Backend::new()),
             Arch::Arm64 => Box::new(Arm64Backend::new()),

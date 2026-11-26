@@ -19,7 +19,7 @@ use crate::driver::Driver;
 use crate::linker::byte_swap::{Buffer, Ref};
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::Backend;
+use crate::backend::AnyBackend;
 use crate::bundler::Bundler;
 use crate::zip::{EndOfCentralDirectoryRecord, ZipBuilder};
 
@@ -65,7 +65,7 @@ fn base64_of_sha256(input: &[u8]) -> String {
 }
 
 impl Bundler for ApkBundler {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, linker: &mut dyn Linker, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, linker: &mut dyn Linker, backend: &mut dyn AnyBackend, dest: &mut dyn Write) -> io::Result<()> {
         let mut classes_dex = Vec::new();
         linker.write(d, main_function_index, backend, &mut classes_dex)?;
 

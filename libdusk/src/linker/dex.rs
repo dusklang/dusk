@@ -20,7 +20,7 @@ use crate::linker::Linker;
 use crate::linker::exe::Exe;
 use crate::driver::Driver;
 use crate::mir::FuncId;
-use crate::backend::Backend;
+use crate::backend::AnyBackend;
 use crate::linker::exe::*;
 use crate::linker::byte_swap::{Buffer, Ref};
 
@@ -727,10 +727,10 @@ pub struct DexLinker {
 }
 
 impl Linker for DexLinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn io::Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn AnyBackend, dest: &mut dyn io::Write) -> io::Result<()> {
         let mut exe = DexExe::new();
 
-        backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.compile_func(d, main_function_index, true, &mut exe);
 
         exe.sort_strings();
 

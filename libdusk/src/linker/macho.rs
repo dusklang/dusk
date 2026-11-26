@@ -12,7 +12,7 @@ use rsa::sha2::{Sha256, Digest};
 
 use dusk_proc_macros::ByteSwap;
 
-use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::exe::*;
 use crate::linker::byte_swap::*;
 use crate::linker::Linker;
@@ -604,11 +604,11 @@ impl MachOLinker {
 }
 
 impl Linker for MachOLinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn AnyBackend, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = MachOExe::new();
         let _lib_system = exe.import_dynamic_library("libSystem");
 
-        backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.compile_func(d, main_function_index, true, &mut exe);
         let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
 
         let mach_header = self.buf.alloc::<MachHeader>();

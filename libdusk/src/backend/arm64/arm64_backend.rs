@@ -1,7 +1,11 @@
-use crate::backend::arm64::*;
 use crate::backend::Backend;
+use crate::backend::arm64::*;
+use crate::backend::AnyBackend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
+use crate::lir::Function;
+use crate::lir::arm64::Arm64Instr;
+use crate::lir::cursor::Cursor as _;
 use crate::mir::CallKind;
 use crate::mir::TerminatorKind;
 use crate::mir::ValueKind;
@@ -19,90 +23,51 @@ impl Arm64Backend {
 }
 
 impl Backend for Arm64Backend {
+    type Instr = Arm64Instr;
+
     fn arch(&self) -> Arch {
         Arch::Arm64
     }
 
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
+    fn lower_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> Function<Arm64Instr> {
+        d.build_lir(d.mir.functions[func_index].get().unwrap())
+    }
+
+    fn generate_func(&self, d: &Driver, func: &crate::lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe) {
         let mut code = Arm64Encoder::new();
 
-        let func = d.mir.functions[func_index].get().unwrap();
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
-        assert_eq!(func.num_parameters(), 0);
 
         match d.os {
             OperatingSystem::MacOS => {
                 let frame_size = 16;
-                code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
-                code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
+
                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
                 let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block);
+                cursor.goto_top(func.entry_block().unwrap());
                 while let Some(instr) = cursor.next_instr() {
-                    match &func.instrs[instr].kind {
-                        InstrKind::Const(konst) => {
-                            match konst {
-                                &Const::Str { id, .. } => {
-                                    let libobjc = exe.import_dynamic_library("libobjc");
-                                    let objc_msg_send = exe.import_symbol(libobjc, "_objc_msgSend".to_string());
-                                    let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
-                                    code.load_fixed_up_address(Reg::R16, objc_msg_send);
-
-                                    let cfstring = exe.use_constant_nsstring(&d.mir.strings[id]);
-                                    code.load_fixed_up_address(Reg::R0, cfstring);
-
-                                    let string_by_appending_string = exe.use_objc_selector(c"stringByAppendingString:");
-                                    code.load_fixed_up_address(Reg::R1, string_by_appending_string);
-
-                                    let cfstring_to_append = exe.use_constant_nsstring(c" LOLOLOLOLOLOL YOU'VE BEEN Appended To");
-                                    code.load_fixed_up_address(Reg::R2, cfstring_to_append);
-
-                                    code.blr(Reg::R16);
-
-                                    // TODO: move string to stack, also maybe don't append another string to the end.
-                                },
-                                _ => todo!("{}", d.display_const(konst)),
+                    match cursor.func.instrs[instr] {
+                        Arm64Instr::PseudoArgs(ref args) => {
+                            code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+                            code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
+                        },
+                        Arm64Instr::PseudoRet(ref assignments) => {
+                            assert_eq!(assignments.len(), 0);
+                            // If this is the main function, we should return 0 despite the high-level return type being `void`.
+                            if is_main {
+                                // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
+                                code.movz64(Reg::R0, 0, 0);
+                            } else {
+                                todo!();
                             }
-                        },
-                        InstrKind::Call(call) => match *call {
-                            CallKind::LegacyIntrinsic { intr, .. } => {
-                                match intr {
-                                    LegacyIntrinsic::Print => {
-                                        let foundation = exe.import_framework("Foundation");
-                                        let puts = exe.import_symbol(foundation, "_NSLog".to_string());
-                                        let puts = exe.use_imported_symbol(puts);
-                                        code.load_fixed_up_address(Reg::R16, puts);
 
-                                        // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
-                                        code.blr(Reg::R16);
-                                    },
-                                    _ => todo!("{}", d.display_mir_call(func, call)),
-                                }
-                            },
-                            _ => todo!("{}", d.display_mir_call(func, call)),
+                            code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
+                            code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+                            code.ret(Reg::LR);
                         },
-                        _ => todo!("{}", d.display_mir_instr(func, instr)),
+                        _ => todo!(),
                     }
                 }
-
-                let terminator = cursor.terminator().unwrap();
-                match *terminator {
-                    TerminatorKind::Ret(value) => {
-                        let ret_void = matches!(func.values[value].kind, ValueKind::Void);
-                        // If this is the main function, we should return 0 despite the high-level return type being `void`.
-                        if is_main {
-                            assert!(ret_void);
-                            // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-                            code.movz64(Reg::R0, 0, 0);
-                        } else {
-                            todo!();
-                        }
-                    },
-                    _ => todo!("{}", d.display_mir_terminator(func, terminator)),
-                }
-                code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
-                code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
-                code.ret(Reg::LR);
             },
             OperatingSystem::Windows => {
                 let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
@@ -112,144 +77,65 @@ impl Backend for Arm64Backend {
                 let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
 
                 let frame_size = 16;
-                code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
-                code.mov64(Reg::FP, Reg::SP);
+
                 let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block);
+                cursor.goto_top(func.entry_block().unwrap());
                 while let Some(instr) = cursor.next_instr() {
-                    match &func.instrs[instr].kind {
-                        InstrKind::Const(konst) => {
-                            match konst {
-                                &Const::Str { id, .. } => {
-                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
-                                },
-                                _ => todo!("{}", d.display_const(konst)),
+                    match func.instrs[instr] {
+                        Arm64Instr::PseudoArgs(ref args) => {
+                            code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
+                            code.mov64(Reg::FP, Reg::SP);
+                        },
+                        Arm64Instr::PseudoRet(ref assignments) => {
+                            assert_eq!(assignments.len(), 0);
+                            // If this is the main function, we should return 0 despite the high-level return type being `void`.
+                            if is_main {
+                                // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
+                                code.movz64(Reg::R0, 0, 0);
+                                code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
+                                code.blr(Reg::R16);
+                            } else {
+                                todo!();
                             }
+
+                            code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
+                            code.ret(Reg::LR);
                         },
-                        InstrKind::Call(call) => match *call {
-                            CallKind::LegacyIntrinsic { intr, .. } => {
-                                match intr {
-                                    LegacyIntrinsic::Print => {
-                                        // Store string address in x19 (assuming it's already in x0 for now, which is obviously dumb)
-                                        code.mov64(Reg::R19, Reg::R0);
-
-                                        // Store stdout handle in x20
-                                        // TODO: implement whatever instruction "mov w0, -11" expands to.
-                                        code.macro_mov64_abs(Reg::R0, -11i64 as u64);
-                                        code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(get_std_handle));
-                                        code.blr(Reg::R16);
-                                        code.mov64(Reg::R20, Reg::R0);
-
-                                        // Store string length in w21
-                                        code.mov64(Reg::R0, Reg::R19);
-                                        code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(lstrlen));
-                                        code.blr(Reg::R16);
-                                        code.mov32(Reg::R21, Reg::R0);
-
-                                        // Call WriteConsoleA
-                                        code.movk64(Reg::R4, 0, 0);
-                                        code.movk64(Reg::R3, 0, 0);
-                                        code.mov32(Reg::R2, Reg::R21);
-                                        code.mov64(Reg::R1, Reg::R19);
-                                        code.mov64(Reg::R0, Reg::R20);
-                                        code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(write_console));
-                                        code.blr(Reg::R16);
-                                    },
-                                    _ => todo!("{}", d.display_mir_call(func, call)),
-                                }
-                            },
-                            _ => todo!("{}", d.display_mir_call(func, call)),
-                        },
-                        _ => todo!("{}", d.display_mir_instr(func, instr)),
+                        _ => todo!(),
                     }
                 }
-                let terminator = cursor.terminator().unwrap();
-                match *terminator {
-                    TerminatorKind::Ret(value) => {
-                        let ret_void = matches!(func.values[value].kind, ValueKind::Void);
-                        // If this is the main function, we should call ExitProcess.
-                        if is_main {
-                            assert!(ret_void);
-                            // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-                            code.movz64(Reg::R0, 0, 0);
-                            code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
-                            code.blr(Reg::R16);
-                        } else {
-                            todo!();
-                        }
-                    },
-                    _ => todo!("{}", d.display_mir_terminator(func, terminator)),
-                }
-                code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
-                code.ret(Reg::LR);
             },
             OperatingSystem::Linux => {
-                code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
-                code.mov64(Reg::R29, Reg::SP);
-
                 let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block);
+                cursor.goto_top(func.entry_block().unwrap());
                 while let Some(instr) = cursor.next_instr() {
-                    match &func.instrs[instr].kind {
-                        InstrKind::Const(konst) => {
-                            match konst {
-                                &Const::Str { id, .. } => {
-                                    code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
-                                },
-                                _ => todo!("{}", d.display_const(konst)),
-                            }
+                    match func.instrs[instr] {
+                        Arm64Instr::PseudoArgs(ref args) => {
+                            code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
+                            code.mov64(Reg::R29, Reg::SP);
                         },
-                        InstrKind::Call(call) => match *call {
-                            CallKind::LegacyIntrinsic { intr, .. } => {
-                                match intr {
-                                    LegacyIntrinsic::Print => {
-                                        // String address (assuming it's already in x0 for now, which is obviously dumb)
-                                        code.mov64(Reg::R1, Reg::R0);
+                        Arm64Instr::PseudoRet(ref assignments) => {
+                            assert_eq!(assignments.len(), 0);
 
-                                        // stdout fd
-                                        code.movz64(Reg::R0, 1, 0);
+                            // If this is the main function, we should call exit().
+                            if is_main {
+                                // exit code
+                                code.movz64(Reg::R0, 7, 0);
+                                // syscall number
+                                code.movz64(Reg::R8, 93, 0);
+                                // syscall
+                                code.svc(0);
+                                code.nop();
+                            } else {
+                                todo!();
+                            }
 
-                                        // string length
-                                        // TODO: don't hardcode this! (obviously)
-                                        code.movz64(Reg::R2, 14, 0);
-
-                                        // syscall number
-                                        code.movz64(Reg::R8, 0x40, 0);
-
-                                        // syscall
-                                        code.svc(0);
-                                    },
-                                    _ => todo!("{}", d.display_mir_call(func, call)),
-                                }
-                            },
-                            _ => todo!("{}", d.display_mir_call(func, call)),
-                        }
-
-                        _ => todo!("{}", d.display_mir_instr(func, instr)),
+                            code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
+                            code.ret(Reg::LR);
+                        },
+                        _ => todo!(),
                     }
                 }
-                let terminator = cursor.terminator().unwrap();
-                match *terminator {
-                    TerminatorKind::Ret(value) => {
-                        let ret_void = matches!(func.values[value].kind, ValueKind::Void);
-                        // If this is the main function, we should call exit().
-                        if is_main {
-                            assert!(ret_void);
-                            // exit code
-                            code.movz64(Reg::R0, 7, 0);
-                            // syscall number
-                            code.movz64(Reg::R8, 93, 0);
-                            // syscall
-                            code.svc(0);
-                            code.nop();
-                        } else {
-                            todo!();
-                        }
-                    },
-                    _ => todo!("{}", d.display_mir_terminator(func, terminator)),
-                }
-                code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
-                code.ret(Reg::LR);
             },
             OperatingSystem::Android => todo!(),
         }
@@ -257,3 +143,241 @@ impl Backend for Arm64Backend {
         exe.add_code_blob(Box::new(code));
     }
 }
+
+// impl AnyBackend for Arm64Backend {
+//     fn arch(&self) -> Arch {
+//         Arch::Arm64
+//     }
+
+//     fn compile_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
+//         let func = d.mir.functions[func_index].get().unwrap();
+//         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
+//         assert_eq!(func.num_parameters(), 0);
+
+//         match d.os {
+//             OperatingSystem::MacOS => {
+//                 let frame_size = 16;
+//                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+//                 code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
+//                 let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
+//                 let mut cursor = func.make_cursor();
+//                 cursor.goto_top(func.entry_block);
+//                 while let Some(instr) = cursor.next_instr() {
+//                     match &func.instrs[instr].kind {
+//                         InstrKind::Const(konst) => {
+//                             match konst {
+//                                 &Const::Str { id, .. } => {
+//                                     let libobjc = exe.import_dynamic_library("libobjc");
+//                                     let objc_msg_send = exe.import_symbol(libobjc, "_objc_msgSend".to_string());
+//                                     let objc_msg_send = exe.use_imported_symbol(objc_msg_send);
+//                                     code.load_fixed_up_address(Reg::R16, objc_msg_send);
+
+//                                     let cfstring = exe.use_constant_nsstring(&d.mir.strings[id]);
+//                                     code.load_fixed_up_address(Reg::R0, cfstring);
+
+//                                     let string_by_appending_string = exe.use_objc_selector(c"stringByAppendingString:");
+//                                     code.load_fixed_up_address(Reg::R1, string_by_appending_string);
+
+//                                     let cfstring_to_append = exe.use_constant_nsstring(c" LOLOLOLOLOLOL YOU'VE BEEN Appended To");
+//                                     code.load_fixed_up_address(Reg::R2, cfstring_to_append);
+
+//                                     code.blr(Reg::R16);
+
+//                                     // TODO: move string to stack, also maybe don't append another string to the end.
+//                                 },
+//                                 _ => todo!("{}", d.display_const(konst)),
+//                             }
+//                         },
+//                         InstrKind::Call(call) => match *call {
+//                             CallKind::LegacyIntrinsic { intr, .. } => {
+//                                 match intr {
+//                                     LegacyIntrinsic::Print => {
+//                                         let foundation = exe.import_framework("Foundation");
+//                                         let puts = exe.import_symbol(foundation, "_NSLog".to_string());
+//                                         let puts = exe.use_imported_symbol(puts);
+//                                         code.load_fixed_up_address(Reg::R16, puts);
+
+//                                         // TODO: make sure argument is in x0 (currently assumed because of how string literals are implemented)
+//                                         code.blr(Reg::R16);
+//                                     },
+//                                     _ => todo!("{}", d.display_mir_call(func, call)),
+//                                 }
+//                             },
+//                             _ => todo!("{}", d.display_mir_call(func, call)),
+//                         },
+//                         _ => todo!("{}", d.display_mir_instr(func, instr)),
+//                     }
+//                 }
+
+//                 let terminator = cursor.terminator().unwrap();
+//                 match *terminator {
+//                     TerminatorKind::Ret(value) => {
+//                         let ret_void = matches!(func.values[value].kind, ValueKind::Void);
+//                         // If this is the main function, we should return 0 despite the high-level return type being `void`.
+//                         if is_main {
+//                             assert!(ret_void);
+//                             // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
+//                             code.movz64(Reg::R0, 0, 0);
+//                         } else {
+//                             todo!();
+//                         }
+//                     },
+//                     _ => todo!("{}", d.display_mir_terminator(func, terminator)),
+//                 }
+//                 code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
+//                 code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+//                 code.ret(Reg::LR);
+//             },
+//             OperatingSystem::Windows => {
+//                 let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
+//                 let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
+//                 let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
+//                 let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());
+//                 let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
+
+//                 let frame_size = 16;
+//                 code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
+//                 code.mov64(Reg::FP, Reg::SP);
+//                 let mut cursor = func.make_cursor();
+//                 cursor.goto_top(func.entry_block);
+//                 while let Some(instr) = cursor.next_instr() {
+//                     match &func.instrs[instr].kind {
+//                         InstrKind::Const(konst) => {
+//                             match konst {
+//                                 &Const::Str { id, .. } => {
+//                                     code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
+//                                 },
+//                                 _ => todo!("{}", d.display_const(konst)),
+//                             }
+//                         },
+//                         InstrKind::Call(call) => match *call {
+//                             CallKind::LegacyIntrinsic { intr, .. } => {
+//                                 match intr {
+//                                     LegacyIntrinsic::Print => {
+//                                         // Store string address in x19 (assuming it's already in x0 for now, which is obviously dumb)
+//                                         code.mov64(Reg::R19, Reg::R0);
+
+//                                         // Store stdout handle in x20
+//                                         // TODO: implement whatever instruction "mov w0, -11" expands to.
+//                                         code.macro_mov64_abs(Reg::R0, -11i64 as u64);
+//                                         code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(get_std_handle));
+//                                         code.blr(Reg::R16);
+//                                         code.mov64(Reg::R20, Reg::R0);
+
+//                                         // Store string length in w21
+//                                         code.mov64(Reg::R0, Reg::R19);
+//                                         code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(lstrlen));
+//                                         code.blr(Reg::R16);
+//                                         code.mov32(Reg::R21, Reg::R0);
+
+//                                         // Call WriteConsoleA
+//                                         code.movk64(Reg::R4, 0, 0);
+//                                         code.movk64(Reg::R3, 0, 0);
+//                                         code.mov32(Reg::R2, Reg::R21);
+//                                         code.mov64(Reg::R1, Reg::R19);
+//                                         code.mov64(Reg::R0, Reg::R20);
+//                                         code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(write_console));
+//                                         code.blr(Reg::R16);
+//                                     },
+//                                     _ => todo!("{}", d.display_mir_call(func, call)),
+//                                 }
+//                             },
+//                             _ => todo!("{}", d.display_mir_call(func, call)),
+//                         },
+//                         _ => todo!("{}", d.display_mir_instr(func, instr)),
+//                     }
+//                 }
+//                 let terminator = cursor.terminator().unwrap();
+//                 match *terminator {
+//                     TerminatorKind::Ret(value) => {
+//                         let ret_void = matches!(func.values[value].kind, ValueKind::Void);
+//                         // If this is the main function, we should call ExitProcess.
+//                         if is_main {
+//                             assert!(ret_void);
+//                             // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
+//                             code.movz64(Reg::R0, 0, 0);
+//                             code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
+//                             code.blr(Reg::R16);
+//                         } else {
+//                             todo!();
+//                         }
+//                     },
+//                     _ => todo!("{}", d.display_mir_terminator(func, terminator)),
+//                 }
+//                 code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
+//                 code.ret(Reg::LR);
+//             },
+//             OperatingSystem::Linux => {
+//                 code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
+//                 code.mov64(Reg::R29, Reg::SP);
+
+//                 let mut cursor = func.make_cursor();
+//                 cursor.goto_top(func.entry_block);
+//                 while let Some(instr) = cursor.next_instr() {
+//                     match &func.instrs[instr].kind {
+//                         InstrKind::Const(konst) => {
+//                             match konst {
+//                                 &Const::Str { id, .. } => {
+//                                     code.load_fixed_up_address(Reg::R0, exe.use_cstring(&d.mir.strings[id]));
+//                                 },
+//                                 _ => todo!("{}", d.display_const(konst)),
+//                             }
+//                         },
+//                         InstrKind::Call(call) => match *call {
+//                             CallKind::LegacyIntrinsic { intr, .. } => {
+//                                 match intr {
+//                                     LegacyIntrinsic::Print => {
+//                                         // String address (assuming it's already in x0 for now, which is obviously dumb)
+//                                         code.mov64(Reg::R1, Reg::R0);
+
+//                                         // stdout fd
+//                                         code.movz64(Reg::R0, 1, 0);
+
+//                                         // string length
+//                                         // TODO: don't hardcode this! (obviously)
+//                                         code.movz64(Reg::R2, 14, 0);
+
+//                                         // syscall number
+//                                         code.movz64(Reg::R8, 0x40, 0);
+
+//                                         // syscall
+//                                         code.svc(0);
+//                                     },
+//                                     _ => todo!("{}", d.display_mir_call(func, call)),
+//                                 }
+//                             },
+//                             _ => todo!("{}", d.display_mir_call(func, call)),
+//                         }
+
+//                         _ => todo!("{}", d.display_mir_instr(func, instr)),
+//                     }
+//                 }
+//                 let terminator = cursor.terminator().unwrap();
+//                 match *terminator {
+//                     TerminatorKind::Ret(value) => {
+//                         let ret_void = matches!(func.values[value].kind, ValueKind::Void);
+//                         // If this is the main function, we should call exit().
+//                         if is_main {
+//                             assert!(ret_void);
+//                             // exit code
+//                             code.movz64(Reg::R0, 7, 0);
+//                             // syscall number
+//                             code.movz64(Reg::R8, 93, 0);
+//                             // syscall
+//                             code.svc(0);
+//                             code.nop();
+//                         } else {
+//                             todo!();
+//                         }
+//                     },
+//                     _ => todo!("{}", d.display_mir_terminator(func, terminator)),
+//                 }
+//                 code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
+//                 code.ret(Reg::LR);
+//             },
+//             OperatingSystem::Android => todo!(),
+//         }
+
+//         exe.add_code_blob(Box::new(code));
+//     }
+// }

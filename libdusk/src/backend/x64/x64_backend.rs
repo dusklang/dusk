@@ -4,7 +4,7 @@ use crate::mir::cursor::Cursor;
 use crate::mir::{CallKind, Const, FuncId, InstrKind, TerminatorKind, ValueKind};
 use crate::linker::exe::*;
 use crate::backend::x64::*;
-use crate::backend::Backend;
+use crate::backend::AnyBackend;
 use crate::target::Arch;
 
 pub struct X64Backend;
@@ -15,12 +15,12 @@ impl X64Backend {
     }
 }
 
-impl Backend for X64Backend {
+impl AnyBackend for X64Backend {
     fn arch(&self) -> Arch {
         Arch::X86_64
     }
 
-    fn generate_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
+    fn compile_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
         let mut code = X64Encoder::new();
 
         let func = d.mir.functions[func_index].get().unwrap();

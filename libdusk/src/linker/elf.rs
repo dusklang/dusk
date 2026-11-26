@@ -10,7 +10,7 @@ use crate::index_vec::IndexVec;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::exe::{Exe, DynLibId, ImportedSymbolId, FixupLocationId};
 use crate::linker::byte_swap::{Buffer, Ref};
 use crate::target::Arch;
@@ -460,11 +460,11 @@ impl ElfLinker {
 }
 
 impl Linker for ElfLinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> IoResult<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn AnyBackend, dest: &mut dyn Write) -> IoResult<()> {
         let bss_size = 8_u64; // TODO: don't hardcode this.
 
         let mut exe = ElfExe::default();
-        backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.compile_func(d, main_function_index, true, &mut exe);
         let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
 
         let mut dynamic_symbol_table = SymbolTableBuilder::new();

@@ -8,7 +8,7 @@ use std::mem;
 use bitflags::bitflags;
 
 use crate::index_vec::IndexVec;
-use crate::backend::{Backend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::*;
 use crate::mir::FuncId;
@@ -298,7 +298,7 @@ const FILE_ALIGNMENT: usize = 0x200;
 const SECTION_ALIGNMENT: usize = 0x1000;
 
 impl Linker for PELinker {
-    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn Backend, dest: &mut dyn Write) -> io::Result<()> {
+    fn write(&mut self, d: &Driver, main_function_index: FuncId, backend: &mut dyn AnyBackend, dest: &mut dyn Write) -> io::Result<()> {
         let mut exe = PEExe::new();
 
         self.buf.push(*b"MZ");
@@ -324,7 +324,7 @@ impl Linker for PELinker {
 
         let address_of_entry_point = self.buf.rva();
 
-        backend.generate_func(d, main_function_index, true, &mut exe);
+        backend.compile_func(d, main_function_index, true, &mut exe);
         let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
         self.buf.pad_with_zeroes(code.len());
 

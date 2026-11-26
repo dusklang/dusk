@@ -412,7 +412,7 @@ impl Driver {
 
             Arm64Instr::MovK { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'k'))?,
             Arm64Instr::MovZ { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
-            Arm64Instr::MovN { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
+            Arm64Instr::MovN { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'n'))?,
         };
         Ok(())
     }

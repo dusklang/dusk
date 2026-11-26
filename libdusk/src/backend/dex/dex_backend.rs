@@ -4,16 +4,16 @@ use crate::mir::FuncId;
 use crate::linker::exe::Exe;
 use crate::linker::dex::{AccessFlags, DexReturnType, DexType};
 use crate::backend::dex::DexEncoder;
-use crate::backend::Backend;
+use crate::backend::AnyBackend;
 
 pub struct DexBackend;
 
-impl Backend for DexBackend {
+impl AnyBackend for DexBackend {
     fn arch(&self) -> Arch {
         Arch::Dex
     }
 
-    fn generate_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) {
+    fn compile_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) {
         let exe = exe.as_dex_exe().expect("dex backend only supports writing code into dex files");
 
         let android_activity = exe.add_type(DexType::Class("android.app.Activity"));
