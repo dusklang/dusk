@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use crate::display_adapter;
 use crate::pattern_matching::{SwitchScrutineeValueId, PatternMatchingContext};
 use crate::index_vec::IndexVec;
+use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::{DefaultStringInterner as StringInterner, DefaultSymbol as Sym, Symbol};
 
@@ -239,7 +240,7 @@ pub enum GenericCtx {
 pub enum Expr {
     Void,
     Error,
-    IntLit { lit: u64 },
+    IntLit { lit: BigInt },
     DecLit { lit: f64 },
     StrLit { lit: CString },
     CharLit { lit: i8 },
@@ -933,7 +934,7 @@ impl Driver {
         global_attr_id
     }
 
-    pub fn int_lit(&self, b: &Builder, lit: u64, range: SourceRange) -> ExprId {
+    pub fn int_lit(&self, b: &Builder, lit: BigInt, range: SourceRange) -> ExprId {
         self.add_expr(b, Expr::IntLit { lit }, range)
     }
     pub fn dec_lit(&self, b: &Builder, lit: f64, range: SourceRange) -> ExprId {

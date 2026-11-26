@@ -1027,6 +1027,7 @@ dependencies = [
  "libc",
  "md-5",
  "num-bigint 0.5.1",
+ "num-traits",
  "objc",
  "papaya",
  "paste",

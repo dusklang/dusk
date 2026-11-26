@@ -40,6 +40,7 @@ rayon = "1.12"
 
 # LSP-related dependencies
 url = { version = "2.5.8", optional = true }
+num-traits = "0.2.19"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

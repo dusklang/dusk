@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use arrayvec::ArrayVec;
+use num_bigint::BigInt;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use derivative::Derivative;
@@ -525,12 +526,21 @@ impl Driver {
     }
 
     /// A restricted term doesn't include cast or struct literal expressions
-    fn try_parse_restricted_term(&self, p: &mut Parser, b: &mut ast::Builder) -> ParseResult<ExprId> {
-        if let Some((op, op_range)) = self.parse_prefix_operator(p) {
-            let term = self.try_parse_restricted_term(p, b)
+    /// The `op` parameter grants the ability for the parser to special-case unary operators depending on what the term is.
+    /// For example, the term `-128` is mapped in the AST as `IntLit(-128)` instead of `Negate(IntLit(128))`.
+    /// If the `op` parameter is handled specially, it must be set to `None` before returning.
+    fn try_parse_restricted_term_impl(&self, p: &mut Parser, b: &mut ast::Builder, op: &mut Option<(UnOp, SourceRange)>) -> ParseResult<ExprId> {
+        if let Some(op) = self.parse_prefix_operator(p) {
+            let mut op = Some(op);
+            let term = self.try_parse_restricted_term_impl(p, b, &mut op)
                 .unwrap_or_else(|tok| panic!("Expected expression after unary operator, found {:?}", tok));
             let term_range = self.get_range(term);
-            return Ok(self.un_op(b, op, term, source_info::concat(op_range, term_range)));
+
+            return if let Some((op, op_range)) = op {
+                Ok(self.un_op(b, op, term, source_info::concat(op_range, term_range)))
+            } else {
+                Ok(term)
+            };
         }
 
         match p.cur().kind {
@@ -563,7 +573,15 @@ impl Driver {
                 Ok(expr)
             },
             &TokenKind::IntLit(val) => {
-                let lit = self.int_lit(b, val, p.cur().range);
+                let mut val = BigInt::from(val);
+                let mut range = p.cur().range;
+                // Special-case negative integer literals (see more above)
+                if let &mut Some((UnOp::Neg, op_range)) = op {
+                    val = -val;
+                    range = source_info::concat(range, op_range);
+                    *op = None;
+                };
+                let lit = self.int_lit(b, val, range);
                 p.next();
                 Ok(lit)
             },
@@ -716,6 +734,11 @@ impl Driver {
             }
             Ok(expr)
         })
+    }
+
+    /// A restricted term doesn't include cast or struct literal expressions
+    fn try_parse_restricted_term(&self, p: &mut Parser, b: &mut ast::Builder) -> ParseResult<ExprId> {
+        self.try_parse_restricted_term_impl(p, b, &mut None)
     }
 
     fn try_parse_expr(&self, p: &mut Parser, b: &mut ast::Builder, parse_struct_lits: bool) -> ParseResult<ExprId> {

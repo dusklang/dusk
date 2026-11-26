@@ -7,12 +7,13 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use num_bigint::BigInt;
+use num_traits::cast::ToPrimitive;
 use smallvec::{SmallVec, smallvec};
 use string_interner::DefaultSymbol as Sym;
 use crate::index_vec::IndexVec;
 use crate::display_adapter;
 
-use crate::linked_list::{LinkedList, LinkedListHead, LinkedListNode, LinkedListStorage};
+use crate::linked_list::{LinkedList, LinkedListHead, LinkedListStorage};
 use crate::mir::cursor::{Cursor, CursorMut};
 use crate::pattern_matching::{SwitchDecisionNode, SwitchDecisionValue, SwitchScrutineeValueId, TypedSwitchScrutineeValue, TypedSwitchScrutineeValueKind};
 use crate::source_info::SourceRange;
@@ -526,10 +527,10 @@ impl Context {
 impl Driver {
     fn expr_to_const(&self, expr: ExprId, ty: Type) -> Const {
         match ef!(expr.ast) {
-            Expr::IntLit { lit } => {
+            Expr::IntLit { ref lit } => {
                 match ty {
-                    Type::Int { .. } => Const::Int { lit: BigInt::from(lit), ty },
-                    Type::Float(_)   => Const::Float { lit: lit as f64, ty },
+                    Type::Int { .. } => Const::Int { lit: lit.clone(), ty },
+                    Type::Float(_)   => Const::Float { lit: lit.to_f64().unwrap(), ty },
                     _ => panic!("Unrecognized integer literal type {:?}", ty),
                 }
             },
