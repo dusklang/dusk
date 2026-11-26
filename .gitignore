@@ -39,3 +39,8 @@ dls-client/server/*
 
 # direnv
 .envrc
+
+# Dusk outputs
+a.out
+a.apk
+*.app
