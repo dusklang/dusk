@@ -1,4 +1,4 @@
-use crate::linker::exe::{Exe, FixupLocationId};
+use crate::linker::exe::{Exe, ExeFuncId, FixupLocationId};
 use crate::mir;
 use crate::lir;
 use crate::driver::Driver;
@@ -14,16 +14,16 @@ pub mod dex;
 
 pub trait AnyBackend {
     fn arch(&self) -> Arch;
-    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe);
+    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) -> ExeFuncId;
 }
 
 impl<B> AnyBackend for B where B: Backend {
     fn arch(&self) -> Arch {
         Backend::arch(self)
     }
-    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) {
+    fn compile_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) -> ExeFuncId {
         let func = self.lower_func(d, func_index, is_main, exe);
-        self.generate_func(d, &func, is_main, exe);
+        self.generate_func(d, &func, is_main, exe)
     }
 }
 
@@ -32,7 +32,7 @@ pub trait Backend: AnyBackend {
 
     fn arch(&self) -> Arch;
     fn lower_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) -> lir::Function<Self::Instr>;
-    fn generate_func(&self, d: &Driver, func: &lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe);
+    fn generate_func(&self, d: &Driver, func: &lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe) -> ExeFuncId;
 }
 
 impl Driver {

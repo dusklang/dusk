@@ -608,8 +608,15 @@ impl Linker for MachOLinker {
         let mut exe = MachOExe::new();
         let _lib_system = exe.import_dynamic_library("libSystem");
 
-        backend.compile_func(d, main_function_index, true, &mut exe);
-        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
+        let mut main_func = None;
+        for func_index in d.mir.functions.indices() {
+            let is_main = func_index == main_function_index;
+            let id = backend.compile_func(d, func_index, is_main, &mut exe);
+            if is_main {
+                main_func = Some(id);
+            }
+        }
+        let mut code = main_func.expect("generate_func must generate a code blob for main function");
 
         let mach_header = self.buf.alloc::<MachHeader>();
 
@@ -619,7 +626,7 @@ impl Linker for MachOLinker {
         self.add_info_to_segment(page_zero, SegmentOffset::PageZero, SegmentSize::Different { vm_size: TEXT_ADDR as usize, file_size: 0 });
 
         let mut text_segment = self.alloc_text_segment();
-        let text_section = self.reserve_text_section(&mut text_segment, "__text", code.len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
+        let text_section = self.reserve_text_section(&mut text_segment, "__text", exe.code.len(), 4, SectionFlags::new(SectionType::Regular, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
         let cstring_section = (!exe.cstrings.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__cstring", exe.cstrings.len(), 1, SectionFlags::new(SectionType::CStringLiterals, 0)));
         let objc_methname_section = (!exe.objc_method_names.is_empty()).then(|| self.reserve_text_section(&mut text_segment, "__objc_methname", exe.objc_method_names.len(), 2, SectionFlags::new(SectionType::CStringLiterals, 0)));
 
@@ -1010,7 +1017,7 @@ impl Linker for MachOLinker {
         }
 
         let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
-        let final_code = code.perform_fixups(self.get_section_offset(text_section), |fixup| {
+        let final_code = exe.code[code].perform_fixups(self.get_section_offset(text_section), |fixup| {
             match exe.fixup_locations[fixup] {
                 MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ObjcSelectorId(id) => (objc_selrefs_begin + id.index() * 8, Indirection::Direct),
@@ -1521,7 +1528,7 @@ struct MachOExe {
     got_entries: IndexVec<GotEntryId, ImportedSymbolId>,
     got_map: HashMap<ImportedSymbolId, GotEntryId>,
 
-    code_blob: Option<Box<dyn CodeBlob>>,
+    code: ExeCode,
 }
 
 // TODO: don't hardcode this
@@ -1601,9 +1608,8 @@ impl Exe for MachOExe {
         self.fixup_locations.push(MachOFixupLocation::CStringSectionOffset(offset))
     }
 
-    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>) {
-        assert!(self.code_blob.is_none());
-        self.code_blob = Some(blob);
+    fn add_func(&mut self, blob: Box<dyn CodeBlob>) -> ExeFuncId {
+        self.code.push(blob)
     }
 
     fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> {

@@ -1,7 +1,7 @@
 use crate::target::Arch;
 use crate::driver::Driver;
 use crate::mir::FuncId;
-use crate::linker::exe::Exe;
+use crate::linker::exe::{Exe, ExeFuncId};
 use crate::linker::dex::{AccessFlags, DexReturnType, DexType};
 use crate::backend::dex::DexEncoder;
 use crate::backend::AnyBackend;
@@ -13,7 +13,7 @@ impl AnyBackend for DexBackend {
         Arch::Dex
     }
 
-    fn compile_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) {
+    fn compile_func(&self, _d: &Driver, _func_index: FuncId, _is_main: bool, exe: &mut dyn Exe) -> ExeFuncId {
         let exe = exe.as_dex_exe().expect("dex backend only supports writing code into dex files");
 
         let android_activity = exe.add_type(DexType::Class("android.app.Activity"));
@@ -56,5 +56,7 @@ impl AnyBackend for DexBackend {
 
         on_create.ret_void();
         exe.add_virtual_method(main_activity, "onCreate", DexReturnType::Void, &[DexType::Class("android.os.Bundle").into()], AccessFlags::PROTECTED, Some(on_create));
+
+        exe.code.next_idx()
     }
 }

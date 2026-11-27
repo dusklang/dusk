@@ -20,7 +20,7 @@ impl AnyBackend for X64Backend {
         Arch::X86_64
     }
 
-    fn compile_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) {
+    fn compile_func(&self, d: &Driver, func_index: FuncId, is_main: bool, exe: &mut dyn Exe) -> ExeFuncId {
         let mut code = X64Encoder::new();
 
         let func = d.mir.functions[func_index].get().unwrap();
@@ -96,6 +96,6 @@ impl AnyBackend for X64Backend {
             _ => todo!("{}", d.display_mir_terminator(func, terminator)),
         }
 
-        exe.add_code_blob(Box::new(code));
+        exe.add_func(Box::new(code))
     }
 }

@@ -9,6 +9,7 @@ use std::mem;
 use std::hash::Hash;
 
 use crate::backend::dex::DexEncoder;
+use crate::index_counter::IndexCounter;
 use crate::index_vec::*;
 use bitflags::bitflags;
 use sha1::{Sha1, Digest};
@@ -195,6 +196,8 @@ pub struct DexExe {
     type_list_map: HashMap<Vec<TypeId>, TypeListId>,
     physical_type_list_map: IndexVec<TypeListId, PhysicalTypeListId>,
     pub physical_type_lists: IndexVec<PhysicalTypeListId, Vec<PhysicalTypeId>>,
+
+    pub code: IndexCounter<ExeFuncId>,
 }
 
 #[derive(Clone)]
@@ -563,7 +566,7 @@ impl Exe for DexExe {
         todo!()
     }
 
-    fn add_code_blob(&mut self, _blob: Box<dyn crate::backend::CodeBlob>) {
+    fn add_func(&mut self, _blob: Box<dyn crate::backend::CodeBlob>) -> ExeFuncId {
         unimplemented!()
     }
 

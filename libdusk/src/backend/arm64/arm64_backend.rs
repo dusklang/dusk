@@ -175,7 +175,7 @@ impl Backend for Arm64Backend {
         d.build_lir(d.mir.functions[func_index].get().unwrap())
     }
 
-    fn generate_func(&self, d: &Driver, func: &crate::lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe) {
+    fn generate_func(&self, d: &Driver, func: &crate::lir::Function<Self::Instr>, is_main: bool, exe: &mut dyn Exe) -> ExeFuncId {
         let mut code = Arm64Encoder::new();
 
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
@@ -229,7 +229,7 @@ impl Backend for Arm64Backend {
 
         drop(abi);
 
-        exe.add_code_blob(Box::new(code));
+        exe.add_func(Box::new(code))
     }
 }
 

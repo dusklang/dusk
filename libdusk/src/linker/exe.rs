@@ -1,14 +1,44 @@
-use std::ffi::CStr;
+use std::{ffi::CStr, ops::{Index, IndexMut}};
 
-use crate::{backend::CodeBlob, linker::dex::DexExe};
+use crate::{backend::CodeBlob, index_vec::IndexVec, linker::dex::DexExe};
 
 define_index_type!(pub struct DynLibId = u32;);
 define_index_type!(pub struct ImportedSymbolId = u32;);
 define_index_type!(pub struct FixupLocationId = u32;);
+define_index_type!(pub struct ExeFuncId = u32;);
 
 pub struct Fixup {
     pub offset: usize,
     pub id: FixupLocationId,
+}
+
+#[derive(Default)]
+pub struct ExeCode {
+    code_blobs: IndexVec<ExeFuncId, Box<dyn CodeBlob>>,
+    len: usize,
+}
+
+impl ExeCode {
+    pub fn push(&mut self, blob: Box<dyn CodeBlob>) -> ExeFuncId {
+        self.len += blob.len();
+        self.code_blobs.push(blob)
+    }
+
+    pub fn len(&self) -> usize { self.len }
+}
+
+impl Index<ExeFuncId> for ExeCode {
+    type Output = dyn CodeBlob;
+
+    fn index(&self, index: ExeFuncId) -> &Self::Output {
+        &*self.code_blobs[index]
+    }
+}
+
+impl IndexMut<ExeFuncId> for ExeCode {
+    fn index_mut(&mut self, index: ExeFuncId) -> &mut Self::Output {
+        &mut *self.code_blobs[index]
+    }
 }
 
 pub trait Exe {
@@ -24,7 +54,7 @@ pub trait Exe {
     // TODO: CodeBlob is not usable for Dex files (and honestly probably insufficient for all executable types if I were to implement features like debug info, for example)
     // I should instead think of a better interface that makes Exe more knowledgeable about functions/methods. E.g., `add_func(FuncSignatureId) -> ExeFuncId` with platform-specific
     // methods for things like creating a function signature, or adding code to a function.
-    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>);
+    fn add_func(&mut self, blob: Box<dyn CodeBlob>) -> ExeFuncId;
 
     // Platform or runtime-specific extensions (a bit hacky, but also kind of unavoidable I think)
     fn as_objc_exe(&mut self) -> Option<&mut dyn ObjCExe> { None }

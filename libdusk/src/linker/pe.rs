@@ -324,9 +324,16 @@ impl Linker for PELinker {
 
         let address_of_entry_point = self.buf.rva();
 
-        backend.compile_func(d, main_function_index, true, &mut exe);
-        let mut code = mem::take(&mut exe.code_blob).expect("generate_func must generate a code blob");
-        self.buf.pad_with_zeroes(code.len());
+        let mut main_func = None;
+        for func_index in d.mir.functions.indices() {
+            let is_main = func_index == main_function_index;
+            let id = backend.compile_func(d, func_index, is_main, &mut exe);
+            if is_main {
+                main_func = Some(id);
+            }
+        }
+        let mut code = main_func.expect("compile_func must generate a code blob for main function");
+        self.buf.pad_with_zeroes(exe.code.len());
 
         let size_of_code = self.end_section(text_section, text_header);
 
@@ -409,7 +416,7 @@ impl Linker for PELinker {
             }
         );
 
-        let code = code.perform_fixups(text_section.rva, |fixup| {
+        let code = exe.code[code].perform_fixups(text_section.rva, |fixup| {
             match exe.fixup_locations[fixup] {
                 PEFixupLocation::ImportedProc(proc) => {
                     let proc = &exe.procs[proc];
@@ -592,7 +599,7 @@ struct PEExe {
     cstrings: Vec<u8>,
     cstring_map: HashMap<CString, usize>,
 
-    code_blob: Option<Box<dyn CodeBlob>>,
+    code: ExeCode,
 }
 
 impl PEExe {
@@ -639,8 +646,7 @@ impl Exe for PEExe {
         self.fixup_locations.push(PEFixupLocation::RDataSectionOffset(offset))
     }
 
-    fn add_code_blob(&mut self, blob: Box<dyn CodeBlob>) {
-        assert!(self.code_blob.is_none());
-        self.code_blob = Some(blob);
+    fn add_func(&mut self, blob: Box<dyn CodeBlob>) -> ExeFuncId {
+        self.code.push(blob)
     }
 }
