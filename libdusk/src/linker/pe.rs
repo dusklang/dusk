@@ -596,7 +596,11 @@ enum PEFixupLocation {
 #[derive(Default)]
 struct PEExe {
     dll_imports: IndexVec<DynLibId, DllImport>,
+    dll_import_map: HashMap<String, DynLibId>,
+
     procs: IndexVec<ImportedSymbolId, DllProcHandle>,
+    proc_map: HashMap<(DynLibId, String), ImportedSymbolId>,
+
     fixup_locations: IndexVec<FixupLocationId, PEFixupLocation>,
 
     cstrings: Vec<u8>,
@@ -625,19 +629,24 @@ impl PEExe {
 
 impl Exe for PEExe {
     fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
-        self.dll_imports.push(
-            DllImport {
-                name: String::from(name),
-                procs: Vec::new(),
-            }
-        )
+        let name = name.to_string();
+        *self.dll_import_map.entry(name.clone()).or_insert_with(|| {
+            self.dll_imports.push(
+                DllImport {
+                    name,
+                    procs: Vec::new(),
+                }
+            )
+        })
     }
 
     fn import_symbol(&mut self, dll: DynLibId, name: String) -> ImportedSymbolId {
-        let procs = &mut self.dll_imports[dll].procs;
-        let id = self.procs.push(DllProcHandle { dll, proc_index: procs.len(), name: name.clone() });
-        procs.push(name);
-        id
+        *self.proc_map.entry((dll, name.clone())).or_insert_with(|| {
+            let procs = &mut self.dll_imports[dll].procs;
+            let id = self.procs.push(DllProcHandle { dll, proc_index: procs.len(), name: name.clone() });
+            procs.push(name);
+            id
+        })
     }
 
     fn use_imported_symbol(&mut self, symbol: ImportedSymbolId) -> FixupLocationId {
