@@ -143,7 +143,7 @@ fn visit_field(ty: &Type, binding: &TokenStream, visit: Visit, depth: usize) -> 
             return None;
         }
         let method = visit.method();
-        return Some(quote!(#binding.#method(&mut *f);));
+        return Some(quote!(#binding.#method(&mut f);));
     }
     None
 }
@@ -170,10 +170,10 @@ fn visit_fields(fields: &Fields, visit: Visit) -> (TokenStream, TokenStream) {
 fn visit_method(input: &DeriveInput, visit: Visit) -> TokenStream {
     let method = visit.method();
     let (receiver, callback) = match visit {
-        Visit::Values => (quote!(&self), quote!(&mut impl FnMut(ValueId))),
-        Visit::ValuesMut => (quote!(&mut self), quote!(&mut impl FnMut(&mut ValueId))),
-        Visit::Blocks => (quote!(&self), quote!(&mut impl FnMut(BlockId))),
-        Visit::BlocksMut => (quote!(&mut self), quote!(&mut impl FnMut(&mut BlockId))),
+        Visit::Values => (quote!(&self), quote!(impl FnMut(ValueId))),
+        Visit::ValuesMut => (quote!(&mut self), quote!(impl FnMut(&mut ValueId))),
+        Visit::Blocks => (quote!(&self), quote!(impl FnMut(BlockId))),
+        Visit::BlocksMut => (quote!(&mut self), quote!(impl FnMut(&mut BlockId))),
     };
     let body = match &input.data {
         Data::Struct(data) => {
@@ -199,7 +199,7 @@ fn visit_method(input: &DeriveInput, visit: Visit) -> TokenStream {
     };
     quote! {
         #[allow(unused_variables, clippy::needless_borrow)]
-        pub fn #method(#receiver, f: #callback) {
+        pub fn #method(#receiver, mut f: #callback) {
             #body
         }
     }
@@ -266,18 +266,18 @@ fn value_helpers() -> TokenStream {
         /// All values referenced by `self`, in field order.
         pub fn referenced_values(&self) -> Vec<ValueId> {
             let mut values = Vec::new();
-            self.visit_values(&mut |value| values.push(value));
+            self.visit_values(|value| values.push(value));
             values
         }
 
         pub fn references_value(&self, val: ValueId) -> bool {
             let mut found = false;
-            self.visit_values(&mut |value| found |= value == val);
+            self.visit_values(|value| found |= value == val);
             found
         }
 
         pub fn replace_value(&mut self, old: ValueId, new: ValueId) {
-            self.visit_values_mut(&mut |value| if *value == old { *value = new; });
+            self.visit_values_mut(|value| if *value == old { *value = new; });
         }
     }
 }
@@ -286,13 +286,13 @@ fn value_helpers() -> TokenStream {
 fn block_helpers() -> TokenStream {
     quote! {
         pub fn replace_block(&mut self, old: BlockId, new: BlockId) {
-            self.visit_blocks_mut(&mut |block| if *block == old { *block = new; });
+            self.visit_blocks_mut(|block| if *block == old { *block = new; });
         }
 
         /// Calls `register_edge(from, to)` for every block `to` referenced by `self`, in field order. When `self`
         /// is the terminator of block `from`, these are the outgoing control-flow edges of `from`.
         pub fn register_edges(&self, from: BlockId, mut register_edge: impl FnMut(BlockId, BlockId)) {
-            self.visit_blocks(&mut |to| register_edge(from, to));
+            self.visit_blocks(|to| register_edge(from, to));
         }
     }
 }

@@ -310,7 +310,7 @@ impl Graph {
         level
     }
 
-    fn find_level(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, mut filter: impl Clone + Fn(ItemId) -> bool) -> u32 {
+    fn find_level(&self, item: ItemId, levels: &mut HashMap<ItemId, u32>, mut filter: impl FnMut(ItemId) -> bool) -> u32 {
         self.find_level_recursive(item, levels, &mut Vec::new(), &mut HashSet::new(), &mut filter)
     }
 
