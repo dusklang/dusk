@@ -363,15 +363,21 @@ impl Arm64Encoder {
         self.mem_access_reg_impl(DataSize::Bits8, true, dest.into(), src_addr, imm);
     }
 
-    fn mov_wide64_impl(&mut self, should_keep_other_bits: bool, dest: Reg, imm: u16, shift_amount: u8) {
-        assert!(shift_amount <= 48 && shift_amount.is_multiple_of(16));
+    fn mov_wide_impl(&mut self, bits64: bool, opcode: u32, dest: Reg, imm: u16, shift_amount: u8) {
+        let num_chunks = if bits64 {
+            4
+        } else {
+            2
+        };
+        assert!(shift_amount.is_multiple_of(16) && (shift_amount / 16) < num_chunks);
+        assert!(opcode < 4);
 
         let mut instr = InstrEncoder::new();
 
         // 64-bit
-        instr.push_value_of_size(1, 1);
+        instr.push_value_of_size(bits64 as u32, 1);
 
-        instr.push_value_of_size(2 | (should_keep_other_bits as u32), 2);
+        instr.push_value_of_size(opcode, 2);
         instr.push_value_of_size(0x25, 6);
         instr.push_value_of_size(shift_amount as u32 / 16, 2);
         instr.push_value_of_size(imm as u32, 16);
@@ -381,11 +387,27 @@ impl Arm64Encoder {
     }
 
     pub fn movz64(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
-        self.mov_wide64_impl(false, dest, imm, shift_amount);
+        self.mov_wide_impl(true, 2, dest, imm, shift_amount);
+    }
+
+    pub fn movz32(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide_impl(false, 2, dest, imm, shift_amount);
     }
 
     pub fn movk64(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
-        self.mov_wide64_impl(true, dest, imm, shift_amount);
+        self.mov_wide_impl(true, 3, dest, imm, shift_amount);
+    }
+
+    pub fn movk32(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide_impl(false, 3, dest, imm, shift_amount);
+    }
+
+    pub fn movn64(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide_impl(true, 0, dest, imm, shift_amount);
+    }
+
+    pub fn movn32(&mut self, dest: Reg, imm: u16, shift_amount: u8) {
+        self.mov_wide_impl(false, 0, dest, imm, shift_amount);
     }
 
     pub fn macro_mov64_abs(&mut self, dest: Reg, value: u64) {

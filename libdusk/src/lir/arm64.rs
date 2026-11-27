@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::{assert_matches, mem};
 
 use dusk_proc_macros::display_adapter;
 
@@ -92,6 +93,92 @@ pub enum Arm64Instr {
         immediate: u16,
         shift: u8,
     },
+
+    Mov {
+        width: IntWidth,
+        source: VirtualRegister,
+        destination: VirtualRegister,
+    },
+}
+
+impl Arm64Instr {
+    fn register_accesses(&self, registrar: &mut impl AccessRegistrar) {
+        match *self {
+            Arm64Instr::PseudoArgs(ref assignments) => for assignment in assignments {
+                registrar.physical_to_virtual(assignment.phys, assignment.virt);
+            },
+            Arm64Instr::PseudoRet(ref assignments) => for assignment in assignments {
+                registrar.virtual_to_physical(assignment.virt, assignment.phys);
+            },
+            Arm64Instr::PseudoMovImmediate32 { destination, .. } | Arm64Instr::PseudoMovImmediate64 { destination, .. }
+                | Arm64Instr::MovN { destination, .. } | Arm64Instr::MovZ { destination, .. } => registrar.write(destination),
+            Arm64Instr::MovK { destination, .. } => {
+                registrar.read(destination);
+                registrar.write(destination);
+            },
+            Arm64Instr::Mov { destination, source, .. } => {
+                registrar.read(source);
+                registrar.write(destination);
+            },
+        }
+    }
+}
+
+trait AccessRegistrar {
+    fn physical_to_virtual(&mut self, src: PhysicalRegister, dest: VirtualRegister) {}
+    fn virtual_to_physical(&mut self, src: VirtualRegister, dest: PhysicalRegister) {}
+    fn read(&mut self, reg: VirtualRegister) {}
+    fn write(&mut self, reg: VirtualRegister) {}
+}
+
+struct RegisterAllocator {
+    free_registers: Vec<PhysicalRegister>,
+    allocations: HashMap<VirtualRegister, PhysicalRegister>,
+}
+
+impl RegisterAllocator {
+    fn new() -> Self {
+        let mut caller_saved_registers = Vec::new();
+        for num in 9..=15 {
+            caller_saved_registers.push(PhysicalRegister { num, class: RegisterClass::Int });
+        }
+
+        Self {
+            free_registers: caller_saved_registers,
+            allocations: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ConstraintCollector {
+    pins: HashMap<VirtualRegister, PhysicalRegister>,
+}
+
+impl AccessRegistrar for ConstraintCollector {
+    fn physical_to_virtual(&mut self, src: PhysicalRegister, dest: VirtualRegister) {
+        assert!(self.pins.insert(dest, src).is_none());
+    }
+
+    fn virtual_to_physical(&mut self, src: VirtualRegister, dest: PhysicalRegister) {
+        assert!(self.pins.insert(src, dest).is_none());
+    }
+}
+
+impl AccessRegistrar for RegisterAllocator {
+    fn physical_to_virtual(&mut self, src: PhysicalRegister, dest: VirtualRegister) {
+        self.allocations.entry(dest).or_insert(src);
+    }
+    fn virtual_to_physical(&mut self, src: VirtualRegister, dest: PhysicalRegister) {
+        self.allocations.entry(src).or_insert(dest);
+    }
+    fn read(&mut self, reg: VirtualRegister) {
+        assert!(self.allocations.contains_key(&reg));
+    }
+    fn write(&mut self, reg: VirtualRegister) {
+        assert_matches!(reg.class, RegisterClass::Int);
+        self.allocations.entry(reg).or_insert_with(|| self.free_registers.pop().unwrap());
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -307,7 +394,9 @@ impl Driver {
                         assert!(registers.len() <= 1, "more than 1 ABI value not implemented");
                         let mut ret_assignments = Vec::new();
                         for virt in registers {
-                            ret_assignments.push(RetAssignment { virt, phys: Arm64Reg::R0 });
+                            let copied_register = b.func.make_vreg(RegisterClass::Int);
+                            b.func.push_instr(block_id, Arm64Instr::Mov { width: IntWidth::W64, source: virt, destination: copied_register });
+                            ret_assignments.push(RetAssignment { virt: copied_register, phys: Arm64Reg::R0 });
                         };
 
                         b.func.push_instr(block_id, Arm64Instr::PseudoRet(ret_assignments));
@@ -317,6 +406,26 @@ impl Driver {
             }
         }
 
+        // Register allocation (very naive edition)
+        let mut constraints = ConstraintCollector::default();
+        let mut cursor = b.func.make_cursor();
+        while let Some(block) = cursor.next_block() {
+            while let Some(instr) = cursor.next_instr() {
+                b.func.instrs[instr].register_accesses(&mut constraints);
+            }
+        }
+
+        let mut register_allocator = RegisterAllocator::new();
+        register_allocator.allocations = constraints.pins;
+        let mut cursor = b.func.make_cursor();
+        while let Some(block) = cursor.next_block() {
+            while let Some(instr) = cursor.next_instr() {
+                b.func.instrs[instr].register_accesses(&mut register_allocator);
+            }
+        }
+        b.func.register_allocations = register_allocator.allocations;
+
+        // Replace pseudo-instructions with real instructions
         let mut cursor = b.func.make_cursor_mut();
         while let Some(block) = cursor.next_block() {
             while let Some(instr) = cursor.next_instr() {
@@ -340,8 +449,12 @@ impl Driver {
     }
 
     #[display_adapter]
-    pub fn display_arm64_lir_virt_register(&self, func: &Function<Arm64Instr>, reg: VirtualRegister, f: &mut Formatter) {
-        write!(f, "%v{}", reg.num)
+    pub fn display_arm64_lir_virt_register(&self, func: &Function<Arm64Instr>, reg: VirtualRegister, width: impl Into<RegisterWidth> + Copy + 'display_adapter_lifetime, f: &mut Formatter) {
+        if let Some(&physical_reg) = func.register_allocations.get(&reg) {
+            write!(f, "(%v{} = {})", reg.num, self.display_arm64_lir_phys_register(func, physical_reg, width))
+        } else {
+            write!(f, "%v{}", reg.num)
+        }
     }
 
     #[display_adapter]
@@ -363,7 +476,7 @@ impl Driver {
         write!(
             f,
             "{} = {}",
-            self.display_arm64_lir_virt_register(func, assignment.virt),
+            self.display_arm64_lir_virt_register(func, assignment.virt, width),
             self.display_arm64_lir_phys_register(func, assignment.phys, width),
         )
     }
@@ -374,13 +487,13 @@ impl Driver {
             f,
             "{} = {}",
             self.display_arm64_lir_phys_register(func, assignment.phys, width),
-            self.display_arm64_lir_virt_register(func, assignment.virt),
+            self.display_arm64_lir_virt_register(func, assignment.virt, width),
         )
     }
 
     #[display_adapter]
-    pub fn display_arm64_lir_mov_instr(&self, func: &Function<Arm64Instr>, destination: VirtualRegister, immediate: u64, shift: u8, variant: char, f: &mut Formatter) {
-        write!(f, "mov{} {}, #{}", variant, self.display_arm64_lir_virt_register(func, destination), immediate)?;
+    pub fn display_arm64_lir_mov_instr(&self, func: &Function<Arm64Instr>, destination: VirtualRegister, width: impl Into<RegisterWidth> + Copy + 'display_adapter_lifetime, immediate: u64, shift: u8, variant: char, f: &mut Formatter) {
+        write!(f, "mov{} {}, #{}", variant, self.display_arm64_lir_virt_register(func, destination, width), immediate)?;
         if shift > 0 {
             write!(f, ", lsl #{}", shift)?;
         }
@@ -426,12 +539,16 @@ impl Driver {
                     write!(f, " }}")?;
                 }
             },
-            Arm64Instr::PseudoMovImmediate32 { destination, immediate } => write!(f, "@mov32 {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
-            Arm64Instr::PseudoMovImmediate64 { destination, immediate } => write!(f, "@mov64 {}, #{}", self.display_arm64_lir_virt_register(func, destination), immediate)?,
+            Arm64Instr::PseudoMovImmediate32 { destination, immediate } => write!(f, "@mov32 {}, #{}", self.display_arm64_lir_virt_register(func, destination, IntWidth::W32), immediate)?,
+            Arm64Instr::PseudoMovImmediate64 { destination, immediate } => write!(f, "@mov64 {}, #{}", self.display_arm64_lir_virt_register(func, destination, IntWidth::W64), immediate)?,
 
-            Arm64Instr::MovK { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'k'))?,
-            Arm64Instr::MovZ { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'z'))?,
-            Arm64Instr::MovN { destination, immediate, shift, .. } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, immediate.into(), shift, 'n'))?,
+            Arm64Instr::MovK { destination, immediate, shift, width } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, width, immediate.into(), shift, 'k'))?,
+            Arm64Instr::MovZ { destination, immediate, shift, width } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, width, immediate.into(), shift, 'z'))?,
+            Arm64Instr::MovN { destination, immediate, shift, width } => write!(f, "{}", self.display_arm64_lir_mov_instr(func, destination, width, immediate.into(), shift, 'n'))?,
+
+            Arm64Instr::Mov { width, source, destination } => {
+                write!(f, "mov {}, {}", self.display_arm64_lir_virt_register(func, destination, width), self.display_arm64_lir_virt_register(func, source, width))?;
+            },
         };
         Ok(())
     }
@@ -514,7 +631,7 @@ fn pseudo_mov<'a>(cursor: &mut impl CursorMut<'a, InstrKind=Arm64Instr>, width: 
             let chunk = (immediate >> (i * 16)) & 0xFFFF;
             if chunk != pattern {
                 if !filled {
-                    if num_zeros >= num_neg_ones {
+                    if pattern == 0 {
                         cursor.insert_instr(
                             Arm64Instr::MovZ {
                                 width,

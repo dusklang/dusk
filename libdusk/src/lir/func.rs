@@ -148,19 +148,19 @@ impl<InstrKind> Function<InstrKind> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum RegisterClass {
     Int,
     Float,
 }
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
 pub struct VirtualRegister {
     pub num: usize,
     pub class: RegisterClass,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct PhysicalRegister {
     pub num: usize,
     pub class: RegisterClass,

@@ -7,7 +7,9 @@ use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
 use crate::lir;
 use crate::lir::Function;
+use crate::lir::arm64::ArgAssignment;
 use crate::lir::arm64::Arm64Instr;
+use crate::lir::arm64::RetAssignment;
 use crate::lir::cursor::Cursor as _;
 use crate::mir::CallKind;
 use crate::mir::TerminatorKind;
@@ -22,6 +24,143 @@ pub struct Arm64Backend;
 impl Arm64Backend {
     pub fn new() -> Self {
         Self
+    }
+}
+
+trait PlatformAbi {
+    type Instr;
+
+    fn generate_prologue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[ArgAssignment], code: &mut Arm64Encoder);
+    fn generate_epilogue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[RetAssignment], code: &mut Arm64Encoder);
+}
+
+struct MacOSAbi<'exe> {
+    exe: &'exe mut dyn ObjCExe,
+    is_main: bool,
+    frame_size: u16,
+}
+
+impl<'exe> PlatformAbi for MacOSAbi<'exe> {
+    type Instr = Arm64Instr;
+
+    fn generate_prologue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[ArgAssignment], code: &mut Arm64Encoder) {
+        code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+        code.sub64_imm(false, Reg::SP, Reg::SP, self.frame_size);
+    }
+
+    fn generate_epilogue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, assignments: &[RetAssignment], code: &mut Arm64Encoder) {
+        // If this is the main function, we should return 0 despite the high-level return type being `void`.
+        if self.is_main && assignments.is_empty() {
+            code.movz32(Reg::R0, 0, 0);
+        }
+
+        code.add64_imm(false, Reg::SP, Reg::SP, self.frame_size);
+        code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
+        code.ret(Reg::LR);
+    }
+}
+
+impl<'exe> MacOSAbi<'exe> {
+    fn new(d: &Driver, func: &crate::lir::Function<<MacOSAbi<'exe> as PlatformAbi>::Instr>, is_main: bool, exe: &'exe mut dyn Exe) -> Self {
+        let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
+        Self {
+            exe,
+            frame_size: 16,
+            is_main,
+        }
+    }
+}
+
+struct WindowsAbi<'exe> {
+    frame_size: i16,
+    kernel32: DynLibId,
+    get_std_handle: ImportedSymbolId,
+    write_console: ImportedSymbolId,
+    exit_process: ImportedSymbolId,
+    lstrlen: ImportedSymbolId,
+    is_main: bool,
+    exe: &'exe mut dyn Exe,
+}
+
+impl<'exe> PlatformAbi for WindowsAbi<'exe> {
+    type Instr = Arm64Instr;
+
+    fn generate_prologue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[ArgAssignment], code: &mut Arm64Encoder) {
+        code.stp64(PairAddressMode::PreIndex, Reg::FP, Reg::LR, Reg::SP, -self.frame_size);
+        code.mov64(Reg::FP, Reg::SP);
+    }
+    fn generate_epilogue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, assignments: &[RetAssignment], code: &mut Arm64Encoder) {
+        // If this is the main function, we should return 0 despite the high-level return type being `void`.
+        if self.is_main {
+            if assignments.is_empty() {
+                code.movz32(Reg::R0, 0, 0);
+            }
+            code.load_fixed_up_address(Reg::R16, self.exe.use_imported_symbol(self.exit_process));
+            code.blr(Reg::R16);
+        }
+
+        code.ldp64(PairAddressMode::PostIndex, Reg::FP, Reg::LR, Reg::SP, self.frame_size);
+        code.ret(Reg::LR);
+    }
+}
+
+impl<'exe> WindowsAbi<'exe> {
+    fn new(d: &Driver, func: &crate::lir::Function<<WindowsAbi as PlatformAbi>::Instr>, is_main: bool, exe: &'exe mut dyn Exe) -> Self {
+        let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
+        let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
+        let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
+        let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());
+        let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
+        Self {
+            kernel32,
+            get_std_handle,
+            write_console,
+            exit_process,
+            lstrlen,
+            is_main,
+            frame_size: 16,
+            exe,
+        }
+    }
+}
+
+struct LinuxAbi<'exe> {
+    is_main: bool,
+    exe: &'exe mut dyn Exe,
+}
+
+impl<'exe> PlatformAbi for LinuxAbi<'exe> {
+    type Instr = Arm64Instr;
+
+    fn generate_prologue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[ArgAssignment], code: &mut Arm64Encoder) {
+        code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
+        code.mov64(Reg::R29, Reg::SP);
+    }
+    fn generate_epilogue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, assignments: &[RetAssignment], code: &mut Arm64Encoder) {
+        // If this is the main function, we should call exit_group().
+        if self.is_main {
+            if assignments.is_empty() {
+                // exit code
+                code.movz64(Reg::R0, 0, 0);
+            }
+            // syscall number
+            code.movz64(Reg::R8, 94, 0);
+            // syscall
+            code.svc(0);
+            code.nop();
+        }
+
+        code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
+        code.ret(Reg::LR);
+    }
+}
+
+impl<'exe> LinuxAbi<'exe> {
+    fn new(d: &Driver, func: &crate::lir::Function<<LinuxAbi<'exe> as PlatformAbi>::Instr>, is_main: bool, exe: &'exe mut dyn Exe) -> Self {
+        Self {
+            is_main,
+            exe,
+        }
     }
 }
 
@@ -41,117 +180,54 @@ impl Backend for Arm64Backend {
 
         assert_eq!(func.make_cursor().blocks_iter().count(), 1);
 
-        match d.os {
-            OperatingSystem::MacOS => {
-                let frame_size = 16;
-
-                let exe = exe.as_objc_exe().expect("Objective-C features unimplemented for current executable format, but are required on macOS");
-                let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block().unwrap());
-                while let Some(instr) = cursor.next_instr() {
-                    match cursor.func.instrs[instr] {
-                        Arm64Instr::PseudoArgs(ref args) => {
-                            code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
-                            code.sub64_imm(false, Reg::SP, Reg::SP, frame_size);
-                        },
-                        Arm64Instr::PseudoRet(ref assignments) => {
-                            assert_eq!(assignments.len(), 0);
-                            // If this is the main function, we should return 0 despite the high-level return type being `void`.
-                            if is_main {
-                                // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-                                code.movz64(Reg::R0, 0, 0);
-                            } else {
-                                todo!();
-                            }
-
-                            code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
-                            code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
-                            code.ret(Reg::LR);
-                        },
-                        Arm64Instr::MovK { width, destination, immediate, shift } => {
-                            assert_matches!(width, lir::arm64::IntWidth::W64);
-                            let destination = func.register_allocations[&destination];
-                            code.movk64(destination.try_into().unwrap(), immediate, shift);
-                        },
-                        Arm64Instr::MovZ { width, destination, immediate, shift } => {
-                            assert_matches!(width, lir::arm64::IntWidth::W64);
-                            let destination = func.register_allocations[&destination];
-                            code.movz64(destination.try_into().unwrap(), immediate, shift);
-                        },
-                        _ => todo!(),
-                    }
-                }
-            },
-            OperatingSystem::Windows => {
-                let kernel32 = exe.import_dynamic_library("KERNEL32.dll");
-                let get_std_handle = exe.import_symbol(kernel32, "GetStdHandle".to_string());
-                let write_console = exe.import_symbol(kernel32, "WriteConsoleA".to_string());
-                let exit_process = exe.import_symbol(kernel32, "ExitProcess".to_string());
-                let lstrlen = exe.import_symbol(kernel32, "lstrlenA".to_string());
-
-                let frame_size = 16;
-
-                let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block().unwrap());
-                while let Some(instr) = cursor.next_instr() {
-                    match func.instrs[instr] {
-                        Arm64Instr::PseudoArgs(ref args) => {
-                            code.stp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -frame_size);
-                            code.mov64(Reg::FP, Reg::SP);
-                        },
-                        Arm64Instr::PseudoRet(ref assignments) => {
-                            assert_eq!(assignments.len(), 0);
-                            // If this is the main function, we should return 0 despite the high-level return type being `void`.
-                            if is_main {
-                                // TODO: this should actually be a 32-bit move, if we supported that. Not that it matters in this case.
-                                code.movz64(Reg::R0, 0, 0);
-                                code.load_fixed_up_address(Reg::R16, exe.use_imported_symbol(exit_process));
-                                code.blr(Reg::R16);
-                            } else {
-                                todo!();
-                            }
-
-                            code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, frame_size);
-                            code.ret(Reg::LR);
-                        },
-                        _ => todo!(),
-                    }
-                }
-            },
-            OperatingSystem::Linux => {
-                let mut cursor = func.make_cursor();
-                cursor.goto_top(func.entry_block().unwrap());
-                while let Some(instr) = cursor.next_instr() {
-                    match func.instrs[instr] {
-                        Arm64Instr::PseudoArgs(ref args) => {
-                            code.stp64(PairAddressMode::PreIndex, Reg::R29, Reg::R30, Reg::SP, -16);
-                            code.mov64(Reg::R29, Reg::SP);
-                        },
-                        Arm64Instr::PseudoRet(ref assignments) => {
-                            assert_eq!(assignments.len(), 0);
-
-                            // If this is the main function, we should call exit().
-                            if is_main {
-                                // exit code
-                                code.movz64(Reg::R0, 7, 0);
-                                // syscall number
-                                code.movz64(Reg::R8, 93, 0);
-                                // syscall
-                                code.svc(0);
-                                code.nop();
-                            } else {
-                                todo!();
-                            }
-
-                            code.ldp64(PairAddressMode::PostIndex, Reg::R29, Reg::R30, Reg::SP, 16);
-                            code.ret(Reg::LR);
-                        },
-                        _ => todo!(),
-                    }
-                }
-            },
+        let mut abi: Box<dyn PlatformAbi<Instr = Arm64Instr>> = match d.os {
+            OperatingSystem::MacOS => Box::new(MacOSAbi::new(d, func, is_main, exe)),
+            OperatingSystem::Windows => Box::new(WindowsAbi::new(d, func, is_main, exe)),
+            OperatingSystem::Linux => Box::new(LinuxAbi::new(d, func, is_main, exe)),
             OperatingSystem::Android => todo!(),
+        };
+
+        let mut cursor = func.make_cursor();
+        cursor.goto_top(func.entry_block().unwrap());
+        while let Some(instr) = cursor.next_instr() {
+            match func.instrs[instr] {
+                Arm64Instr::PseudoArgs(ref args) => abi.generate_prologue(d, func, args, &mut code),
+                Arm64Instr::PseudoRet(ref assignments) => abi.generate_epilogue(d, func, assignments, &mut code),
+                Arm64Instr::Mov { width, source, destination } => {
+                    let source = func.register_allocations[&source];
+                    let source: RegOrSp = source.try_into().unwrap();
+                    let destination = func.register_allocations[&destination];
+                    match width {
+                        lir::arm64::IntWidth::W32 => code.mov32(destination.try_into().unwrap(), source),
+                        lir::arm64::IntWidth::W64 => code.mov64(destination.try_into().unwrap(), source),
+                    }
+                },
+                Arm64Instr::MovK { width, immediate, shift, destination } => {
+                    let destination = func.register_allocations[&destination];
+                    match width {
+                        lir::arm64::IntWidth::W32 => code.movk32(destination.try_into().unwrap(), immediate, shift),
+                        lir::arm64::IntWidth::W64 => code.movk64(destination.try_into().unwrap(), immediate, shift),
+                    }
+                },
+                Arm64Instr::MovZ { width, immediate, shift, destination } => {
+                    let destination = func.register_allocations[&destination];
+                    match width {
+                        lir::arm64::IntWidth::W32 => code.movz32(destination.try_into().unwrap(), immediate, shift),
+                        lir::arm64::IntWidth::W64 => code.movz64(destination.try_into().unwrap(), immediate, shift),
+                    }
+                },
+                Arm64Instr::MovN { width, immediate, shift, destination } => {
+                    let destination = func.register_allocations[&destination];
+                    match width {
+                        lir::arm64::IntWidth::W32 => code.movn32(destination.try_into().unwrap(), immediate, shift),
+                        lir::arm64::IntWidth::W64 => code.movn64(destination.try_into().unwrap(), immediate, shift),
+                    }
+                },
+                Arm64Instr::PseudoMovImmediate32 { .. } | Arm64Instr::PseudoMovImmediate64 { .. } => unreachable!("internal compiler error: pseudo-instruction should have been replaced"),
+            }
         }
+
+        drop(abi);
 
         exe.add_code_blob(Box::new(code));
     }
