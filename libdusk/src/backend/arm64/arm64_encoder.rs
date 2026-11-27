@@ -3,6 +3,8 @@ use libc::{pthread_jit_write_protect_np, c_void, size_t};
 
 use crate::backend::{CodeBlob, Indirection};
 use crate::linker::exe::{Fixup, FixupLocationId};
+use crate::lir::arm64::Arm64Reg;
+use crate::lir::func::{PhysicalRegister, RegisterClass};
 
 #[cfg(target_arch="aarch64")]
 #[link(name="c")]
@@ -35,6 +37,59 @@ pub struct Arm64Encoder {
 pub enum Reg {
     R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15,
     R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30,
+}
+
+#[derive(Debug)]
+pub enum RegisterConversionError {
+    WrongClass,
+    OutOfRange,
+}
+
+const GPR_TABLE: [Reg; 31] = [
+    Reg::R0, Reg::R1, Reg::R2, Reg::R3, Reg::R4, Reg::R5, Reg::R6, Reg::R7, Reg::R8, Reg::R9, Reg::R10, Reg::R11, Reg::R12, Reg::R13, Reg::R14, Reg::R15,
+    Reg::R16, Reg::R17, Reg::R18, Reg::R19, Reg::R20, Reg::R21, Reg::R22, Reg::R23, Reg::R24, Reg::R25, Reg::R26, Reg::R27, Reg::R28, Reg::R29, Reg::R30,
+];
+
+impl TryFrom<PhysicalRegister> for Reg {
+    type Error = RegisterConversionError;
+
+    fn try_from(value: PhysicalRegister) -> Result<Self, Self::Error> {
+        if !matches!(value.class, RegisterClass::Int) {
+            return Err(RegisterConversionError::WrongClass);
+        }
+
+        if value.num >= GPR_TABLE.len() {
+            return Err(RegisterConversionError::OutOfRange);
+        }
+
+        Ok(GPR_TABLE[value.num])
+    }
+}
+
+impl TryFrom<PhysicalRegister> for RegOrSp {
+    type Error = RegisterConversionError;
+
+    fn try_from(value: PhysicalRegister) -> Result<Self, Self::Error> {
+        if value == Arm64Reg::SP {
+            Ok(Reg::SP)
+        } else {
+            let gpr: Reg = value.try_into()?;
+            Ok(gpr.into())
+        }
+    }
+}
+
+impl TryFrom<PhysicalRegister> for RegOrZero {
+    type Error = RegisterConversionError;
+
+    fn try_from(value: PhysicalRegister) -> Result<Self, Self::Error> {
+        if value == Arm64Reg::ZERO {
+            Ok(Reg::ZERO)
+        } else {
+            let gpr: Reg = value.try_into()?;
+            Ok(gpr.into())
+        }
+    }
 }
 
 #[allow(unused)]

@@ -28,7 +28,11 @@ fn return_int(): usize {
 }
 
 fn return_i32(): i32 {
-    7
+    -12345
+}
+
+fn return_i8(): i8 {
+    -65
 }
 
 fn main() {

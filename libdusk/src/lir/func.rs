@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use string_interner::DefaultSymbol as Sym;
 
 use crate::index_vec::IndexVec;
@@ -16,6 +18,7 @@ pub struct Function<InstrKind> {
     pub entry_block: Option<BlockId>,
     pub stack_slots: IndexVec<StackSlotId, StackSlot>,
     pub vreg_counter: usize,
+    pub register_allocations: HashMap<VirtualRegister, PhysicalRegister>,
 }
 
 pub struct StackSlot {
@@ -43,6 +46,7 @@ impl<InstrKind> Function<InstrKind> {
             entry_block: None,
             stack_slots: IndexVec::new(),
             vreg_counter: 0,
+            register_allocations: HashMap::new(),
         }
     }
 
@@ -61,6 +65,32 @@ impl<InstrKind> Function<InstrKind> {
     pub fn push_instr(&mut self, block: BlockId, instr: InstrKind) -> InstrId {
         let id = self.instr_nodes.push_back(
             &mut self.blocks[block].instrs,
+            InstrNode {
+                block: Some(block),
+            }
+        );
+        self.instrs.push_at(id, instr);
+
+        id
+    }
+
+    pub fn insert_instr_before(&mut self, block: BlockId, next: InstrId, instr: InstrKind) -> InstrId {
+        let id = self.instr_nodes.insert_before(
+            &mut self.blocks[block].instrs,
+            next,
+            InstrNode {
+                block: Some(block),
+            }
+        );
+        self.instrs.push_at(id, instr);
+
+        id
+    }
+
+    pub fn insert_instr_after(&mut self, block: BlockId, prev: InstrId, instr: InstrKind) -> InstrId {
+        let id = self.instr_nodes.insert_after(
+            &mut self.blocks[block].instrs,
+            prev,
             InstrNode {
                 block: Some(block),
             }
@@ -118,19 +148,19 @@ impl<InstrKind> Function<InstrKind> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum RegisterClass {
     Int,
     Float,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct VirtualRegister {
     pub num: usize,
     pub class: RegisterClass,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PhysicalRegister {
     pub num: usize,
     pub class: RegisterClass,

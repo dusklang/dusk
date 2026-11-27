@@ -3,37 +3,50 @@ use std::collections::HashMap;
 use dusk_proc_macros::display_adapter;
 
 use crate::driver::Driver;
-use crate::lir::cursor::Cursor;
+use crate::lir::cursor::{Cursor, CursorMut};
 use crate::lir::func::{BlockId, Function, InstrId, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
 use crate::{mir, ty};
 use crate::mir::cursor::Cursor as _;
 use crate::ty::Type;
 
-enum Arm64Reg {}
+pub enum Arm64Reg {}
 
 #[allow(unused)]
 impl Arm64Reg {
-    const R0: PhysicalRegister = PhysicalRegister { num: 0, class: RegisterClass::Int };
-    const R1: PhysicalRegister = PhysicalRegister { num: 1, class: RegisterClass::Int };
-    const R2: PhysicalRegister = PhysicalRegister { num: 2, class: RegisterClass::Int };
-    const R3: PhysicalRegister = PhysicalRegister { num: 3, class: RegisterClass::Int };
-    const R4: PhysicalRegister = PhysicalRegister { num: 4, class: RegisterClass::Int };
-    const R5: PhysicalRegister = PhysicalRegister { num: 5, class: RegisterClass::Int };
-    const R6: PhysicalRegister = PhysicalRegister { num: 6, class: RegisterClass::Int };
-    const R7: PhysicalRegister = PhysicalRegister { num: 7, class: RegisterClass::Int };
-    const R8: PhysicalRegister = PhysicalRegister { num: 8, class: RegisterClass::Int };
-    const R9: PhysicalRegister = PhysicalRegister { num: 9, class: RegisterClass::Int };
-    const R10: PhysicalRegister = PhysicalRegister { num: 10, class: RegisterClass::Int };
-    const R11: PhysicalRegister = PhysicalRegister { num: 11, class: RegisterClass::Int };
-    const R12: PhysicalRegister = PhysicalRegister { num: 12, class: RegisterClass::Int };
-    const R13: PhysicalRegister = PhysicalRegister { num: 13, class: RegisterClass::Int };
-    const R14: PhysicalRegister = PhysicalRegister { num: 14, class: RegisterClass::Int };
-    const R15: PhysicalRegister = PhysicalRegister { num: 15, class: RegisterClass::Int };
-    const R16: PhysicalRegister = PhysicalRegister { num: 16, class: RegisterClass::Int };
-    const R17: PhysicalRegister = PhysicalRegister { num: 17, class: RegisterClass::Int };
-    const R18: PhysicalRegister = PhysicalRegister { num: 18, class: RegisterClass::Int };
-    const R19: PhysicalRegister = PhysicalRegister { num: 19, class: RegisterClass::Int };
-    const R20: PhysicalRegister = PhysicalRegister { num: 20, class: RegisterClass::Int };
+    pub const R0:  PhysicalRegister = PhysicalRegister { num: 0, class: RegisterClass::Int };
+    pub const R1:  PhysicalRegister = PhysicalRegister { num: 1, class: RegisterClass::Int };
+    pub const R2:  PhysicalRegister = PhysicalRegister { num: 2, class: RegisterClass::Int };
+    pub const R3:  PhysicalRegister = PhysicalRegister { num: 3, class: RegisterClass::Int };
+    pub const R4:  PhysicalRegister = PhysicalRegister { num: 4, class: RegisterClass::Int };
+    pub const R5:  PhysicalRegister = PhysicalRegister { num: 5, class: RegisterClass::Int };
+    pub const R6:  PhysicalRegister = PhysicalRegister { num: 6, class: RegisterClass::Int };
+    pub const R7:  PhysicalRegister = PhysicalRegister { num: 7, class: RegisterClass::Int };
+    pub const R8:  PhysicalRegister = PhysicalRegister { num: 8, class: RegisterClass::Int };
+    pub const R9:  PhysicalRegister = PhysicalRegister { num: 9, class: RegisterClass::Int };
+    pub const R10: PhysicalRegister = PhysicalRegister { num: 10, class: RegisterClass::Int };
+    pub const R11: PhysicalRegister = PhysicalRegister { num: 11, class: RegisterClass::Int };
+    pub const R12: PhysicalRegister = PhysicalRegister { num: 12, class: RegisterClass::Int };
+    pub const R13: PhysicalRegister = PhysicalRegister { num: 13, class: RegisterClass::Int };
+    pub const R14: PhysicalRegister = PhysicalRegister { num: 14, class: RegisterClass::Int };
+    pub const R15: PhysicalRegister = PhysicalRegister { num: 15, class: RegisterClass::Int };
+    pub const R16: PhysicalRegister = PhysicalRegister { num: 16, class: RegisterClass::Int };
+    pub const R17: PhysicalRegister = PhysicalRegister { num: 17, class: RegisterClass::Int };
+    pub const R18: PhysicalRegister = PhysicalRegister { num: 18, class: RegisterClass::Int };
+    pub const R19: PhysicalRegister = PhysicalRegister { num: 19, class: RegisterClass::Int };
+    pub const R20: PhysicalRegister = PhysicalRegister { num: 20, class: RegisterClass::Int };
+    pub const R21: PhysicalRegister = PhysicalRegister { num: 21, class: RegisterClass::Int };
+    pub const R22: PhysicalRegister = PhysicalRegister { num: 22, class: RegisterClass::Int };
+    pub const R23: PhysicalRegister = PhysicalRegister { num: 23, class: RegisterClass::Int };
+    pub const R24: PhysicalRegister = PhysicalRegister { num: 24, class: RegisterClass::Int };
+    pub const R25: PhysicalRegister = PhysicalRegister { num: 25, class: RegisterClass::Int };
+    pub const R26: PhysicalRegister = PhysicalRegister { num: 26, class: RegisterClass::Int };
+    pub const R27: PhysicalRegister = PhysicalRegister { num: 27, class: RegisterClass::Int };
+    pub const R28: PhysicalRegister = PhysicalRegister { num: 28, class: RegisterClass::Int };
+    pub const R29: PhysicalRegister = PhysicalRegister { num: 29, class: RegisterClass::Int };
+    pub const R30: PhysicalRegister = PhysicalRegister { num: 30, class: RegisterClass::Int };
+
+    pub const SP:   PhysicalRegister = PhysicalRegister { num: 31, class: RegisterClass::Int };
+    pub const ZERO: PhysicalRegister = PhysicalRegister { num: 32, class: RegisterClass::Int };
 }
 
 #[derive(Copy, Clone)]
@@ -52,15 +65,6 @@ pub enum Arm64Instr {
     PseudoArgs(Vec<ArgAssignment>),
     PseudoRet(Vec<RetAssignment>),
 
-    // TODO: map these pseudo-instructions to movk, movz and movn. Rough algorithm:
-    //     - Split number into 16-bit chunks (4 for 64-bit case, 2 for 32-bit case)
-    //     - Count how many chunks are equal to 0, and how many are equal to 0xffff.
-    //     - If either of the counts are equal to the total number of chunks, then do
-    //       a single movz/movn for 0 and 0xffff respectively, with immediate = 0.
-    //     - If the counts are the same, or there are more chunks = 0 than = 0xffff,
-    //       then start with a movz of the first non-zero chunk, movk of the rest.
-    //     - If there are more chunks = 0xffff than = 0, then start with a movn of the
-    //       bitwise not of the first non-0xffff chunk, then movk of the rest.
     PseudoMovImmediate64 {
         destination: VirtualRegister,
         immediate: u64
@@ -90,7 +94,7 @@ pub enum Arm64Instr {
     },
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum IntWidth {
     W32,
     W64,
@@ -312,6 +316,21 @@ impl Driver {
                 }
             }
         }
+
+        let mut cursor = b.func.make_cursor_mut();
+        while let Some(block) = cursor.next_block() {
+            while let Some(instr) = cursor.next_instr() {
+                match cursor.func.instrs[instr] {
+                    Arm64Instr::PseudoMovImmediate32 { destination, immediate } => {
+                        pseudo_mov(&mut cursor, IntWidth::W32, destination, immediate.into());
+                    },
+                    Arm64Instr::PseudoMovImmediate64 { destination, immediate } => {
+                        pseudo_mov(&mut cursor, IntWidth::W64, destination, immediate);
+                    },
+                    _ => {},
+                }
+            }
+        }
     }
 
     pub fn build_lir(&self, mir_func: &mir::Function) -> Function<Arm64Instr> {
@@ -447,4 +466,88 @@ impl Driver {
 
         write!(f, "}}")
     }
+}
+
+fn pseudo_mov<'a>(cursor: &mut impl CursorMut<'a, InstrKind=Arm64Instr>, width: IntWidth, destination: VirtualRegister, immediate: u64) {
+    let (num_chunks, mask) = match width {
+        IntWidth::W32 => (2, u32::MAX.into()),
+        IntWidth::W64 => (4, u64::MAX),
+    };
+    debug_assert!(immediate <= mask);
+    if immediate == 0 {
+        cursor.insert_instr(
+            Arm64Instr::MovZ {
+                width,
+                destination,
+                immediate: 0,
+                shift: 0
+            }
+        );
+    } else if immediate == mask {
+        cursor.insert_instr(
+            Arm64Instr::MovN {
+                width,
+                destination,
+                immediate: 0,
+                shift: 0
+            }
+        );
+    } else {
+        let mut num_zeros = 0;
+        let mut num_neg_ones = 0;
+        for i in 0..num_chunks {
+            let chunk = (immediate >> (i * 16)) & 0xFFFF;
+            if chunk == 0 {
+                num_zeros += 1;
+            } else if chunk == 0xffff {
+                num_neg_ones += 1;
+            }
+        }
+
+        let pattern = if num_zeros >= num_neg_ones {
+            0
+        } else {
+            0xFFFF
+        };
+        let mut filled = false;
+        for i in 0..num_chunks {
+            let chunk = (immediate >> (i * 16)) & 0xFFFF;
+            if chunk != pattern {
+                if !filled {
+                    if num_zeros >= num_neg_ones {
+                        cursor.insert_instr(
+                            Arm64Instr::MovZ {
+                                width,
+                                destination,
+                                immediate: chunk.try_into().unwrap(),
+                                shift: i * 16,
+                            }
+                        );
+                    } else {
+                        let immediate: u16 = chunk.try_into().unwrap();
+                        cursor.insert_instr(
+                            Arm64Instr::MovN {
+                                width,
+                                destination,
+                                immediate: !immediate,
+                                shift: i * 16,
+                            }
+                        );
+                    }
+                    filled = true;
+                } else {
+                    cursor.insert_instr(
+                        Arm64Instr::MovK {
+                            width,
+                            destination,
+                            immediate: chunk.try_into().unwrap(),
+                            shift: i * 16,
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    cursor.remove_instr();
 }

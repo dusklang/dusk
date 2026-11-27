@@ -162,6 +162,8 @@ pub trait CursorMut<'func>: Cursor<'func> {
     fn remove_block(&mut self);
     fn remove_instr(&mut self);
 
+    fn insert_instr(&mut self, instr: Self::InstrKind) -> InstrId;
+
     fn replace_instr(&mut self, instr: Self::InstrKind) -> Option<Self::InstrKind>;
     fn make_cursor_mut<'a>(&'a mut self) -> FuncCursorMut<'a, Self::InstrKind> where 'func: 'a;
 }
@@ -253,6 +255,18 @@ impl<'func, InstrKind> CursorMut<'func> for FuncCursorMut<'func, InstrKind> {
         } else {
             CursorPosition::Before(block_id)
         };
+    }
+
+    fn insert_instr(&mut self, instr: Self::InstrKind) -> InstrId {
+        match self.position {
+            CursorPosition::None => panic!("unable to insert instruction outside of a block"),
+            CursorPosition::At(next) => self.func.insert_instr_before(self.cur_block().unwrap(), next, instr),
+            CursorPosition::Before(block) => {
+                assert!(self.peek_next_instr().is_none(), "unable to insert instruction before the beginning of a non-empty block");
+                self.func.push_instr(block, instr)
+            },
+            CursorPosition::After(block) => self.func.push_instr(block, instr),
+        }
     }
 
     fn replace_instr(&mut self, instr: InstrKind) -> Option<InstrKind> {

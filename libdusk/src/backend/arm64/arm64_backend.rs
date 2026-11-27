@@ -1,8 +1,11 @@
+use std::assert_matches;
+
 use crate::backend::Backend;
 use crate::backend::arm64::*;
 use crate::backend::AnyBackend;
 use crate::ast::LegacyIntrinsic;
 use crate::driver::Driver;
+use crate::lir;
 use crate::lir::Function;
 use crate::lir::arm64::Arm64Instr;
 use crate::lir::cursor::Cursor as _;
@@ -64,6 +67,16 @@ impl Backend for Arm64Backend {
                             code.add64_imm(false, Reg::SP, Reg::SP, frame_size);
                             code.ldp64(PairAddressMode::SignedOffset, Reg::FP, Reg::LR, Reg::SP, -16);
                             code.ret(Reg::LR);
+                        },
+                        Arm64Instr::MovK { width, destination, immediate, shift } => {
+                            assert_matches!(width, lir::arm64::IntWidth::W64);
+                            let destination = func.register_allocations[&destination];
+                            code.movk64(destination.try_into().unwrap(), immediate, shift);
+                        },
+                        Arm64Instr::MovZ { width, destination, immediate, shift } => {
+                            assert_matches!(width, lir::arm64::IntWidth::W64);
+                            let destination = func.register_allocations[&destination];
+                            code.movz64(destination.try_into().unwrap(), immediate, shift);
                         },
                         _ => todo!(),
                     }
