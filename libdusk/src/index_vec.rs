@@ -203,6 +203,10 @@ impl<I: Idx, T> IndexVec<I, T> {
         self.raw.iter()
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item=&mut T> {
+        self.raw.iter_mut()
+    }
+
     pub fn into_iter_enumerated(self) -> impl Iterator<Item=(I, T)> {
         self.raw.into_iter().enumerate()
             .map(|(i, value)| (I::from_usize(i), value))

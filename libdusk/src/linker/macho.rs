@@ -12,7 +12,7 @@ use rsa::sha2::{Sha256, Digest};
 
 use dusk_proc_macros::ByteSwap;
 
-use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, Indirection};
 use crate::linker::exe::*;
 use crate::linker::byte_swap::*;
 use crate::linker::Linker;
@@ -616,7 +616,7 @@ impl Linker for MachOLinker {
                 main_func = Some(id);
             }
         }
-        let mut code = main_func.expect("generate_func must generate a code blob for main function");
+        let main_func = main_func.expect("generate_func must generate a code blob for main function");
 
         let mach_header = self.buf.alloc::<MachHeader>();
 
@@ -719,10 +719,11 @@ impl Linker for MachOLinker {
             }
         );
         let text_section_offset = self.get_section_offset(text_section);
+        let entry_point_file_offset = self.get_section_offset(text_section) + exe.code.func_offset(main_func);
         local_symbols.push(
             Symbol {
                 symbol: "_main".to_string(),
-                internal_address: Some(TEXT_ADDR + text_section_offset as u64),
+                internal_address: Some(TEXT_ADDR + entry_point_file_offset as u64),
                 description: SymbolDescription::new(0, false, false, false, false, 0),
             }
         );
@@ -1017,7 +1018,7 @@ impl Linker for MachOLinker {
         }
 
         let cstring_section_offset = cstring_section.map(|section| self.get_section_offset(section));
-        let final_code = exe.code[code].perform_fixups(self.get_section_offset(text_section), |fixup| {
+        let final_code = exe.code.perform_fixups(self.get_section_offset(text_section), |fixup| {
             match exe.fixup_locations[fixup] {
                 MachOFixupLocation::GotEntry(got_entry_id) => (got_begin + got_entry_id.index() * 8, Indirection::Direct),
                 MachOFixupLocation::ObjcSelectorId(id) => (objc_selrefs_begin + id.index() * 8, Indirection::Direct),
@@ -1026,7 +1027,7 @@ impl Linker for MachOLinker {
             }
         });
 
-        self.fill_text_section(&text_segment, text_section, final_code);
+        self.fill_text_section(&text_segment, text_section, &final_code);
 
 
         let link_edit_end = self.buf.pos() + code_slots_len;
@@ -1181,7 +1182,6 @@ impl Linker for MachOLinker {
                 name_offset: load_dylinker.size() as u32,
             }
         );
-        let entry_point_file_offset = self.get_section_offset(text_section);
         self.buf.get_mut(entry_point).set(
             EntryPointCommand {
                 command: LC_MAIN,

@@ -1,6 +1,6 @@
 use std::{ffi::CStr, ops::{Index, IndexMut}};
 
-use crate::{backend::CodeBlob, index_vec::IndexVec, linker::dex::DexExe};
+use crate::{backend::{CodeBlob, CodeBlobExt, Indirection}, index_vec::IndexVec, linker::dex::DexExe};
 
 define_index_type!(pub struct DynLibId = u32;);
 define_index_type!(pub struct ImportedSymbolId = u32;);
@@ -14,30 +14,50 @@ pub struct Fixup {
 
 #[derive(Default)]
 pub struct ExeCode {
-    code_blobs: IndexVec<ExeFuncId, Box<dyn CodeBlob>>,
+    func_blobs: IndexVec<ExeFuncId, Box<dyn CodeBlob>>,
+    func_offsets: IndexVec<ExeFuncId, usize>,
     len: usize,
 }
 
 impl ExeCode {
     pub fn push(&mut self, blob: Box<dyn CodeBlob>) -> ExeFuncId {
+        let offset = self.len;
         self.len += blob.len();
-        self.code_blobs.push(blob)
+        let id = self.func_blobs.push(blob);
+        self.func_offsets.push_at(id, offset);
+        id
     }
 
     pub fn len(&self) -> usize { self.len }
+
+    pub fn func_offset(&self, index: ExeFuncId) -> usize {
+        self.func_offsets[index]
+    }
+
+    pub fn perform_fixups(&mut self, code_addr: usize, mut get_fixup_addr: impl FnMut(FixupLocationId) -> (usize, Indirection)) -> Vec<u8> {
+        let mut code = Vec::new();
+        for (blob, &offset) in self.func_blobs.iter_mut().zip(&self.func_offsets) {
+            assert_eq!(offset, code.len());
+            let code_addr = code_addr + code.len();
+            let blob_code = blob.perform_fixups(code_addr, &mut get_fixup_addr);
+            code.extend(blob_code);
+        }
+
+        code
+    }
 }
 
 impl Index<ExeFuncId> for ExeCode {
     type Output = dyn CodeBlob;
 
     fn index(&self, index: ExeFuncId) -> &Self::Output {
-        &*self.code_blobs[index]
+        &*self.func_blobs[index]
     }
 }
 
 impl IndexMut<ExeFuncId> for ExeCode {
     fn index_mut(&mut self, index: ExeFuncId) -> &mut Self::Output {
-        &mut *self.code_blobs[index]
+        &mut *self.func_blobs[index]
     }
 }
 

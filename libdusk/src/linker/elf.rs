@@ -10,7 +10,7 @@ use crate::index_vec::IndexVec;
 use crate::driver::Driver;
 use crate::mir::FuncId;
 use crate::linker::Linker;
-use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, Indirection};
 use crate::linker::exe::{DynLibId, Exe, ExeCode, ExeFuncId, FixupLocationId, ImportedSymbolId};
 use crate::linker::byte_swap::{Buffer, Ref};
 use crate::target::Arch;
@@ -471,7 +471,7 @@ impl Linker for ElfLinker {
                 main_func = Some(exe_func_id);
             }
         }
-        let code = main_func.expect("no main function code blob created");
+        let main_func = main_func.expect("no main function code blob created");
 
         let mut dynamic_symbol_table = SymbolTableBuilder::new();
         let mut normal_symbol_table = SymbolTableBuilder::new();
@@ -690,7 +690,8 @@ impl Linker for ElfLinker {
             let symbol = normal_symbol_table.add_entry(section_name, SymbolType::Section, SymbolBinding::Local, SymbolVisibility::Default, section_index.raw() as u16, 0, 0);
             section_symbol_table_indices.insert(section_index, symbol);
         }
-        let start_func_len = exe.code[code].len();
+        let start_func_len = exe.code[main_func].len();
+        // value is filled in below
         let func_symbol = normal_symbol_table.add_entry("start", SymbolType::Func, SymbolBinding::Global, SymbolVisibility::Default, text_section.raw() as u16, 0, start_func_len as u64);
 
         let bss_section = (bss_size > 0).then(|| self.add_section_header(
@@ -806,7 +807,8 @@ impl Linker for ElfLinker {
         self.section_headers[text_section].1.section_file_offset = text_section_pos;
         self.section_headers[text_section].1.section_size = text_section_size;
 
-        normal_symbol_table.entries[func_symbol].value = text_section_pos;
+        let start_func_offset: u64 = exe.code.func_offset(main_func).try_into().unwrap();
+        normal_symbol_table.entries[func_symbol].value = text_section_pos + start_func_offset;
 
         let rodata_section_pos = rodata_section.map(|rodata_section| {
             self.buf.pad_both_to_next_boundary(8);
@@ -951,16 +953,17 @@ impl Linker for ElfLinker {
             header.section_header_table_offset = section_header_table_offset;
             header.num_section_header_table_entries = num_section_headers as u16;
             header.name_section_header_table_entry_index = section_names_section_header.index() as u16;
-            header.entry_point_addr = text_section_pos;
+            let main_func_offset: u64 = exe.code.func_offset(main_func).try_into().unwrap();
+            header.entry_point_addr = text_section_pos + main_func_offset;
         });
 
-        let code = exe.code[code].perform_fixups(text_section_pos as usize, |fixup| {
+        let code = exe.code.perform_fixups(text_section_pos as usize, |fixup| {
             match exe.fixup_locations[fixup] {
                 ElfFixupLocation::CStringSectionOffset(offset) => (rodata_section_pos.unwrap() as usize + offset, Indirection::Indirect),
             }
         });
 
-        self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(code);
+        self.buf.data[text_section_pos as usize..][..code.len()].copy_from_slice(&code);
 
         dynamic_symbol_table.write_to(&mut self.buf);
         normal_symbol_table.write_to(&mut self.buf);

@@ -8,7 +8,7 @@ use std::mem;
 use bitflags::bitflags;
 
 use crate::index_vec::IndexVec;
-use crate::backend::{AnyBackend, CodeBlob, CodeBlobExt, Indirection};
+use crate::backend::{AnyBackend, CodeBlob, Indirection};
 use crate::linker::Linker;
 use crate::linker::exe::*;
 use crate::mir::FuncId;
@@ -322,7 +322,7 @@ impl Linker for PELinker {
 
         let text_section = self.begin_section(b".text\0\0\0", SectionCharacteristics::CNT_CODE | SectionCharacteristics::MEM_EXECUTE | SectionCharacteristics::MEM_READ);
 
-        let address_of_entry_point = self.buf.rva();
+        let address_of_text_section = self.buf.rva();
 
         let mut main_func = None;
         for func_index in d.mir.functions.indices() {
@@ -332,7 +332,8 @@ impl Linker for PELinker {
                 main_func = Some(id);
             }
         }
-        let mut code = main_func.expect("compile_func must generate a code blob for main function");
+        let main_func = main_func.expect("compile_func must generate a code blob for main function");
+        let address_of_entry_point = address_of_text_section + exe.code.func_offset(main_func);
         self.buf.pad_with_zeroes(exe.code.len());
 
         let size_of_code = self.end_section(text_section, text_header);
@@ -416,7 +417,7 @@ impl Linker for PELinker {
             }
         );
 
-        let code = exe.code[code].perform_fixups(text_section.rva, |fixup| {
+        let code = exe.code.perform_fixups(text_section.rva, |fixup| {
             match exe.fixup_locations[fixup] {
                 PEFixupLocation::ImportedProc(proc) => {
                     let proc = &exe.procs[proc];
@@ -430,7 +431,7 @@ impl Linker for PELinker {
             }
         });
 
-        self.buf.data[text_section.address..][..code.len()].copy_from_slice(code);
+        self.buf.data[text_section.address..][..code.len()].copy_from_slice(&code);
 
         dest.write_all(&self.buf.data)?;
         Ok(())
@@ -465,6 +466,7 @@ impl PELinker {
             .collect();
         self.buf.push(ImportDirectoryTableEntry::null());
 
+        self.buf.pad_both_to_next_boundary(8);
         for (dll, info) in exe.dll_imports.iter().zip(&mut dll_import_info) {
             // Lookup table
             info.lookup_table_rva = self.buf.rva() as u32;
@@ -474,6 +476,7 @@ impl PELinker {
             self.buf.push(Pe32PlusImportLookupTableEntry::null());
         }
 
+        self.buf.pad_both_to_next_boundary(8);
         for (dll, info) in exe.dll_imports.iter().zip(&mut dll_import_info) {
             // Address table
             info.address_table_rva = self.buf.rva() as u32;
