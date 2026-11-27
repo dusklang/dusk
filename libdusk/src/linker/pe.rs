@@ -629,11 +629,11 @@ impl PEExe {
 
 impl Exe for PEExe {
     fn import_dynamic_library(&mut self, name: &str) -> DynLibId {
-        let name = name.to_string();
-        *self.dll_import_map.entry(name.clone()).or_insert_with(|| {
+        let lowercase_name = name.to_ascii_lowercase();
+        *self.dll_import_map.entry(lowercase_name).or_insert_with(|| {
             self.dll_imports.push(
                 DllImport {
-                    name,
+                    name: name.to_string(),
                     procs: Vec::new(),
                 }
             )
