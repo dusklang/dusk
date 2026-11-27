@@ -43,4 +43,5 @@ dls-client/server/*
 # Dusk outputs
 a.out
 a.apk
+a.exe
 *.app
