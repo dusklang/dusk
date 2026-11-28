@@ -11,6 +11,7 @@ use crate::lir::arm64::ArgAssignment;
 use crate::lir::arm64::Arm64Instr;
 use crate::lir::arm64::RetAssignment;
 use crate::lir::cursor::Cursor as _;
+use crate::lir::func::LirInstr;
 use crate::mir::CallKind;
 use crate::mir::TerminatorKind;
 use crate::mir::ValueKind;
@@ -28,7 +29,7 @@ impl Arm64Backend {
 }
 
 trait PlatformAbi {
-    type Instr;
+    type Instr: LirInstr;
 
     fn generate_prologue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[ArgAssignment], code: &mut Arm64Encoder);
     fn generate_epilogue(&mut self, d: &Driver, func: &crate::lir::Function<Self::Instr>, args: &[RetAssignment], code: &mut Arm64Encoder);

@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use string_interner::DefaultSymbol as Sym;
 
+use crate::index_counter::IndexCounter;
 use crate::index_vec::IndexVec;
 use crate::linked_list::{LinkedList, LinkedListHead, LinkedListStorage};
 
@@ -10,7 +11,9 @@ define_index_type!(pub struct BlockId = u32;);
 define_index_type!(pub struct InstrId = u32;);
 define_index_type!(pub struct StackSlotId = u32;);
 
-pub struct Function<InstrKind> {
+define_index_type!(pub struct AccessPositionId = u32;);
+
+pub struct Function<InstrKind: LirInstr> {
     pub name: Option<Sym>,
     pub blocks: LinkedList<BlockId, Block>,
     pub instrs: IndexVec<InstrId, InstrKind>,
@@ -30,13 +33,13 @@ pub struct InstrNode {
     pub block: Option<BlockId>,
 }
 
-impl<InstrKind> Default for Function<InstrKind> {
+impl<InstrKind: LirInstr> Default for Function<InstrKind> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<InstrKind> Function<InstrKind> {
+impl<InstrKind: LirInstr> Function<InstrKind> {
     pub fn new() -> Self {
         Self {
             name: None,
@@ -146,6 +149,112 @@ impl<InstrKind> Function<InstrKind> {
         let block = &mut self.blocks[block_id];
         self.instr_nodes.remove(&mut block.instrs, instr_id);
     }
+
+    pub fn liveness(&self) -> LivenessSets {
+        assert_eq!(self.blocks.first(), self.blocks.last());
+        assert_eq!(self.blocks.first(), self.entry_block());
+        let Some(entry_block) = self.entry_block else {
+            return Default::default();
+        };
+
+        let mut counter = IndexCounter::<AccessPositionId>::new();
+        let block = entry_block;
+        let mut next_instr = self.blocks[block].instrs.first();
+        let mut access_positions = HashMap::<InstrId, AccessPositions>::new();
+        while let Some(instr_id) = next_instr {
+            let early = counter.next_idx();
+            let late = counter.next_idx();
+            let positions = AccessPositions { early, late };
+            access_positions.insert(instr_id, positions);
+
+            next_instr = self.next_instr(instr_id);
+        }
+
+        #[derive(Default)]
+        struct AccessCollector {
+            reads: Vec<VirtualRegister>,
+            writes: Vec<VirtualRegister>,
+        }
+
+        impl AccessCollector {
+            fn clear(&mut self) {
+                self.reads.clear();
+                self.writes.clear();
+            }
+        }
+
+        impl AccessRegistrar for AccessCollector {
+            fn read(&mut self, reg: VirtualRegister) {
+                self.reads.push(reg);
+            }
+
+            fn write(&mut self, reg: VirtualRegister) {
+                self.writes.push(reg);
+            }
+
+            fn physical_to_virtual(&mut self, _: PhysicalRegister, reg: VirtualRegister) {
+                self.writes.push(reg);
+            }
+
+            fn virtual_to_physical(&mut self, reg: VirtualRegister, _: PhysicalRegister) {
+                self.reads.push(reg);
+            }
+        }
+
+        let block = entry_block;
+        let mut collector = AccessCollector::default();
+        let mut ranges = LivenessSets::default();
+        let mut live = HashSet::new();
+        let mut next_instr = self.blocks[block].instrs.last();
+        while let Some(instr_id) = next_instr {
+            collector.clear();
+            self.instrs[instr_id].register_accesses(&mut collector);
+
+            let pos = access_positions[&instr_id];
+
+            for &write in &collector.writes {
+                ranges.register_live_at(write, pos.late);
+                live.remove(&write);
+            }
+
+            for &reg in &live {
+                ranges.register_live_at(reg, pos.early);
+                ranges.register_live_at(reg, pos.late);
+            }
+
+            for &read in &collector.reads {
+                ranges.register_live_at(read, pos.early);
+                live.insert(read);
+            }
+
+            next_instr = self.prev_instr(instr_id);
+        }
+
+        assert!(live.is_empty(), "internal compiler error: virtual register used before it was defined");
+
+        ranges
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LivenessSets {
+    int: Vec<HashSet<AccessPositionId>>,
+    float: Vec<HashSet<AccessPositionId>>,
+}
+
+impl LivenessSets {
+    fn register_live_at(&mut self, reg: VirtualRegister, position: AccessPositionId) {
+        let sets = match reg.class {
+            RegisterClass::Int => &mut self.int,
+            RegisterClass::Float => &mut self.float,
+        };
+
+        if sets.len() <= reg.num {
+            sets.resize_with(reg.num + 1, Default::default);
+        }
+
+        sets[reg.num].insert(position);
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -174,4 +283,21 @@ pub enum Register {
 #[derive(Default)]
 pub struct Block {
     pub instrs: LinkedListHead<InstrId>,
+}
+
+pub trait AccessRegistrar {
+    fn physical_to_virtual(&mut self, src: PhysicalRegister, dest: VirtualRegister) {}
+    fn virtual_to_physical(&mut self, src: VirtualRegister, dest: PhysicalRegister) {}
+    fn read(&mut self, reg: VirtualRegister) {}
+    fn write(&mut self, reg: VirtualRegister) {}
+}
+
+pub trait LirInstr {
+    fn register_accesses(&self, registrar: &mut impl AccessRegistrar);
+}
+
+#[derive(Copy, Clone)]
+struct AccessPositions {
+    early: AccessPositionId,
+    late: AccessPositionId,
 }

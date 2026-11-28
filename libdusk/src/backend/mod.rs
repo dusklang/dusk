@@ -1,4 +1,5 @@
 use crate::linker::exe::{Exe, ExeFuncId, FixupLocationId};
+use crate::lir::func::LirInstr;
 use crate::mir;
 use crate::lir;
 use crate::driver::Driver;
@@ -28,7 +29,7 @@ impl<B> AnyBackend for B where B: Backend {
 }
 
 pub trait Backend: AnyBackend {
-    type Instr;
+    type Instr: LirInstr;
 
     fn arch(&self) -> Arch;
     fn lower_func(&self, d: &Driver, func_index: mir::FuncId, is_main: bool, exe: &mut dyn Exe) -> lir::Function<Self::Instr>;

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::{assert_matches, mem};
+use std::assert_matches;
 
 use dusk_proc_macros::display_adapter;
 
 use crate::driver::Driver;
 use crate::lir::cursor::{Cursor, CursorMut};
-use crate::lir::func::{BlockId, Function, InstrId, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
+use crate::lir::func::{AccessRegistrar, BlockId, Function, InstrId, LirInstr, PhysicalRegister, RegisterClass, StackSlotId, VirtualRegister};
 use crate::{mir, ty};
 use crate::mir::cursor::Cursor as _;
 use crate::ty::Type;
@@ -101,7 +101,7 @@ pub enum Arm64Instr {
     },
 }
 
-impl Arm64Instr {
+impl LirInstr for Arm64Instr {
     fn register_accesses(&self, registrar: &mut impl AccessRegistrar) {
         match *self {
             Arm64Instr::PseudoArgs(ref assignments) => for assignment in assignments {
@@ -122,13 +122,6 @@ impl Arm64Instr {
             },
         }
     }
-}
-
-trait AccessRegistrar {
-    fn physical_to_virtual(&mut self, src: PhysicalRegister, dest: VirtualRegister) {}
-    fn virtual_to_physical(&mut self, src: VirtualRegister, dest: PhysicalRegister) {}
-    fn read(&mut self, reg: VirtualRegister) {}
-    fn write(&mut self, reg: VirtualRegister) {}
 }
 
 struct RegisterAllocator {

@@ -1,15 +1,15 @@
 use std::mem;
 
 use crate::linked_list::{LinkedList, LinkedListStorage};
-use crate::lir::func::{Block, BlockId, Function, InstrNode, InstrId};
+use crate::lir::func::{Block, BlockId, Function, InstrId, InstrNode, LirInstr};
 
 // This pattern is heavily inspired by Cranelift
-pub struct FuncCursor<'func, InstrKind> {
+pub struct FuncCursor<'func, InstrKind: LirInstr> {
     pub func: &'func Function<InstrKind>,
     pub position: CursorPosition,
 }
 
-impl<'func, InstrKind> Clone for FuncCursor<'func, InstrKind> {
+impl<'func, InstrKind: LirInstr> Clone for FuncCursor<'func, InstrKind> {
     fn clone(&self) -> Self {
         Self {
             func: self.func,
@@ -18,10 +18,10 @@ impl<'func, InstrKind> Clone for FuncCursor<'func, InstrKind> {
     }
 }
 
-impl<'func, InstrKind> Copy for FuncCursor<'func, InstrKind> {
+impl<'func, InstrKind: LirInstr> Copy for FuncCursor<'func, InstrKind> {
 }
 
-pub struct FuncCursorMut<'func, InstrKind> {
+pub struct FuncCursorMut<'func, InstrKind: LirInstr> {
     pub func: &'func mut Function<InstrKind>,
     pub position: CursorPosition,
 }
@@ -35,7 +35,7 @@ pub enum CursorPosition {
 }
 
 pub trait Cursor<'func> {
-    type InstrKind;
+    type InstrKind: LirInstr;
 
     fn make_cursor<'a>(&'a self) -> FuncCursor<'a, Self::InstrKind> where 'func: 'a;
     fn position(&self) -> CursorPosition;
@@ -168,7 +168,7 @@ pub trait CursorMut<'func>: Cursor<'func> {
     fn make_cursor_mut<'a>(&'a mut self) -> FuncCursorMut<'a, Self::InstrKind> where 'func: 'a;
 }
 
-impl<'func, InstrKind> Cursor<'func> for FuncCursor<'func, InstrKind> {
+impl<'func, InstrKind: LirInstr> Cursor<'func> for FuncCursor<'func, InstrKind> {
     type InstrKind = InstrKind;
 
     fn make_cursor<'a>(&'a self) -> FuncCursor<'a, Self::InstrKind> where 'func: 'a {
@@ -199,7 +199,7 @@ impl<'func, InstrKind> Cursor<'func> for FuncCursor<'func, InstrKind> {
     }
 }
 
-impl<'func, InstrKind> Cursor<'func> for FuncCursorMut<'func, InstrKind> {
+impl<'func, InstrKind: LirInstr> Cursor<'func> for FuncCursorMut<'func, InstrKind> {
     type InstrKind = InstrKind;
 
     fn make_cursor<'a>(&'a self) -> FuncCursor<'a, InstrKind> where 'func: 'a {
@@ -231,7 +231,7 @@ impl<'func, InstrKind> Cursor<'func> for FuncCursorMut<'func, InstrKind> {
     }
 }
 
-impl<'func, InstrKind> CursorMut<'func> for FuncCursorMut<'func, InstrKind> {
+impl<'func, InstrKind: LirInstr> CursorMut<'func> for FuncCursorMut<'func, InstrKind> {
     fn remove_block(&mut self) {
         let block_id = self.cur_block().expect("not currently in a block");
         let prev = self.func.prev_block(block_id);
@@ -282,7 +282,7 @@ impl<'func, InstrKind> CursorMut<'func> for FuncCursorMut<'func, InstrKind> {
     }
 }
 
-impl<InstrKind> Function<InstrKind> {
+impl<InstrKind: LirInstr> Function<InstrKind> {
     pub fn make_cursor(&self) -> FuncCursor<'_, InstrKind> {
         FuncCursor {
             func: self,
@@ -298,11 +298,11 @@ impl<InstrKind> Function<InstrKind> {
     }
 }
 
-struct BlockIter<'func, InstrKind> {
+struct BlockIter<'func, InstrKind: LirInstr> {
     cursor: FuncCursor<'func, InstrKind>,
 }
 
-impl<'c, InstrKind> Iterator for BlockIter<'c, InstrKind> {
+impl<'c, InstrKind: LirInstr> Iterator for BlockIter<'c, InstrKind> {
     type Item = &'c Block;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -311,11 +311,11 @@ impl<'c, InstrKind> Iterator for BlockIter<'c, InstrKind> {
     }
 }
 
-struct EnumeratedBlockIter<'func, InstrKind> {
+struct EnumeratedBlockIter<'func, InstrKind: LirInstr> {
     cursor: FuncCursor<'func, InstrKind>,
 }
 
-impl<'c, InstrKind> Iterator for EnumeratedBlockIter<'c, InstrKind> {
+impl<'c, InstrKind: LirInstr> Iterator for EnumeratedBlockIter<'c, InstrKind> {
     type Item = (BlockId, &'c Block);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -324,11 +324,11 @@ impl<'c, InstrKind> Iterator for EnumeratedBlockIter<'c, InstrKind> {
     }
 }
 
-struct BlockIdsIter<'func, InstrKind> {
+struct BlockIdsIter<'func, InstrKind: LirInstr> {
     cursor: FuncCursor<'func, InstrKind>,
 }
 
-impl<'c, InstrKind> Iterator for BlockIdsIter<'c, InstrKind> {
+impl<'c, InstrKind: LirInstr> Iterator for BlockIdsIter<'c, InstrKind> {
     type Item = BlockId;
 
     fn next(&mut self) -> Option<Self::Item> {
